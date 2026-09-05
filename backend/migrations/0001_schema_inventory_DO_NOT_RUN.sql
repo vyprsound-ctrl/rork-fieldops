@@ -1,0 +1,1190 @@
+-- =============================================================================
+-- TradeDesk HVAC - STRUCTURAL SCHEMA INVENTORY (DOCUMENTATION ONLY)
+-- =============================================================================
+--
+--  *** THIS IS NOT A MIGRATION. IT IS NOT EXECUTABLE. DO NOT RUN IT. ***
+--
+-- Running this file would NOT reproduce the database. It would produce a
+-- database with NO row level security, NO policies, NO triggers, and NO
+-- function bodies -- every tenancy boundary in this product would be absent.
+-- The guard block below therefore aborts immediately if anyone executes it.
+--
+-- WHAT THIS IS
+--   A best-effort inventory of the live schema, reconstructed WITHOUT a
+--   database connection.
+--
+-- HOW IT WAS PRODUCED, AND WHY THAT MATTERS
+--   The agent that generated this file had no Supabase credentials in its
+--   environment (no SUPABASE_ACCESS_TOKEN, no SUPABASE_SERVICE_ROLE_KEY, no
+--   SUPABASE_DB_URL), so it could not run `pg_dump`, `supabase db dump`, or a
+--   single catalogue query. NOTHING here was read from the live database
+--   during generation.
+--
+--   Everything below is derived from `backend/types.ts`, which Supabase
+--   auto-generated FROM the live database at some earlier point. That makes it
+--   real evidence, but SECOND-HAND and POSSIBLY STALE: any change made to the
+--   database after those types were generated is not reflected here.
+--
+--   A handful of infrastructure notes are marked [FROM TESTS] -- those are
+--   inferred from identifiers referenced in backend/tests/, not observed.
+--
+-- PRODUCTION DATA
+--   None. This file contains no rows. Table contents were never read.
+--
+-- SECRETS
+--   None. No key, token, password or Vault secret value appears here. Vault
+--   entries are referenced by NAME only.
+--
+-- TO REPLACE THIS FILE WITH A REAL DUMP, from an authenticated shell:
+--   supabase db dump --project-ref srfnfimskixjqjyyftak -f backend/migrations/0001_live_schema.sql
+--   supabase db dump --project-ref srfnfimskixjqjyyftak --data-only=false --schema public
+-- =============================================================================
+
+do $$
+begin
+  raise exception
+    'This file is a documentation inventory, not a migration. It cannot recreate the database and must never be executed. Use: supabase db dump.';
+end $$;
+
+-- =============================================================================
+-- SECTION 0 - WHAT COULD NOT BE CAPTURED WITHOUT A DATABASE CONNECTION
+-- =============================================================================
+--
+-- The following are ABSENT from this file. Each requires a live catalogue
+-- query. Do not assume any of them from what is written below.
+--
+--   * Exact SQL column types. TypeScript collapses uuid/text/citext to
+--     `string`, and numeric/int/bigint/float to `number`. Types shown below
+--     are the TS view, NOT the true Postgres types. Enum types ARE exact.
+--   * DEFAULT expressions (e.g. now(), gen_random_uuid()).
+--   * PRIMARY KEY declarations. `id` is a strong convention here but is not
+--     recorded in the generated types.
+--   * UNIQUE constraints -- including the one on push_devices.token that the
+--     device-handover logic depends on.
+--   * CHECK constraints.
+--   * Indexes of every kind.
+--   * Whether RLS is ENABLED or FORCED per table.
+--   * ALL RLS POLICY definitions -- names, commands, USING and WITH CHECK
+--     expressions. This is the single largest and most security-critical gap.
+--   * ALL function BODIES, including SECURITY DEFINER status, search_path
+--     settings, and volatility. Only names and signatures survive below.
+--   * Trigger definitions (timing, event, function, WHEN clause).
+--   * Sequences and identity columns.
+--   * Installed extensions and their versions/schemas.
+--   * GRANT/REVOKE state for every role (anon, authenticated, service_role).
+--   * pg_cron job definitions and schedules.
+--   * Storage buckets and their policies.
+--   * auth.* and other non-public schemas.
+--
+-- =============================================================================
+-- SECTION 1 - ENUM TYPES  (exact; enums survive type generation intact)
+-- =============================================================================
+--
+-- create type public.app_permission as enum (
+--     'companyProfileRead',
+--     'companyProfileManage',
+--     'companyDelete',
+--     'usersRead',
+--     'usersManage',
+--     'saasBillingRead',
+--     'saasBillingManage',
+--     'customersReadAll',
+--     'customersReadAssignedSiteOnly',
+--     'customersManage',
+--     'customerBillingDetailsRead',
+--     'jobsReadAll',
+--     'jobsReadAssignedOnly',
+--     'jobsManage',
+--     'jobStatusUpdateOwn',
+--     'jobStatusHistoryReadAll',
+--     'calendarReadAll',
+--     'calendarReadOwnOnly',
+--     'assignmentsManage',
+--     'jobNotesRead',
+--     'jobNotesCreate',
+--     'jobPhotosRead',
+--     'jobPhotosCreate',
+--     'equipmentRead',
+--     'equipmentManage',
+--     'fieldWorkerLocationReadAll',
+--     'fieldWorkerLocationReadOwnOnly',
+--     'quotesRead',
+--     'quotesManage',
+--     'quoteFinancialsRead',
+--     'invoicesRead',
+--     'invoicesManage',
+--     'paymentsRead',
+--     'paymentsManage',
+--     'smsLedgerRead',
+--     'smsCreditsConsume',
+--     'smsCreditsPurchase',
+--     'reportsOperational',
+--     'reportsFinancial'
+-- );
+--
+-- create type public.app_role as enum (
+--     'owner',
+--     'admin',
+--     'dispatcher',
+--     'fieldWorker',
+--     'accounts'
+-- );
+--
+-- create type public.app_trade as enum (
+--     'hvac',
+--     'plumbing',
+--     'electrical',
+--     'roofing',
+--     'applianceRepair',
+--     'locksmith',
+--     'generalMaintenance',
+--     'pestControl',
+--     'other'
+-- );
+--
+-- create type public.app_user_status as enum (
+--     'active',
+--     'invited',
+--     'suspended'
+-- );
+--
+-- create type public.billing_period as enum (
+--     'monthly',
+--     'annual'
+-- );
+--
+-- create type public.billing_store as enum (
+--     'apple',
+--     'google',
+--     'none'
+-- );
+--
+-- create type public.customer_type as enum (
+--     'residential',
+--     'commercial',
+--     'propertyManagement',
+--     'other'
+-- );
+--
+-- create type public.document_kind as enum (
+--     'quote',
+--     'job',
+--     'invoice'
+-- );
+--
+-- create type public.invoice_status as enum (
+--     'draft',
+--     'sent',
+--     'viewed',
+--     'partPaid',
+--     'paid',
+--     'overdue',
+--     'void'
+-- );
+--
+-- create type public.job_kind as enum (
+--     'callOut',
+--     'install',
+--     'maintenance',
+--     'warranty'
+-- );
+--
+-- create type public.job_photo_kind as enum (
+--     'before',
+--     'after',
+--     'part',
+--     'proof'
+-- );
+--
+-- create type public.job_priority as enum (
+--     'standard',
+--     'urgent'
+-- );
+--
+-- create type public.job_status as enum (
+--     'scheduled',
+--     'workerAssigned',
+--     'travelling',
+--     'arrived',
+--     'inProgress',
+--     'completed',
+--     'invoiced',
+--     'paid',
+--     'cancelled'
+-- );
+--
+-- create type public.location_capture_event as enum (
+--     'travelStarted',
+--     'arrived',
+--     'completed'
+-- );
+--
+-- create type public.note_visibility as enum (
+--     'internalOnly',
+--     'customerVisible'
+-- );
+--
+-- create type public.notification_channel as enum (
+--     'sms',
+--     'email',
+--     'push'
+-- );
+--
+-- create type public.notification_status as enum (
+--     'queued',
+--     'sent',
+--     'delivered',
+--     'failed'
+-- );
+--
+-- create type public.payment_method as enum (
+--     'card',
+--     'ach',
+--     'cash',
+--     'check'
+-- );
+--
+-- create type public.payment_status as enum (
+--     'pending',
+--     'succeeded',
+--     'failed',
+--     'refunded'
+-- );
+--
+-- create type public.quote_status as enum (
+--     'draft',
+--     'sent',
+--     'viewed',
+--     'accepted',
+--     'declined',
+--     'expired'
+-- );
+--
+-- create type public.service_frequency as enum (
+--     'monthly',
+--     'quarterly',
+--     'semiAnnual',
+--     'annual'
+-- );
+--
+-- create type public.sms_ledger_transaction_type as enum (
+--     'purchase',
+--     'consumption',
+--     'refund',
+--     'adjustment'
+-- );
+--
+-- create type public.subscription_plan as enum (
+--     'soloTrader',
+--     'team',
+--     'business'
+-- );
+--
+-- create type public.subscription_status as enum (
+--     'trialing',
+--     'active',
+--     'pastDue',
+--     'cancelled',
+--     'expired'
+-- );
+--
+
+-- =============================================================================
+-- SECTION 2 - TABLES AND COLUMNS  (29 tables)
+-- =============================================================================
+--
+-- Legend:  NOT NULL = column is non-nullable in the live schema.
+--          [opt-on-insert] = omittable on INSERT, meaning it either has a
+--          DEFAULT or is nullable. The generated types cannot distinguish
+--          which, so the default expression itself is unknown.
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.addresses  (13 columns)
+-- ---------------------------------------------------------------------------
+--   access_notes  string           [opt-on-insert]
+--   city          string  NOT NULL [opt-on-insert]
+--   company_id    string  NOT NULL 
+--   created_at    string  NOT NULL [opt-on-insert]
+--   customer_id   string  NOT NULL 
+--   id            string  NOT NULL [opt-on-insert]
+--   latitude      number  NOT NULL [opt-on-insert]
+--   line1         string  NOT NULL 
+--   line2         string           [opt-on-insert]
+--   longitude     number  NOT NULL [opt-on-insert]
+--   postal_code   string  NOT NULL [opt-on-insert]
+--   state         string  NOT NULL [opt-on-insert]
+--   updated_at    string  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     addresses_company_id_fkey: (company_id) -> public.companies(id)
+--     addresses_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     addresses_customer_id_fkey: (customer_id) -> public.customers(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.app_users  (12 columns)
+-- ---------------------------------------------------------------------------
+--   avatar_url          string                         [opt-on-insert]
+--   company_id          string                NOT NULL 
+--   created_at          string                NOT NULL [opt-on-insert]
+--   email               string                NOT NULL 
+--   id                  string                NOT NULL 
+--   invited_by_user_id  string                         [opt-on-insert]
+--   last_active_at      string                         [opt-on-insert]
+--   name                string                NOT NULL [opt-on-insert]
+--   phone               string                NOT NULL [opt-on-insert]
+--   role                enum app_role         NOT NULL 
+--   status              enum app_user_status  NOT NULL [opt-on-insert]
+--   updated_at          string                NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     app_users_company_id_fkey: (company_id) -> public.companies(id)
+--     app_users_invited_by_user_id_fkey: (invited_by_user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.companies  (15 columns)
+-- ---------------------------------------------------------------------------
+--   address_line             string          NOT NULL [opt-on-insert]
+--   city                     string          NOT NULL [opt-on-insert]
+--   country_code             string          NOT NULL 
+--   created_at               string          NOT NULL [opt-on-insert]
+--   currency_code            string          NOT NULL 
+--   default_tax_rate         number          NOT NULL [opt-on-insert]
+--   id                       string          NOT NULL [opt-on-insert]
+--   name                     string          NOT NULL 
+--   online_payment_link_url  string                   [opt-on-insert]
+--   phone                    string          NOT NULL [opt-on-insert]
+--   postal_code              string          NOT NULL [opt-on-insert]
+--   state                    string          NOT NULL [opt-on-insert]
+--   time_zone_identifier     string          NOT NULL 
+--   trade                    enum app_trade  NOT NULL 
+--   updated_at               string          NOT NULL [opt-on-insert]
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.company_subscriptions  (19 columns)
+-- ---------------------------------------------------------------------------
+--   additional_users               number                    NOT NULL [opt-on-insert]
+--   apple_original_transaction_id  string                             [opt-on-insert]
+--   billing_period                 enum billing_period       NOT NULL [opt-on-insert]
+--   cancelled_at                   string                             [opt-on-insert]
+--   company_id                     string                    NOT NULL 
+--   created_at                     string                    NOT NULL [opt-on-insert]
+--   current_period_end             string                    NOT NULL [opt-on-insert]
+--   current_period_start           string                    NOT NULL [opt-on-insert]
+--   google_purchase_token          string                             [opt-on-insert]
+--   id                             string                    NOT NULL [opt-on-insert]
+--   included_users                 number                    NOT NULL [opt-on-insert]
+--   is_trial                       boolean                   NOT NULL [opt-on-insert]
+--   plan                           enum subscription_plan    NOT NULL [opt-on-insert]
+--   renewal_date                   string                    NOT NULL [opt-on-insert]
+--   seat_count                     number                    NOT NULL [opt-on-insert]
+--   status                         enum subscription_status  NOT NULL [opt-on-insert]
+--   store                          enum billing_store        NOT NULL [opt-on-insert]
+--   trial_ends_at                  string                             [opt-on-insert]
+--   updated_at                     string                    NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     company_subscriptions_company_id_fkey: (company_id) -> public.companies(id)  [one-to-one]
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.customer_contacts  (11 columns)
+-- ---------------------------------------------------------------------------
+--   company_id          string   NOT NULL 
+--   contact_role        string   NOT NULL [opt-on-insert]
+--   created_at          string   NOT NULL [opt-on-insert]
+--   customer_id         string   NOT NULL 
+--   email               string            [opt-on-insert]
+--   id                  string   NOT NULL [opt-on-insert]
+--   is_billing_contact  boolean  NOT NULL [opt-on-insert]
+--   is_primary          boolean  NOT NULL [opt-on-insert]
+--   name                string   NOT NULL 
+--   phone               string   NOT NULL [opt-on-insert]
+--   updated_at          string   NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     customer_contacts_company_id_fkey: (company_id) -> public.companies(id)
+--     customer_contacts_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     customer_contacts_customer_id_fkey: (customer_id) -> public.customers(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.customers  (8 columns)
+-- ---------------------------------------------------------------------------
+--   billing_terms  string              NOT NULL [opt-on-insert]
+--   company_id     string              NOT NULL 
+--   created_at     string              NOT NULL [opt-on-insert]
+--   id             string              NOT NULL [opt-on-insert]
+--   name           string              NOT NULL 
+--   notes          string                       [opt-on-insert]
+--   type           enum customer_type  NOT NULL [opt-on-insert]
+--   updated_at     string              NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     customers_company_id_fkey: (company_id) -> public.companies(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.document_sequences  (8 columns)
+-- ---------------------------------------------------------------------------
+--   company_id  string              NOT NULL 
+--   created_at  string              NOT NULL [opt-on-insert]
+--   id          string              NOT NULL [opt-on-insert]
+--   kind        enum document_kind  NOT NULL 
+--   next_value  number              NOT NULL [opt-on-insert]
+--   pad_width   number              NOT NULL [opt-on-insert]
+--   prefix      string              NOT NULL [opt-on-insert]
+--   updated_at  string              NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     document_sequences_company_id_fkey: (company_id) -> public.companies(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.equipment  (13 columns)
+-- ---------------------------------------------------------------------------
+--   address_id           string  NOT NULL 
+--   attributes           Json    NOT NULL [opt-on-insert]
+--   category             string  NOT NULL [opt-on-insert]
+--   company_id           string  NOT NULL 
+--   created_at           string  NOT NULL [opt-on-insert]
+--   id                   string  NOT NULL [opt-on-insert]
+--   installed_on         string  NOT NULL 
+--   make                 string  NOT NULL [opt-on-insert]
+--   model                string  NOT NULL [opt-on-insert]
+--   photo_url            string           [opt-on-insert]
+--   serial_number        string  NOT NULL [opt-on-insert]
+--   updated_at           string  NOT NULL [opt-on-insert]
+--   warranty_expires_on  string           [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     equipment_address_id_fkey: (address_id) -> public.addresses(id)
+--     equipment_address_id_fkey: (address_id) -> public.assigned_site_customers(address_id)
+--     equipment_company_id_fkey: (company_id) -> public.companies(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.equipment_history  (7 columns)
+-- ---------------------------------------------------------------------------
+--   company_id    string  NOT NULL 
+--   created_at    string  NOT NULL [opt-on-insert]
+--   equipment_id  string  NOT NULL 
+--   id            string  NOT NULL [opt-on-insert]
+--   job_id        string           [opt-on-insert]
+--   occurred_at   string  NOT NULL 
+--   summary       string  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     equipment_history_company_id_fkey: (company_id) -> public.companies(id)
+--     equipment_history_equipment_id_fkey: (equipment_id) -> public.equipment(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.field_worker_assignments  (9 columns)
+-- ---------------------------------------------------------------------------
+--   accepted_at          string            [opt-on-insert]
+--   assigned_at          string   NOT NULL [opt-on-insert]
+--   assigned_by_user_id  string   NOT NULL 
+--   company_id           string   NOT NULL 
+--   id                   string   NOT NULL [opt-on-insert]
+--   is_primary           boolean  NOT NULL [opt-on-insert]
+--   job_id               string   NOT NULL 
+--   sort_order           number   NOT NULL [opt-on-insert]
+--   user_id              string   NOT NULL 
+--
+--   FOREIGN KEYS:
+--     field_worker_assignments_assigned_by_user_id_fkey: (assigned_by_user_id) -> public.app_users(id)
+--     field_worker_assignments_company_id_fkey: (company_id) -> public.companies(id)
+--     field_worker_assignments_job_id_fkey: (job_id) -> public.jobs(id)
+--     field_worker_assignments_user_id_fkey: (user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.field_worker_locations  (11 columns)
+-- ---------------------------------------------------------------------------
+--   accuracy_meters          number   NOT NULL [opt-on-insert]
+--   company_id               string   NOT NULL 
+--   heading                  number            [opt-on-insert]
+--   id                       string   NOT NULL [opt-on-insert]
+--   is_simulated             boolean  NOT NULL [opt-on-insert]
+--   job_id                   string            [opt-on-insert]
+--   latitude                 number   NOT NULL 
+--   longitude                number   NOT NULL 
+--   recorded_at              string   NOT NULL [opt-on-insert]
+--   speed_meters_per_second  number            [opt-on-insert]
+--   user_id                  string   NOT NULL 
+--
+--   FOREIGN KEYS:
+--     field_worker_locations_company_id_fkey: (company_id) -> public.companies(id)
+--     field_worker_locations_job_id_fkey: (job_id) -> public.jobs(id)
+--     field_worker_locations_user_id_fkey: (user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.invitations  (11 columns)
+-- ---------------------------------------------------------------------------
+--   accepted_at          string                  [opt-on-insert]
+--   accepted_by_user_id  string                  [opt-on-insert]
+--   company_id           string         NOT NULL 
+--   created_at           string         NOT NULL [opt-on-insert]
+--   email                string         NOT NULL 
+--   expires_at           string         NOT NULL 
+--   id                   string         NOT NULL [opt-on-insert]
+--   invited_by_user_id   string         NOT NULL 
+--   revoked_at           string                  [opt-on-insert]
+--   role                 enum app_role  NOT NULL 
+--   token                string         NOT NULL 
+--
+--   FOREIGN KEYS:
+--     invitations_accepted_by_user_id_fkey: (accepted_by_user_id) -> public.app_users(id)
+--     invitations_company_id_fkey: (company_id) -> public.companies(id)
+--     invitations_invited_by_user_id_fkey: (invited_by_user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.invoice_line_items  (10 columns)
+-- ---------------------------------------------------------------------------
+--   company_id                 string  NOT NULL 
+--   id                         string  NOT NULL [opt-on-insert]
+--   invoice_id                 string  NOT NULL 
+--   item_description           string  NOT NULL [opt-on-insert]
+--   line_total                 number  NOT NULL [opt-on-insert]
+--   quantity                   number  NOT NULL [opt-on-insert]
+--   sort_order                 number  NOT NULL [opt-on-insert]
+--   source_quote_line_item_id  string           [opt-on-insert]
+--   tax_rate                   number  NOT NULL [opt-on-insert]
+--   unit_price                 number  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     invoice_line_items_company_id_fkey: (company_id) -> public.companies(id)
+--     invoice_line_items_invoice_id_fkey: (invoice_id) -> public.invoices(id)
+--     invoice_line_items_source_quote_line_item_id_fkey: (source_quote_line_item_id) -> public.quote_line_items(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.invoice_share_tokens  (9 columns)
+-- ---------------------------------------------------------------------------
+--   company_id          string  NOT NULL 
+--   created_at          string  NOT NULL [opt-on-insert]
+--   created_by_user_id  string  NOT NULL 
+--   id                  string  NOT NULL [opt-on-insert]
+--   invoice_id          string  NOT NULL 
+--   last_viewed_at      string           [opt-on-insert]
+--   revoked_at          string           [opt-on-insert]
+--   token               string  NOT NULL 
+--   view_count          number  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     invoice_share_tokens_company_id_fkey: (company_id) -> public.companies(id)
+--     invoice_share_tokens_created_by_user_id_fkey: (created_by_user_id) -> public.app_users(id)
+--     invoice_share_tokens_invoice_id_fkey: (invoice_id) -> public.invoices(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.invoices  (27 columns)
+-- ---------------------------------------------------------------------------
+--   address_id           string                        [opt-on-insert]
+--   amount_paid          number               NOT NULL [opt-on-insert]
+--   balance              number               NOT NULL [opt-on-insert]
+--   billing_contact_id   string                        [opt-on-insert]
+--   company_id           string               NOT NULL 
+--   created_at           string               NOT NULL [opt-on-insert]
+--   created_by_user_id   string                        [opt-on-insert]
+--   currency_code        string               NOT NULL 
+--   customer_id          string               NOT NULL 
+--   due_date             string               NOT NULL 
+--   id                   string               NOT NULL [opt-on-insert]
+--   issue_date           string               NOT NULL 
+--   job_id               string                        [opt-on-insert]
+--   number               string               NOT NULL 
+--   paid_at              string                        [opt-on-insert]
+--   payment_terms_label  string               NOT NULL [opt-on-insert]
+--   quote_id             string                        [opt-on-insert]
+--   scope_of_work        string               NOT NULL [opt-on-insert]
+--   sent_at              string                        [opt-on-insert]
+--   status               enum invoice_status  NOT NULL [opt-on-insert]
+--   subtotal             number               NOT NULL [opt-on-insert]
+--   tax                  number               NOT NULL [opt-on-insert]
+--   title                string               NOT NULL [opt-on-insert]
+--   total                number               NOT NULL [opt-on-insert]
+--   updated_at           string               NOT NULL [opt-on-insert]
+--   viewed_at            string                        [opt-on-insert]
+--   voided_at            string                        [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     invoices_address_id_fkey: (address_id) -> public.addresses(id)
+--     invoices_address_id_fkey: (address_id) -> public.assigned_site_customers(address_id)
+--     invoices_billing_contact_id_fkey: (billing_contact_id) -> public.customer_contacts(id)
+--     invoices_billing_contact_id_fkey: (billing_contact_id) -> public.site_contacts_operational(id)
+--     invoices_company_id_fkey: (company_id) -> public.companies(id)
+--     invoices_created_by_user_id_fkey: (created_by_user_id) -> public.app_users(id)
+--     invoices_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     invoices_customer_id_fkey: (customer_id) -> public.customers(id)
+--     invoices_job_id_fkey: (job_id) -> public.jobs(id)
+--     invoices_quote_id_fkey: (quote_id) -> public.quotes(id)
+--     invoices_quote_id_fkey: (quote_id) -> public.quotes_operational(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.job_notes  (7 columns)
+-- ---------------------------------------------------------------------------
+--   body        string                NOT NULL 
+--   company_id  string                NOT NULL 
+--   created_at  string                NOT NULL [opt-on-insert]
+--   id          string                NOT NULL [opt-on-insert]
+--   job_id      string                NOT NULL 
+--   user_id     string                NOT NULL 
+--   visibility  enum note_visibility  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     job_notes_company_id_fkey: (company_id) -> public.companies(id)
+--     job_notes_job_id_fkey: (job_id) -> public.jobs(id)
+--     job_notes_user_id_fkey: (user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.job_photos  (8 columns)
+-- ---------------------------------------------------------------------------
+--   caption            string                        [opt-on-insert]
+--   captured_at        string               NOT NULL [opt-on-insert]
+--   company_id         string               NOT NULL 
+--   id                 string               NOT NULL [opt-on-insert]
+--   job_id             string               NOT NULL 
+--   kind               enum job_photo_kind  NOT NULL [opt-on-insert]
+--   storage_reference  string               NOT NULL 
+--   user_id            string               NOT NULL 
+--
+--   FOREIGN KEYS:
+--     job_photos_company_id_fkey: (company_id) -> public.companies(id)
+--     job_photos_job_id_fkey: (job_id) -> public.jobs(id)
+--     job_photos_user_id_fkey: (user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.job_status_history  (9 columns)
+-- ---------------------------------------------------------------------------
+--   changed_at          string           NOT NULL [opt-on-insert]
+--   changed_by_user_id  string           NOT NULL 
+--   company_id          string           NOT NULL 
+--   from_status         enum job_status           [opt-on-insert]
+--   id                  string           NOT NULL [opt-on-insert]
+--   job_id              string           NOT NULL 
+--   latitude            number                    [opt-on-insert]
+--   longitude           number                    [opt-on-insert]
+--   to_status           enum job_status  NOT NULL 
+--
+--   FOREIGN KEYS:
+--     job_status_history_changed_by_user_id_fkey: (changed_by_user_id) -> public.app_users(id)
+--     job_status_history_company_id_fkey: (company_id) -> public.companies(id)
+--     job_status_history_job_id_fkey: (job_id) -> public.jobs(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.job_transitions  (5 columns)
+-- ---------------------------------------------------------------------------
+--   captures_location    boolean          NOT NULL [opt-on-insert]
+--   from_status          enum job_status  NOT NULL 
+--   is_destructive       boolean          NOT NULL [opt-on-insert]
+--   requires_field_work  boolean          NOT NULL [opt-on-insert]
+--   to_status            enum job_status  NOT NULL 
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.jobs  (19 columns)
+-- ---------------------------------------------------------------------------
+--   actual_end            string                      [opt-on-insert]
+--   actual_start          string                      [opt-on-insert]
+--   address_id            string             NOT NULL 
+--   company_id            string             NOT NULL 
+--   created_at            string             NOT NULL [opt-on-insert]
+--   customer_id           string             NOT NULL 
+--   equipment_id          string                      [opt-on-insert]
+--   id                    string             NOT NULL [opt-on-insert]
+--   job_description       string             NOT NULL [opt-on-insert]
+--   kind                  enum job_kind      NOT NULL [opt-on-insert]
+--   number                string             NOT NULL 
+--   priority              enum job_priority  NOT NULL [opt-on-insert]
+--   quote_id              string                      [opt-on-insert]
+--   scheduled_end         string                      [opt-on-insert]
+--   scheduled_start       string                      [opt-on-insert]
+--   service_agreement_id  string                      [opt-on-insert]
+--   status                enum job_status    NOT NULL [opt-on-insert]
+--   title                 string             NOT NULL [opt-on-insert]
+--   updated_at            string             NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     jobs_address_id_fkey: (address_id) -> public.addresses(id)
+--     jobs_address_id_fkey: (address_id) -> public.assigned_site_customers(address_id)
+--     jobs_company_id_fkey: (company_id) -> public.companies(id)
+--     jobs_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     jobs_customer_id_fkey: (customer_id) -> public.customers(id)
+--     jobs_equipment_id_fkey: (equipment_id) -> public.equipment(id)
+--     jobs_quote_id_fkey: (quote_id) -> public.quotes(id)
+--     jobs_quote_id_fkey: (quote_id) -> public.quotes_operational(id)
+--     jobs_service_agreement_id_fkey: (service_agreement_id) -> public.service_agreements(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.notifications  (20 columns)
+-- ---------------------------------------------------------------------------
+--   body                string                              [opt-on-insert]
+--   channel             enum notification_channel  NOT NULL 
+--   claimed_at          string                              [opt-on-insert]
+--   company_id          string                     NOT NULL 
+--   created_at          string                     NOT NULL [opt-on-insert]
+--   customer_id         string                              [opt-on-insert]
+--   deep_link           string                              [opt-on-insert]
+--   delivered_at        string                              [opt-on-insert]
+--   failure_reason      string                              [opt-on-insert]
+--   id                  string                     NOT NULL [opt-on-insert]
+--   invoice_id          string                              [opt-on-insert]
+--   job_id              string                              [opt-on-insert]
+--   provider_reference  string                              [opt-on-insert]
+--   push_device_id      string                              [opt-on-insert]
+--   recipient           string                     NOT NULL [opt-on-insert]
+--   sent_at             string                              [opt-on-insert]
+--   status              enum notification_status   NOT NULL [opt-on-insert]
+--   target_user_id      string                              [opt-on-insert]
+--   template            string                     NOT NULL [opt-on-insert]
+--   title               string                              [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     notifications_company_id_fkey: (company_id) -> public.companies(id)
+--     notifications_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     notifications_customer_id_fkey: (customer_id) -> public.customers(id)
+--     notifications_invoice_id_fkey: (invoice_id) -> public.invoices(id)
+--     notifications_job_id_fkey: (job_id) -> public.jobs(id)
+--     notifications_push_device_id_fkey: (push_device_id) -> public.push_devices(id)
+--     notifications_target_user_id_fkey: (target_user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.payments  (12 columns)
+-- ---------------------------------------------------------------------------
+--   amount               number               NOT NULL 
+--   company_id           string               NOT NULL 
+--   created_at           string               NOT NULL [opt-on-insert]
+--   id                   string               NOT NULL [opt-on-insert]
+--   invoice_id           string               NOT NULL 
+--   is_simulated         boolean              NOT NULL [opt-on-insert]
+--   method               enum payment_method  NOT NULL 
+--   note                 string                        [opt-on-insert]
+--   received_at          string               NOT NULL [opt-on-insert]
+--   recorded_by_user_id  string               NOT NULL 
+--   reference            string                        [opt-on-insert]
+--   status               enum payment_status  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     payments_company_id_fkey: (company_id) -> public.companies(id)
+--     payments_invoice_id_fkey: (invoice_id) -> public.invoices(id)
+--     payments_recorded_by_user_id_fkey: (recorded_by_user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.permission_matrix_contract  (5 columns)
+-- ---------------------------------------------------------------------------
+--   fingerprint       string   NOT NULL 
+--   grant_count       number   NOT NULL 
+--   id                boolean  NOT NULL [opt-on-insert]
+--   permission_count  number   NOT NULL 
+--   synced_at         string   NOT NULL [opt-on-insert]
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.push_devices  (14 columns)
+-- ---------------------------------------------------------------------------
+--   app_version         string  NOT NULL [opt-on-insert]
+--   bundle_id           string  NOT NULL [opt-on-insert]
+--   company_id          string  NOT NULL 
+--   created_at          string  NOT NULL [opt-on-insert]
+--   device_model        string  NOT NULL [opt-on-insert]
+--   environment         string  NOT NULL [opt-on-insert]
+--   id                  string  NOT NULL [opt-on-insert]
+--   last_registered_at  string  NOT NULL [opt-on-insert]
+--   platform            string  NOT NULL [opt-on-insert]
+--   revoked_at          string           [opt-on-insert]
+--   revoked_reason      string           [opt-on-insert]
+--   token               string  NOT NULL 
+--   updated_at          string  NOT NULL [opt-on-insert]
+--   user_id             string  NOT NULL 
+--
+--   FOREIGN KEYS:
+--     push_devices_company_id_fkey: (company_id) -> public.companies(id)
+--     push_devices_user_id_fkey: (user_id) -> public.app_users(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.quote_line_items  (9 columns)
+-- ---------------------------------------------------------------------------
+--   company_id        string  NOT NULL 
+--   id                string  NOT NULL [opt-on-insert]
+--   item_description  string  NOT NULL [opt-on-insert]
+--   line_total        number  NOT NULL [opt-on-insert]
+--   quantity          number  NOT NULL [opt-on-insert]
+--   quote_id          string  NOT NULL 
+--   sort_order        number  NOT NULL [opt-on-insert]
+--   tax_rate          number  NOT NULL [opt-on-insert]
+--   unit_price        number  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     quote_line_items_company_id_fkey: (company_id) -> public.companies(id)
+--     quote_line_items_quote_id_fkey: (quote_id) -> public.quotes(id)
+--     quote_line_items_quote_id_fkey: (quote_id) -> public.quotes_operational(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.quotes  (19 columns)
+-- ---------------------------------------------------------------------------
+--   accepted_at       string                      [opt-on-insert]
+--   address_id        string             NOT NULL 
+--   company_id        string             NOT NULL 
+--   converted_job_id  string                      [opt-on-insert]
+--   created_at        string             NOT NULL [opt-on-insert]
+--   customer_id       string             NOT NULL 
+--   declined_at       string                      [opt-on-insert]
+--   id                string             NOT NULL [opt-on-insert]
+--   number            string             NOT NULL 
+--   scope_of_work     string             NOT NULL [opt-on-insert]
+--   sent_at           string                      [opt-on-insert]
+--   status            enum quote_status  NOT NULL [opt-on-insert]
+--   subtotal          number             NOT NULL [opt-on-insert]
+--   tax               number             NOT NULL [opt-on-insert]
+--   title             string             NOT NULL [opt-on-insert]
+--   total             number             NOT NULL [opt-on-insert]
+--   updated_at        string             NOT NULL [opt-on-insert]
+--   valid_until       string                      [opt-on-insert]
+--   viewed_at         string                      [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     quotes_address_id_fkey: (address_id) -> public.addresses(id)
+--     quotes_address_id_fkey: (address_id) -> public.assigned_site_customers(address_id)
+--     quotes_company_id_fkey: (company_id) -> public.companies(id)
+--     quotes_converted_job_id_fkey: (converted_job_id) -> public.jobs(id)
+--     quotes_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     quotes_customer_id_fkey: (customer_id) -> public.customers(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.role_permissions  (2 columns)
+-- ---------------------------------------------------------------------------
+--   permission  enum app_permission  NOT NULL 
+--   role        enum app_role        NOT NULL 
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.service_agreements  (12 columns)
+-- ---------------------------------------------------------------------------
+--   address_id         string                  NOT NULL 
+--   company_id         string                  NOT NULL 
+--   created_at         string                  NOT NULL [opt-on-insert]
+--   customer_id        string                  NOT NULL 
+--   equipment_id       string                           [opt-on-insert]
+--   frequency          enum service_frequency  NOT NULL 
+--   id                 string                  NOT NULL [opt-on-insert]
+--   is_active          boolean                 NOT NULL [opt-on-insert]
+--   next_due_date      string                  NOT NULL 
+--   template_job_kind  enum job_kind           NOT NULL 
+--   template_title     string                  NOT NULL [opt-on-insert]
+--   updated_at         string                  NOT NULL [opt-on-insert]
+--
+--   FOREIGN KEYS:
+--     service_agreements_address_id_fkey: (address_id) -> public.addresses(id)
+--     service_agreements_address_id_fkey: (address_id) -> public.assigned_site_customers(address_id)
+--     service_agreements_company_id_fkey: (company_id) -> public.companies(id)
+--     service_agreements_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     service_agreements_customer_id_fkey: (customer_id) -> public.customers(id)
+--     service_agreements_equipment_id_fkey: (equipment_id) -> public.equipment(id)
+--
+-- ---------------------------------------------------------------------------
+-- TABLE public.sms_credit_ledger  (10 columns)
+-- ---------------------------------------------------------------------------
+--   amount              number                            NOT NULL 
+--   balance_after       number                            NOT NULL 
+--   company_id          string                            NOT NULL 
+--   created_at          string                            NOT NULL [opt-on-insert]
+--   customer_id         string                                     [opt-on-insert]
+--   id                  string                            NOT NULL [opt-on-insert]
+--   job_id              string                                     [opt-on-insert]
+--   notification_id     string                                     [opt-on-insert]
+--   purchase_reference  string                                     [opt-on-insert]
+--   transaction_type    enum sms_ledger_transaction_type  NOT NULL 
+--
+--   FOREIGN KEYS:
+--     sms_credit_ledger_company_id_fkey: (company_id) -> public.companies(id)
+--     sms_credit_ledger_customer_id_fkey: (customer_id) -> public.assigned_site_customers(id)
+--     sms_credit_ledger_customer_id_fkey: (customer_id) -> public.customers(id)
+--     sms_credit_ledger_job_id_fkey: (job_id) -> public.jobs(id)
+--     sms_credit_ledger_notification_id_fkey: (notification_id) -> public.notifications(id)
+--
+
+-- =============================================================================
+-- SECTION 3 - VIEWS  (3)
+-- =============================================================================
+--
+-- View DEFINITIONS (the SELECT bodies) could not be captured. Columns only.
+--
+-- VIEW public.assigned_site_customers  (13 columns)
+--   access_notes : string
+--   address_id : string
+--   city : string
+--   company_id : string
+--   id : string
+--   latitude : number
+--   line1 : string
+--   line2 : string
+--   longitude : number
+--   name : string
+--   postal_code : string
+--   state : string
+--   type : enum customer_type
+--
+-- VIEW public.quotes_operational  (15 columns)
+--   accepted_at : string
+--   address_id : string
+--   company_id : string
+--   converted_job_id : string
+--   created_at : string
+--   customer_id : string
+--   declined_at : string
+--   id : string
+--   number : string
+--   scope_of_work : string
+--   sent_at : string
+--   status : enum quote_status
+--   title : string
+--   valid_until : string
+--   viewed_at : string
+--
+-- VIEW public.site_contacts_operational  (6 columns)
+--   company_id : string
+--   contact_role : string
+--   customer_id : string
+--   id : string
+--   name : string
+--   phone : string
+--
+
+-- =============================================================================
+-- SECTION 4 - FUNCTIONS / RPCs  (51)
+-- =============================================================================
+--
+-- SIGNATURES ONLY. Bodies, SECURITY DEFINER status, search_path and
+-- volatility are NOT captured. Several of these are SECURITY DEFINER and
+-- carry the tenancy rules -- they cannot be reconstructed from this file.
+--
+-- public.accept_invitation
+--     Args:    { p_token: string }
+--     Returns: string
+--
+-- public.apply_job_status
+--     Args:    { p_job: string p_latitude?: number p_longitude?: number p_to: Database["public"]["Enums"]["job_status"] }
+--     Returns: undefined
+--
+-- public.apply_tenant_rls
+--     Args:    { p_read_perm?: string; p_table: string; p_write_perm?: string }
+--     Returns: undefined
+--
+-- public.assign_job
+--     Args:    { p_acknowledges_conflict?: boolean p_job: string p_worker?: string }
+--     Returns: undefined
+--
+-- public.claim_push_batch
+--     Args:    { p_limit?: number }
+--     Returns: { body: string bundle_id: string company_id: string deep_link: string environment: string event: string job_id: string notification_id: string title: string token: string }[]
+--
+-- public.company_currency_code
+--     Args:    never
+--     Returns: string
+--
+-- public.convert_quote_to_job
+--     Args:    { p_field_worker_user_id?: string p_kind: Database["public"]["Enums"]["job_kind"] p_priority: Database["public"]["Enums"]["job_priority"] p_quote: string p_scheduled_end?: string p_scheduled_start?: string }
+--     Returns: string
+--
+-- public.count_scheduling_conflicts
+--     Args:    { p_end: string p_job: string p_start: string p_worker: string }
+--     Returns: number
+--
+-- public.create_company_and_owner
+--     Args:    { p_country_code: string p_currency_code: string p_default_tax_rate?: number p_name: string p_owner_name?: string p_phone?: string p_time_zone_identifier: string p_trade: Database["public"]["Enums"]["app_trade"] }
+--     Returns: string
+--
+-- public.create_invitation
+--     Args:    { p_email: string p_expires_in_days?: number p_role: Database["public"]["Enums"]["app_role"] }
+--     Returns: { invitation_id: string invitation_token: string }[]
+--
+-- public.create_invoice
+--     Args:    { p_address_id?: string p_customer_id: string p_due_date?: string p_issue_date?: string p_payment_terms_label?: string p_scope_of_work?: string p_title?: string }
+--     Returns: string
+--
+-- public.create_invoice_from_job
+--     Args:    { p_advance_job_status?: boolean p_copy_line_items?: boolean p_due_date?: string p_issue_date?: string p_job: string p_payment_terms_label?: string }
+--     Returns: string
+--
+-- public.create_invoice_from_quote
+--     Args:    { p_advance_job_status?: boolean p_copy_line_items?: boolean p_due_date?: string p_issue_date?: string p_payment_terms_label?: string p_quote: string }
+--     Returns: string
+--
+-- public.create_job
+--     Args:    { p_address_id: string p_customer_id: string p_equipment_id?: string p_field_worker_user_id?: string p_job_description: string p_kind: Database["public"]["Enums"]["job_kind"] p_priority: Database["public"]["Enums"]["job_priority"] p_quote_id?: string p_scheduled_end?: string p_scheduled_start?: string p_title: string }
+--     Returns: string
+--
+-- public.create_quote
+--     Args:    { p_address_id: string p_customer_id: string p_scope_of_work?: string p_title: string p_valid_until?: string }
+--     Returns: string
+--
+-- public.current_app_role
+--     Args:    never
+--     Returns: Database["public"]["Enums"]["app_role"]
+--
+-- public.current_company_id
+--     Args:    never
+--     Returns: string
+--
+-- public.delete_invoice_line_item
+--     Args:    { p_invoice: string; p_line: string }
+--     Returns: undefined
+--
+-- public.delete_quote_line_item
+--     Args:    { p_line: string; p_quote: string }
+--     Returns: undefined
+--
+-- public.dispatch_push_tick
+--     Args:    never
+--     Returns: number
+--
+-- public.enqueue_push
+--     Args:    { p_body: string p_company: string p_customer?: string p_event: string p_job?: string p_title: string p_user: string }
+--     Returns: number
+--
+-- public.has_perm
+--     Args:    { p: Database["public"]["Enums"]["app_permission"] }
+--     Returns: boolean
+--
+-- public.is_assigned_to_job
+--     Args:    { p_job: string }
+--     Returns: boolean
+--
+-- public.is_company_field_worker
+--     Args:    { p_user: string }
+--     Returns: boolean
+--
+-- public.issue_invoice_share_token
+--     Args:    { p_invoice: string; p_rotate?: boolean }
+--     Returns: string
+--
+-- public.make_invoice
+--     Args:    { p_address_id: string p_customer_id: string p_due_date: string p_issue_date: string p_job_id: string p_payment_terms_label: string p_quote_id: string p_scope_of_work: string p_title: string }
+--     Returns: string
+--
+-- public.next_document_number
+--     Args:    { p_kind: Database["public"]["Enums"]["document_kind"] }
+--     Returns: string
+--
+-- public.payment_terms_days
+--     Args:    { p_label: string }
+--     Returns: number
+--
+-- public.push_caller_is_service_role
+--     Args:    never
+--     Returns: boolean
+--
+-- public.push_office_recipients
+--     Args:    { p_company: string p_permission: Database["public"]["Enums"]["app_permission"] }
+--     Returns: string[]
+--
+-- public.push_when_label
+--     Args:    { p_company: string; p_start: string }
+--     Returns: string
+--
+-- public.queue_invoice_notification
+--     Args:    { p_channel: Database["public"]["Enums"]["notification_channel"] p_invoice: string p_recipient: string }
+--     Returns: { balance_after: number credits_charged: number notification_id: string outcome: string }[]
+--
+-- public.recalculate_invoice_totals
+--     Args:    { p_invoice: string }
+--     Returns: undefined
+--
+-- public.recalculate_quote_totals
+--     Args:    { p_quote: string }
+--     Returns: undefined
+--
+-- public.record_payment
+--     Args:    { p_amount: number p_invoice: string p_method: Database["public"]["Enums"]["payment_method"] p_note?: string p_received_at?: string p_reference?: string }
+--     Returns: undefined
+--
+-- public.register_push_device
+--     Args:    { p_app_version?: string p_bundle_id?: string p_device_model?: string p_environment?: string p_token: string }
+--     Returns: string
+--
+-- public.reorder_quote_line_items
+--     Args:    { p_ids: string[]; p_quote: string }
+--     Returns: undefined
+--
+-- public.reschedule_job
+--     Args:    { p_acknowledges_conflict?: boolean p_end?: string p_job: string p_start?: string }
+--     Returns: undefined
+--
+-- public.revoke_invitation
+--     Args:    { p_invitation_id: string }
+--     Returns: undefined
+--
+-- public.revoke_invoice_share_tokens
+--     Args:    { p_invoice: string }
+--     Returns: undefined
+--
+-- public.save_invoice_line_item
+--     Args:    { p_description: string p_invoice: string p_line: string p_quantity: number p_tax_rate: number p_unit_price: number }
+--     Returns: undefined
+--
+-- public.save_quote_line_item
+--     Args:    { p_description: string p_line: string p_quantity: number p_quote: string p_tax_rate: number p_unit_price: number }
+--     Returns: undefined
+--
+-- public.settle_notification
+--     Args:    { p_delivered: boolean p_failure_reason?: string p_notification: string p_provider_reference?: string }
+--     Returns: { balance_after: number credits_refunded: number outcome: string }[]
+--
+-- public.settle_push_delivery
+--     Args:    { p_delivered: boolean p_failure_reason?: string p_invalid_token?: boolean p_notification: string p_provider_reference?: string }
+--     Returns: string
+--
+-- public.sms_credits_per_message
+--     Args:    never
+--     Returns: number
+--
+-- public.snapshot_quote_lines
+--     Args:    { p_invoice: string; p_quote: string }
+--     Returns: number
+--
+-- public.try_advance_job
+--     Args:    { p_job: string; p_to: Database["public"]["Enums"]["job_status"] }
+--     Returns: boolean
+--
+-- public.unregister_push_device
+--     Args:    { p_token: string }
+--     Returns: boolean
+--
+-- public.update_invoice_status
+--     Args:    { p_invoice: string p_to: Database["public"]["Enums"]["invoice_status"] }
+--     Returns: undefined
+--
+-- public.update_job_status
+--     Args:    { p_job: string p_latitude?: number p_longitude?: number p_to: Database["public"]["Enums"]["job_status"] }
+--     Returns: undefined
+--
+-- public.update_quote_status
+--     Args:    { p_quote: string p_to: Database["public"]["Enums"]["quote_status"] }
+--     Returns: undefined
+--
+
+-- =============================================================================
+-- SECTION 5 - INFRASTRUCTURE REFERENCED BY THE TEST SUITES  [FROM TESTS]
+-- =============================================================================
+--
+-- Inferred from identifiers used in backend/tests/ and backend/functions/.
+-- These names are real, but their definitions were NOT read from the database.
+--
+--   TRIGGERS
+--     app_users_delete_protection ON public.app_users
+--       (backend/tests/push-dispatch-concurrency.sh disables and re-enables it
+--        around fixture cleanup, so it exists and blocks deletes.)
+--
+--   SCHEDULED JOBS (pg_cron)
+--     cron job named 'push-dispatch'
+--       Schedule and command NOT captured. Observed to run about once a
+--       minute. Tests read cron.job and cron.job_run_details.
+--
+--   EXTENSIONS (referenced, versions/schemas not captured)
+--     pg_cron    - scheduling
+--     pg_net     - outbound HTTP (net.http_request_queue, net._http_response)
+--     pgcrypto / extensions.hmac - HMAC signing of the dispatch tick
+--     gen_random_uuid() - available for key generation
+--
+--   VAULT (NAMES ONLY - no values, and none were read)
+--     vault.secrets / vault.decrypted_secrets are used to hold the push
+--     dispatch signing key. The secret VALUE is never exposed to the database
+--     caller or to this file.
+--
+--   EDGE FUNCTION SECRETS (names only; set outside the database)
+--     APNS_AUTH_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID,
+--     PUSH_DISPATCH_SIGNING_KEY, SUPABASE_SERVICE_ROLE_KEY
+--     No value of any of these appears anywhere in this file or archive.
+--
+-- =============================================================================
+-- END OF INVENTORY
+-- =============================================================================

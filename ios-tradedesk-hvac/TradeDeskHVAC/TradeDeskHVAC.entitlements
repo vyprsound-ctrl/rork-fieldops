@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Store and TestFlight builds. A token minted under this entitlement is
+	     only deliverable via api.push.apple.com, which is why the app records the
+	     environment alongside the token rather than assuming one. -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>
