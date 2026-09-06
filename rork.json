@@ -4,7 +4,10 @@
     {
       "name": "TradeDesk HVAC",
       "path": "ios-tradedesk-hvac",
-      "framework": "swift"
+      "framework": "swift",
+      "settings": {
+        "iosBundleId": "com.harboursouth.fieldservice"
+      }
     },
     {
       "name": "Backend",
