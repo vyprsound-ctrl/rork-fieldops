@@ -1,10 +1,17 @@
 import SwiftUI
 
+#if DEBUG
+
 /// DEVELOPMENT SIGN-IN — the seeded account picker.
 ///
 /// Unchanged behaviour: credentials are not verified, and every seeded role and
 /// both tenants can be exercised. Extracted from `SignInView` so the production
 /// form could sit beside it without altering this path.
+///
+/// **Compiled into DEBUG builds only.** A sign-in that verifies no credentials
+/// must not exist in an App Store or TestFlight binary, so this type is absent
+/// from a release build entirely rather than merely hidden behind a flag — a
+/// hidden control is still a control someone can reach.
 struct DevelopmentAccountPicker: View {
     @Environment(AppEnvironment.self) private var env
     @State private var accounts: [AuthAccount] = []
@@ -125,3 +132,5 @@ struct DevelopmentAccountPicker: View {
         return String(parts.prefix(2).compactMap(\.first)).uppercased()
     }
 }
+
+#endif
