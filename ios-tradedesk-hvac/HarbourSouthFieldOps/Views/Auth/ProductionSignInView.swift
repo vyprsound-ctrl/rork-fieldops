@@ -73,6 +73,13 @@ struct ProductionSignInView: View {
                     .disabled(email.isEmpty || env.authPhase.isBusy)
                 }
 
+                if let notice = env.signUpNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if let notice = env.passwordResetNotice {
                     Text(notice)
                         .font(.footnote)

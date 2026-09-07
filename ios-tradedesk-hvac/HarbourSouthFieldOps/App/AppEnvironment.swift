@@ -82,6 +82,9 @@ final class AppEnvironment {
     private(set) var productionSession: TenantSession?
     private(set) var authPhase: AuthPhase = .signedOut
     private(set) var passwordResetNotice: String?
+    /// Set when sign-up succeeded but the address still needs confirming. The
+    /// company is founded automatically on the first sign-in after that.
+    private(set) var signUpNotice: String?
 
     // MARK: Push notification state
 
@@ -221,6 +224,7 @@ final class AppEnvironment {
         }
         authPhase = .working
         passwordResetNotice = nil
+        signUpNotice = nil
         do {
             productionSession = try await productionAuth.signIn(email: email, password: password)
             authPhase = .signedIn
@@ -237,9 +241,22 @@ final class AppEnvironment {
         }
         authPhase = .working
         passwordResetNotice = nil
+        signUpNotice = nil
         do {
-            productionSession = try await productionAuth.signUp(registration)
-            authPhase = .signedIn
+            switch try await productionAuth.signUp(registration) {
+            case .signedIn(let session):
+                productionSession = session
+                authPhase = .signedIn
+
+            case .confirmationSent(let address):
+                // Not an error. The account exists and the company details are
+                // held against it; signing in after confirming finishes setup.
+                productionSession = nil
+                authPhase = .signedOut
+                signUpNotice = "Check your email. We've sent a confirmation link to \(address). "
+                    + "Confirm it, then sign in here — your company is created automatically "
+                    + "on your first sign-in."
+            }
         } catch {
             productionSession = nil
             authPhase = .failed(Self.message(for: error))
@@ -261,6 +278,7 @@ final class AppEnvironment {
         productionSession = nil
         authPhase = .signedOut
         passwordResetNotice = nil
+        signUpNotice = nil
         try? await productionAuth.signOut()
     }
 
@@ -270,6 +288,7 @@ final class AppEnvironment {
             return
         }
         passwordResetNotice = nil
+        signUpNotice = nil
         do {
             try await productionAuth.requestPasswordReset(email: email)
             passwordResetNotice = "If that address has an account, a reset link is on its way."

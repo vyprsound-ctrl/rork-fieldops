@@ -51,6 +51,19 @@ nonisolated struct CompanyRegistration: Sendable {
     }
 }
 
+/// How a sign-up ended.
+///
+/// Email confirmation being enabled is a normal, successful outcome — not a
+/// failure. Modelling it as an error was what previously aborted sign-up before
+/// the company could be founded.
+nonisolated enum SignUpOutcome: Sendable {
+    /// Confirmation is disabled: the company exists and the owner is signed in.
+    case signedIn(TenantSession)
+    /// Confirmation is required. The company details are parked on the identity
+    /// and provisioned on the first authenticated session.
+    case confirmationSent(email: String)
+}
+
 nonisolated enum AuthError: LocalizedError, Equatable {
     case unknownAccount
     case suspended
@@ -61,6 +74,9 @@ nonisolated enum AuthError: LocalizedError, Equatable {
     case sessionExpired
     case identityMismatch
     case passwordResetFailed
+    /// Signed in and confirmed, but the parked company details are missing or
+    /// unreadable, so there is nothing to found a company from.
+    case companyDetailsUnavailable
     case notAvailableInDevelopment
     case server(String)
 
@@ -76,6 +92,8 @@ nonisolated enum AuthError: LocalizedError, Equatable {
             return "That email and password don't match an account."
         case .emailConfirmationRequired:
             return "Check your email to confirm the address, then sign in."
+        case .companyDetailsUnavailable:
+            return "We couldn't find the company details from your sign-up. Create the company again with this same email to finish setting it up."
         case .noMembership:
             return "This account isn't a member of any company yet. Ask an owner or admin for an invitation."
         case .sessionExpired:
@@ -107,7 +125,7 @@ protocol AuthService: Sendable {
     func signIn(accountID: String) async throws -> TenantSession
 
     func signIn(email: String, password: String) async throws -> TenantSession
-    func signUp(_ registration: CompanyRegistration) async throws -> TenantSession
+    func signUp(_ registration: CompanyRegistration) async throws -> SignUpOutcome
     /// Returns the restored session, or `nil` when nobody is signed in.
     func restoreSession() async throws -> TenantSession?
     func signOut() async throws
@@ -119,7 +137,7 @@ extension AuthService {
         throw AuthError.notAvailableInDevelopment
     }
 
-    func signUp(_ registration: CompanyRegistration) async throws -> TenantSession {
+    func signUp(_ registration: CompanyRegistration) async throws -> SignUpOutcome {
         throw AuthError.notAvailableInDevelopment
     }
 

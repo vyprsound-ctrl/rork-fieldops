@@ -56,9 +56,13 @@ private nonisolated struct CreateCompanyParams: Encodable, Sendable {
 struct SupabaseAuthService: AuthService {
     let mode: ServiceMode = .production
     private let client: SupabaseClient
+    /// Shared by every copy of this struct, so the single-flight guard holds
+    /// even though the service itself is a value type.
+    private let provisioningGate: CompanyProvisioningGate
 
     init(client: SupabaseClient) {
         self.client = client
+        self.provisioningGate = CompanyProvisioningGate()
     }
 
     /// `nil` when the build has no Supabase coordinates.
@@ -82,7 +86,9 @@ struct SupabaseAuthService: AuthService {
         let normalised = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         do {
             let response = try await client.auth.signIn(email: normalised, password: password)
-            return try await resolveSession(for: response.user.id)
+            // This is the path a founder takes after confirming by email: the
+            // company is founded here, on their first real session.
+            return try await resolveSessionCompletingPendingSetup(for: response.user.id)
         } catch let error as AuthError {
             throw error
         } catch {
@@ -92,32 +98,33 @@ struct SupabaseAuthService: AuthService {
 
     // MARK: - Sign up
 
-    /// Creates the auth identity, then founds the company through the
-    /// SECURITY DEFINER RPC. The client never inserts into `companies` or
-    /// `app_users` — both tables refuse direct inserts by policy.
-    func signUp(_ registration: CompanyRegistration) async throws -> TenantSession {
+    /// Creates the auth identity and founds the company through the SECURITY
+    /// DEFINER RPC. The client never inserts into `companies` or `app_users` —
+    /// both tables refuse direct inserts by policy.
+    ///
+    /// The RPC needs an authenticated caller, because it takes the owner from
+    /// `auth.uid()`. When email confirmation is enabled there is no session at
+    /// this point, so the company details are parked on the identity and the
+    /// company is founded on the first authenticated session instead — whether
+    /// that arrives moments later or on another device next week.
+    func signUp(_ registration: CompanyRegistration) async throws -> SignUpOutcome {
         let normalised = registration.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let setup = PendingCompanySetup(registration: registration)
         do {
-            let response = try await client.auth.signUp(email: normalised, password: registration.password)
-
-            // With email confirmation enabled there is no session yet, so the
-            // RPC would run unauthenticated. Stop and tell the user instead.
-            guard response.session != nil else {
-                throw AuthError.emailConfirmationRequired
-            }
-
-            let params = CreateCompanyParams(
-                p_name: registration.companyName,
-                p_trade: registration.trade.rawValue,
-                p_country_code: registration.countryCode,
-                p_currency_code: registration.currencyCode,
-                p_time_zone_identifier: registration.timeZoneIdentifier,
-                p_owner_name: registration.ownerName
+            let response = try await client.auth.signUp(
+                email: normalised,
+                password: registration.password,
+                data: setup.signUpMetadata
             )
 
-            try await client.rpc("create_company_and_owner", params: params).execute()
+            guard response.session != nil else {
+                // Confirmation required. This is a success, not a failure: the
+                // identity exists and the company details are safely parked.
+                return .confirmationSent(email: normalised)
+            }
 
-            return try await resolveSession(for: response.user.id)
+            let session = try await provisionCompany(setup, for: response.user.id)
+            return .signedIn(session)
         } catch let error as AuthError {
             throw error
         } catch {
@@ -135,7 +142,7 @@ struct SupabaseAuthService: AuthService {
     func restoreSession() async throws -> TenantSession? {
         do {
             let session = try await client.auth.session
-            return try await resolveSession(for: session.user.id)
+            return try await resolveSessionCompletingPendingSetup(for: session.user.id)
         } catch let error as AuthError {
             switch error {
             case .noMembership, .suspended, .identityMismatch:
@@ -169,6 +176,102 @@ struct SupabaseAuthService: AuthService {
             print("[auth] password reset request failed: \(error.localizedDescription)")
             throw AuthError.passwordResetFailed
         }
+    }
+
+    // MARK: - Deferred company provisioning
+
+    /// Resolves the session, founding the company first if one is still owed.
+    ///
+    /// Provisioning is only attempted when the account genuinely has no
+    /// membership AND the identity carries a pending setup. An account that
+    /// simply has not been invited anywhere still gets `.noMembership`.
+    private func resolveSessionCompletingPendingSetup(for userID: UUID) async throws -> TenantSession {
+        do {
+            return try await resolveSession(for: userID)
+        } catch AuthError.noMembership {
+            guard let setup = try await pendingSetup() else { throw AuthError.noMembership }
+            return try await provisionCompany(setup, for: userID)
+        }
+    }
+
+    /// Reads the parked company details off the authenticated identity.
+    private func pendingSetup() async throws -> PendingCompanySetup? {
+        let session = try await client.auth.session
+        return PendingCompanySetup(metadata: session.user.userMetadata)
+    }
+
+    /// Founds the company through the RPC, then resolves the owner session.
+    ///
+    /// Duplicate protection has four layers, only the first of which is a
+    /// guarantee:
+    ///   1. The RPC refuses a caller who already has an `app_users` row. That
+    ///      check is server-side and holds across every device and process.
+    ///   2. This runs only after a resolve returned no membership.
+    ///   3. The single-flight gate stops one client racing itself.
+    ///   4. An "already belongs" or unique-violation answer is treated as
+    ///      already-provisioned and re-resolved, so a half-finished earlier
+    ///      attempt converges instead of erroring.
+    private func provisionCompany(
+        _ setup: PendingCompanySetup,
+        for userID: UUID
+    ) async throws -> TenantSession {
+        try await provisioningGate.provision(userID: userID.uuidString) {
+            let params = CreateCompanyParams(
+                p_name: setup.companyName,
+                p_trade: setup.trade.rawValue,
+                p_country_code: setup.countryCode,
+                p_currency_code: setup.currencyCode,
+                p_time_zone_identifier: setup.timeZoneIdentifier,
+                p_owner_name: setup.ownerName
+            )
+
+            do {
+                try await client.rpc("create_company_and_owner", params: params).execute()
+            } catch {
+                // Someone — an earlier attempt, or a concurrent one that won —
+                // already founded this company. Fall through and resolve it
+                // rather than reporting a failure or founding a second one.
+                guard Self.isAlreadyProvisioned(error) else { throw Self.translate(error) }
+                print("[auth] company already provisioned for this account; resolving the existing one")
+            }
+
+            await clearPendingSetupFlag()
+            return try await resolveSession(for: userID)
+        }
+    }
+
+    /// Marks the setup done so no later sign-in retries it.
+    ///
+    /// Deliberately cannot fail the provisioning it follows: the company now
+    /// exists, and refusing the session over a metadata write would be worse
+    /// than a redundant retry. If this does fail, the next sign-in attempts
+    /// provisioning again, the RPC answers "already belongs to a company", and
+    /// the flow self-heals through the already-provisioned path above.
+    private func clearPendingSetupFlag() async {
+        do {
+            _ = try await client.auth.update(
+                user: UserAttributes(data: PendingCompanySetup.clearedMetadata)
+            )
+        } catch {
+            print("[auth] company provisioned, but the pending flag could not be cleared: \(error.localizedDescription)")
+        }
+    }
+
+    /// True when the database is telling us this account already has a company.
+    ///
+    /// `P0001` is the RPC's own one-company-per-user guard. `23505` is the
+    /// unique violation a concurrent caller hits when it loses the race to
+    /// insert `app_users.id` — surfacing that raw would show the user a
+    /// Postgres constraint name for what is really a success.
+    private static func isAlreadyProvisioned(_ error: Error) -> Bool {
+        if let postgrest = error as? PostgrestError {
+            if postgrest.code == "23505" { return true }
+            if postgrest.message.lowercased().contains("already belongs to a company") { return true }
+        }
+
+        let text = error.localizedDescription.lowercased()
+        if text.contains("already belongs to a company") { return true }
+        return text.contains("duplicate key") && text.contains("app_users")
     }
 
     // MARK: - Tenancy resolution
