@@ -297,6 +297,44 @@ final class AppEnvironment {
         }
     }
 
+    /// Completes a Supabase email link that reopened the app.
+    ///
+    /// Only production authentication is involved. The development picker has
+    /// its own session and is deliberately left untouched — a real identity is
+    /// never handed to the mock stack.
+    func handleAuthCallback(_ url: URL) async {
+        guard AuthCallback.matches(url) else { return }
+
+        guard let productionAuth else {
+            authPhase = .failed(AuthError.notConfigured.localizedDescription)
+            return
+        }
+
+        // A signed-in user tapping an old link from their inbox must not lose
+        // the session they already have, so nothing is cleared up front.
+        let existingSession = productionSession
+
+        authPhase = .working
+        passwordResetNotice = nil
+        signUpNotice = nil
+
+        do {
+            productionSession = try await productionAuth.completeAuthCallback(url: url)
+            authPhase = .signedIn
+        } catch {
+            if let existingSession {
+                // Restore exactly what was there before. An unusable link is
+                // not a reason to sign anyone out.
+                productionSession = existingSession
+                authPhase = .signedIn
+                print("[auth] ignoring an email link that could not be completed while signed in")
+            } else {
+                productionSession = nil
+                authPhase = .failed(Self.message(for: error))
+            }
+        }
+    }
+
     func clearAuthError() {
         if case .failed = authPhase { authPhase = .signedOut }
     }

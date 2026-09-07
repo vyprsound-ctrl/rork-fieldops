@@ -114,7 +114,10 @@ struct SupabaseAuthService: AuthService {
             let response = try await client.auth.signUp(
                 email: normalised,
                 password: registration.password,
-                data: setup.signUpMetadata
+                data: setup.signUpMetadata,
+                // Without this the confirmation email points at the project's
+                // Site URL (localhost), which a phone cannot open.
+                redirectTo: AuthCallback.url
             )
 
             guard response.session != nil else {
@@ -171,11 +174,59 @@ struct SupabaseAuthService: AuthService {
         let normalised = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalised.isEmpty else { throw AuthError.passwordResetFailed }
         do {
-            try await client.auth.resetPasswordForEmail(normalised)
+            // Same reasoning as sign-up: the reset link has to return to the
+            // app, not to the Site URL.
+            try await client.auth.resetPasswordForEmail(normalised, redirectTo: AuthCallback.url)
         } catch {
             print("[auth] password reset request failed: \(error.localizedDescription)")
             throw AuthError.passwordResetFailed
         }
+    }
+
+    // MARK: - Email link callback
+
+    /// Completes an email link that reopened the app.
+    ///
+    /// This is the direct return path: tapping Confirm in the email hands the
+    /// app an authorization code, which is exchanged here for a real session.
+    /// Tenancy then resolves through exactly the same code as a password
+    /// sign-in, so a company still pending from sign-up is founded now.
+    ///
+    /// The indirect path still works unchanged. If the exchange cannot happen —
+    /// the link was opened on another device, or the code was already spent —
+    /// this reports a failure that tells the user to sign in normally, and
+    /// `signIn` provisions the company at that point instead.
+    func completeAuthCallback(url: URL) async throws -> TenantSession {
+        guard AuthCallback.matches(url) else { throw AuthError.confirmationLinkUnusable }
+
+        // An expired or already-used link still redirects here successfully,
+        // reporting the failure in the URL rather than as a network error.
+        if let reported = AuthCallback.reportedFailure(in: url) { throw reported }
+
+        do {
+            let session = try await client.auth.session(from: url)
+            return try await resolveSessionCompletingPendingSetup(for: session.user.id)
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            throw Self.translateCallback(error)
+        }
+    }
+
+    /// Maps a failed code exchange onto advice the user can act on.
+    ///
+    /// Nothing here signs the user out. A link that cannot be exchanged says
+    /// nothing about the session already on this device, and discarding it
+    /// would turn a stale email into an unexpected sign-out.
+    private static func translateCallback(_ error: Error) -> AuthError {
+        let text = error.localizedDescription.lowercased()
+
+        if text.contains("expired") || text.contains("already been used") || text.contains("invalid") {
+            return .confirmationLinkExpired
+        }
+
+        print("[auth] email link could not be completed: \(error)")
+        return .confirmationLinkUnusable
     }
 
     // MARK: - Deferred company provisioning

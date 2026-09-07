@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Only the keys that cannot be expressed as INFOPLIST_KEY_* build settings
+	  live here. CFBundleURLTypes is an array of dictionaries, which that
+	  mechanism cannot represent, so this partial file is merged with the
+	  generated Info.plist (GENERATE_INFOPLIST_FILE stays YES).
+
+	  This registers the scheme Supabase auth emails redirect back to. It does
+	  not change the bundle identifier or any signing setting.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.harboursouth.fieldservice.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.harboursouth.fieldservice</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

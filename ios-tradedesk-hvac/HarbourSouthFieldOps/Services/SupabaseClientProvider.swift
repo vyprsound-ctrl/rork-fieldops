@@ -18,7 +18,25 @@ nonisolated enum SupabaseClientProvider {
               let anonKey = BackendConfiguration.anonKey else {
             return nil
         }
-        return SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
+        return SupabaseClient(
+            supabaseURL: url,
+            supabaseKey: anonKey,
+            options: SupabaseClientOptions(
+                auth: SupabaseClientOptions.AuthOptions(
+                    // Email links come back to the app rather than to the
+                    // project's Site URL. Individual calls pass this explicitly
+                    // too; setting it here means any future flow that needs a
+                    // redirect gets the native one by default instead of
+                    // silently falling back to localhost.
+                    redirectToURL: AuthCallback.url,
+                    // PKCE is already the SDK default, but the confirmation
+                    // flow depends on it: the link returns an authorization
+                    // code that is exchanged for a session using a verifier
+                    // held only by this device.
+                    flowType: .pkce
+                )
+            )
+        )
     }()
 
     static var isConfigured: Bool { shared != nil }

@@ -77,6 +77,12 @@ nonisolated enum AuthError: LocalizedError, Equatable {
     /// Signed in and confirmed, but the parked company details are missing or
     /// unreadable, so there is nothing to found a company from.
     case companyDetailsUnavailable
+    /// An email link that Supabase itself rejected as expired or already used.
+    case confirmationLinkExpired
+    /// A link that could not be exchanged on this device — most often because
+    /// it was opened on a different device from the one that signed up, so the
+    /// PKCE verifier is not held here.
+    case confirmationLinkUnusable
     case notAvailableInDevelopment
     case server(String)
 
@@ -102,6 +108,10 @@ nonisolated enum AuthError: LocalizedError, Equatable {
             return "The account record didn't match the signed-in user. You've been signed out."
         case .passwordResetFailed:
             return "We couldn't send a reset email. Check the address and try again."
+        case .confirmationLinkExpired:
+            return "That link has expired or has already been used. Sign in below, or sign up again to get a new one."
+        case .confirmationLinkUnusable:
+            return "We couldn't complete that link on this device. Sign in with your email and password — your company setup finishes automatically."
         case .notAvailableInDevelopment:
             return "That action needs the production backend. Switch to Production sign-in."
         case .server(let message):
@@ -130,6 +140,13 @@ protocol AuthService: Sendable {
     func restoreSession() async throws -> TenantSession?
     func signOut() async throws
     func requestPasswordReset(email: String) async throws
+
+    /// Completes a Supabase email link that reopened the app.
+    ///
+    /// Production only. Exchanges the callback for a session, then resolves
+    /// tenancy exactly as a normal sign-in would — including founding a company
+    /// that is still pending from sign-up.
+    func completeAuthCallback(url: URL) async throws -> TenantSession
 }
 
 extension AuthService {
@@ -146,6 +163,10 @@ extension AuthService {
     func signOut() async throws {}
 
     func requestPasswordReset(email: String) async throws {
+        throw AuthError.notAvailableInDevelopment
+    }
+
+    func completeAuthCallback(url: URL) async throws -> TenantSession {
         throw AuthError.notAvailableInDevelopment
     }
 }

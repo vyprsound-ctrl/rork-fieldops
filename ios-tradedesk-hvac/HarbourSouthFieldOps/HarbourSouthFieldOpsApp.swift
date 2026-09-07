@@ -20,6 +20,12 @@ struct HarbourSouthFieldOpsApp: App {
             ContentView()
                 .environment(environmentModel)
                 .preferredColorScheme(.light)
+                // Supabase confirmation and password-reset emails reopen the
+                // app through the registered scheme. This fires for a cold
+                // launch from the link as well as for a tap while running.
+                .onOpenURL { url in
+                    Task { await environmentModel.handleAuthCallback(url) }
+                }
         }
     }
 }
