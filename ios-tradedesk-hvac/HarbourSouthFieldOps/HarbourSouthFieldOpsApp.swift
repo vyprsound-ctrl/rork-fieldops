@@ -1,12 +1,12 @@
 //
-//  TradeDeskHVACApp.swift
-//  TradeDeskHVAC
+//  HarbourSouthFieldOpsApp.swift
+//  HarbourSouthFieldOps
 //
 
 import SwiftUI
 
 @main
-struct TradeDeskHVACApp: App {
+struct HarbourSouthFieldOpsApp: App {
     /// Receives the two APNs callbacks that have no SwiftUI equivalent: the
     /// device token, and a tapped notification. Adopting a delegate does not
     /// register for anything or prompt for anything on its own — registration

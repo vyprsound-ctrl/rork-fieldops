@@ -1,13 +1,13 @@
 //
-//  TradeDeskHVACUITests.swift
-//  TradeDeskHVACUITests
+//  HarbourSouthFieldOpsUITests.swift
+//  HarbourSouthFieldOpsUITests
 //
 //  Created by Rork on August 26, 2026.
 //
 
 import XCTest
 
-final class TradeDeskHVACUITests: XCTestCase {
+final class HarbourSouthFieldOpsUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

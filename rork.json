@@ -6,7 +6,8 @@
       "path": "ios-tradedesk-hvac",
       "framework": "swift",
       "settings": {
-        "iosBundleId": "com.harboursouth.fieldservice"
+        "iosBundleId": "com.harboursouth.fieldservice",
+        "displayName": "Harbour South FieldOps"
       }
     },
     {

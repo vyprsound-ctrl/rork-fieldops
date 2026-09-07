@@ -16,37 +16,37 @@
 			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 105FC5792E9EAD3100EA8BCF;
-			remoteInfo = TradeDeskHVAC;
+			remoteInfo = HarbourSouthFieldOps;
 		};
 		105FC5942E9EAD3200EA8BCF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 105FC5722E9EAD3100EA8BCF /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 105FC5792E9EAD3100EA8BCF;
-			remoteInfo = TradeDeskHVAC;
+			remoteInfo = HarbourSouthFieldOps;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		105FC57A2E9EAD3100EA8BCF /* TradeDeskHVAC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TradeDeskHVAC.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		105FC5892E9EAD3200EA8BCF /* TradeDeskHVACTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TradeDeskHVACTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		105FC5932E9EAD3200EA8BCF /* TradeDeskHVACUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TradeDeskHVACUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		105FC57A2E9EAD3100EA8BCF /* HarbourSouthFieldOps.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HarbourSouthFieldOps.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		105FC5892E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HarbourSouthFieldOpsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		105FC5932E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HarbourSouthFieldOpsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		105FC57C2E9EAD3100EA8BCF /* TradeDeskHVAC */ = {
+		105FC57C2E9EAD3100EA8BCF /* HarbourSouthFieldOps */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = TradeDeskHVAC;
+			path = HarbourSouthFieldOps;
 			sourceTree = "<group>";
 		};
-		105FC58C2E9EAD3200EA8BCF /* TradeDeskHVACTests */ = {
+		105FC58C2E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = TradeDeskHVACTests;
+			path = HarbourSouthFieldOpsTests;
 			sourceTree = "<group>";
 		};
-		105FC5962E9EAD3200EA8BCF /* TradeDeskHVACUITests */ = {
+		105FC5962E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = TradeDeskHVACUITests;
+			path = HarbourSouthFieldOpsUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -80,9 +80,9 @@
 		105FC5712E9EAD3100EA8BCF = {
 			isa = PBXGroup;
 			children = (
-				105FC57C2E9EAD3100EA8BCF /* TradeDeskHVAC */,
-				105FC58C2E9EAD3200EA8BCF /* TradeDeskHVACTests */,
-				105FC5962E9EAD3200EA8BCF /* TradeDeskHVACUITests */,
+				105FC57C2E9EAD3100EA8BCF /* HarbourSouthFieldOps */,
+				105FC58C2E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests */,
+				105FC5962E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests */,
 				105FC57B2E9EAD3100EA8BCF /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,9 +90,9 @@
 		105FC57B2E9EAD3100EA8BCF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				105FC57A2E9EAD3100EA8BCF /* TradeDeskHVAC.app */,
-				105FC5892E9EAD3200EA8BCF /* TradeDeskHVACTests.xctest */,
-				105FC5932E9EAD3200EA8BCF /* TradeDeskHVACUITests.xctest */,
+				105FC57A2E9EAD3100EA8BCF /* HarbourSouthFieldOps.app */,
+				105FC5892E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests.xctest */,
+				105FC5932E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,9 +100,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		105FC5792E9EAD3100EA8BCF /* TradeDeskHVAC */ = {
+		105FC5792E9EAD3100EA8BCF /* HarbourSouthFieldOps */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 105FC59D2E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVAC" */;
+			buildConfigurationList = 105FC59D2E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOps" */;
 			buildPhases = (
 				105FC5762E9EAD3100EA8BCF /* Sources */,
 				105FC5772E9EAD3100EA8BCF /* Frameworks */,
@@ -113,19 +113,19 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				105FC57C2E9EAD3100EA8BCF /* TradeDeskHVAC */,
+				105FC57C2E9EAD3100EA8BCF /* HarbourSouthFieldOps */,
 			);
-			name = TradeDeskHVAC;
+			name = HarbourSouthFieldOps;
 			packageProductDependencies = (
 				XX17F496E7391AF4178246XX /* Supabase */,
 			);
-			productName = TradeDeskHVAC;
-			productReference = 105FC57A2E9EAD3100EA8BCF /* TradeDeskHVAC.app */;
+			productName = HarbourSouthFieldOps;
+			productReference = 105FC57A2E9EAD3100EA8BCF /* HarbourSouthFieldOps.app */;
 			productType = "com.apple.product-type.application";
 		};
-		105FC5882E9EAD3200EA8BCF /* TradeDeskHVACTests */ = {
+		105FC5882E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 105FC5A02E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVACTests" */;
+			buildConfigurationList = 105FC5A02E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOpsTests" */;
 			buildPhases = (
 				105FC5852E9EAD3200EA8BCF /* Sources */,
 				105FC5862E9EAD3200EA8BCF /* Frameworks */,
@@ -137,18 +137,18 @@
 				105FC58B2E9EAD3200EA8BCF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				105FC58C2E9EAD3200EA8BCF /* TradeDeskHVACTests */,
+				105FC58C2E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests */,
 			);
-			name = TradeDeskHVACTests;
+			name = HarbourSouthFieldOpsTests;
 			packageProductDependencies = (
 			);
-			productName = TradeDeskHVACTests;
-			productReference = 105FC5892E9EAD3200EA8BCF /* TradeDeskHVACTests.xctest */;
+			productName = HarbourSouthFieldOpsTests;
+			productReference = 105FC5892E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		105FC5922E9EAD3200EA8BCF /* TradeDeskHVACUITests */ = {
+		105FC5922E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 105FC5A32E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVACUITests" */;
+			buildConfigurationList = 105FC5A32E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOpsUITests" */;
 			buildPhases = (
 				105FC58F2E9EAD3200EA8BCF /* Sources */,
 				105FC5902E9EAD3200EA8BCF /* Frameworks */,
@@ -160,13 +160,13 @@
 				105FC5952E9EAD3200EA8BCF /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				105FC5962E9EAD3200EA8BCF /* TradeDeskHVACUITests */,
+				105FC5962E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests */,
 			);
-			name = TradeDeskHVACUITests;
+			name = HarbourSouthFieldOpsUITests;
 			packageProductDependencies = (
 			);
-			productName = TradeDeskHVACUITests;
-			productReference = 105FC5932E9EAD3200EA8BCF /* TradeDeskHVACUITests.xctest */;
+			productName = HarbourSouthFieldOpsUITests;
+			productReference = 105FC5932E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -192,7 +192,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 105FC5752E9EAD3100EA8BCF /* Build configuration list for PBXProject "TradeDeskHVAC" */;
+			buildConfigurationList = 105FC5752E9EAD3100EA8BCF /* Build configuration list for PBXProject "HarbourSouthFieldOps" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -206,9 +206,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				105FC5792E9EAD3100EA8BCF /* TradeDeskHVAC */,
-				105FC5882E9EAD3200EA8BCF /* TradeDeskHVACTests */,
-				105FC5922E9EAD3200EA8BCF /* TradeDeskHVACUITests */,
+				105FC5792E9EAD3100EA8BCF /* HarbourSouthFieldOps */,
+				105FC5882E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests */,
+				105FC5922E9EAD3200EA8BCF /* HarbourSouthFieldOpsUITests */,
 			);
 			packageReferences = (
 				XXA26CCC1C14E04A80BED3XX /* XCRemoteSwiftPackageReference "supabase-swift" */,
@@ -267,12 +267,12 @@
 /* Begin PBXTargetDependency section */
 		105FC58B2E9EAD3200EA8BCF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 105FC5792E9EAD3100EA8BCF /* TradeDeskHVAC */;
+			target = 105FC5792E9EAD3100EA8BCF /* HarbourSouthFieldOps */;
 			targetProxy = 105FC58A2E9EAD3200EA8BCF /* PBXContainerItemProxy */;
 		};
 		105FC5952E9EAD3200EA8BCF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 105FC5792E9EAD3100EA8BCF /* TradeDeskHVAC */;
+			target = 105FC5792E9EAD3100EA8BCF /* HarbourSouthFieldOps */;
 			targetProxy = 105FC5942E9EAD3200EA8BCF /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -404,7 +404,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = TradeDeskHVAC/TradeDeskHVACDebug.entitlements;
+				CODE_SIGN_ENTITLEMENTS = HarbourSouthFieldOps/HarbourSouthFieldOpsDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -431,6 +431,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				INFOPLIST_KEY_CFBundleDisplayName = "Harbour South FieldOps";
 			};
 			name = Debug;
 		};
@@ -439,7 +440,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = TradeDeskHVAC/TradeDeskHVAC.entitlements;
+				CODE_SIGN_ENTITLEMENTS = HarbourSouthFieldOps/HarbourSouthFieldOps.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = "";
@@ -466,6 +467,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				INFOPLIST_KEY_CFBundleDisplayName = "Harbour South FieldOps";
 			};
 			name = Release;
 		};
@@ -487,7 +489,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TradeDeskHVAC.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TradeDeskHVAC";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HarbourSouthFieldOps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HarbourSouthFieldOps";
 			};
 			name = Debug;
 		};
@@ -509,7 +511,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TradeDeskHVAC.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TradeDeskHVAC";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HarbourSouthFieldOps.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HarbourSouthFieldOps";
 			};
 			name = Release;
 		};
@@ -529,7 +531,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = TradeDeskHVAC;
+				TEST_TARGET_NAME = HarbourSouthFieldOps;
 			};
 			name = Debug;
 		};
@@ -549,14 +551,14 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = TradeDeskHVAC;
+				TEST_TARGET_NAME = HarbourSouthFieldOps;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		105FC5752E9EAD3100EA8BCF /* Build configuration list for PBXProject "TradeDeskHVAC" */ = {
+		105FC5752E9EAD3100EA8BCF /* Build configuration list for PBXProject "HarbourSouthFieldOps" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				105FC59B2E9EAD3200EA8BCF /* Debug */,
@@ -565,7 +567,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		105FC59D2E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVAC" */ = {
+		105FC59D2E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOps" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				105FC59E2E9EAD3200EA8BCF /* Debug */,
@@ -574,7 +576,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		105FC5A02E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVACTests" */ = {
+		105FC5A02E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOpsTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				105FC5A12E9EAD3200EA8BCF /* Debug */,
@@ -583,7 +585,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		105FC5A32E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "TradeDeskHVACUITests" */ = {
+		105FC5A32E9EAD3200EA8BCF /* Build configuration list for PBXNativeTarget "HarbourSouthFieldOpsUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				105FC5A42E9EAD3200EA8BCF /* Debug */,
