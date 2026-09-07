@@ -11,7 +11,7 @@ struct ReceivablesView: View {
     @State private var viewModel = ReceivablesViewModel()
     @State private var isFiltering: Bool = false
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

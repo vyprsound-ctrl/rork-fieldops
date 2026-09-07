@@ -13,7 +13,7 @@ struct InvoiceDetailView: View {
     @State private var didCopyLink: Bool = false
     @State private var pendingStatus: InvoiceStatus?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

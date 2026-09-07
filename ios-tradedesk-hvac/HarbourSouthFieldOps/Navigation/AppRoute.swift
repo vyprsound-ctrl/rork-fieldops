@@ -10,6 +10,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     case invoices
     case payments
     case reports
+    case notifications
     case settings
     case paymentLink
     case dataAccess
@@ -28,6 +29,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .invoices: return "Invoices"
         case .payments: return "Accounts receivable"
         case .reports: return "Reports"
+        case .notifications: return "Job alerts"
         case .settings: return "Settings"
         case .paymentLink: return "Online payment link"
         case .dataAccess: return "Role & data access"
@@ -53,6 +55,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .invoices: return "doc.plaintext.fill"
         case .payments: return "chart.line.uptrend.xyaxis"
         case .reports: return "chart.bar.fill"
+        case .notifications: return "bell.fill"
         case .settings: return "gearshape.fill"
         case .paymentLink: return "link"
         case .dataAccess: return "lock.shield.fill"
@@ -70,7 +73,12 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .quotes: return .quotesRead
         case .invoices: return .invoicesRead
         case .payments: return .paymentsRead
+        // Reports carries no single permission: operational and financial
+        // reporting are separate grants held by different roles, so each block
+        // is gated inside the screen instead.
         case .reports: return nil
+        // Anyone with a session may manage their own device's alerts.
+        case .notifications: return nil
         case .settings: return .companyProfileRead
         case .paymentLink: return .companyProfileRead
         case .dataAccess: return nil
@@ -81,8 +89,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
 
     var isBuilt: Bool {
         switch self {
-        case .dispatch, .workerLocations, .quotes, .invoices, .payments, .dataAccess, .integrations, .settings, .paymentLink, .developmentTests: return true
-        default: return false
+        case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports, .notifications, .dataAccess, .integrations, .settings, .paymentLink, .developmentTests: return true
         }
     }
 }
@@ -93,6 +100,21 @@ nonisolated enum AppRoute: Hashable, Sendable {
     case invoice(String)
     case customer(String)
     case more(MoreSection)
+}
+
+extension AppRoute: Identifiable {
+    /// Lets a route be presented directly, which is what a notification tap
+    /// needs: the destination has to open from wherever the person already was,
+    /// not from one particular tab's navigation stack.
+    var id: String {
+        switch self {
+        case .job(let value): return "job-\(value)"
+        case .quote(let value): return "quote-\(value)"
+        case .invoice(let value): return "invoice-\(value)"
+        case .customer(let value): return "customer-\(value)"
+        case .more(let section): return "more-\(section.rawValue)"
+        }
+    }
 }
 
 /// Actions on the office home grid.

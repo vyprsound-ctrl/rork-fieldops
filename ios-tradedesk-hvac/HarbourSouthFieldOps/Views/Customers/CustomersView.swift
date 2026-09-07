@@ -5,7 +5,7 @@ struct CustomersView: View {
     @State private var viewModel = CustomersViewModel()
     @State private var path = NavigationPath()
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         NavigationStack(path: $path) {

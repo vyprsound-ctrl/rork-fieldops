@@ -6,7 +6,7 @@ struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var pendingSection: String?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ScrollView {

@@ -7,7 +7,7 @@ struct JobsView: View {
     @State private var isFiltering: Bool = false
     @State private var isCreating: Bool = false
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     var body: some View {

@@ -13,7 +13,7 @@ struct DispatchView: View {
     @State private var assigningJob: JobRow?
     @State private var reschedulingJob: JobRow?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     var body: some View {
@@ -156,7 +156,7 @@ struct DispatchView: View {
                     )
                 }
 
-                SimulatedServicesBanner()
+                if env.isDevelopmentSession { SimulatedServicesBanner() }
             }
             .padding(.horizontal, Theme.margin)
             .padding(.bottom, 28)

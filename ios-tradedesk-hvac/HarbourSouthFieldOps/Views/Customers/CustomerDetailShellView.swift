@@ -10,7 +10,7 @@ struct CustomerDetailShellView: View {
     @State private var error: DataError?
     @State private var isLoading: Bool = true
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ScrollView {

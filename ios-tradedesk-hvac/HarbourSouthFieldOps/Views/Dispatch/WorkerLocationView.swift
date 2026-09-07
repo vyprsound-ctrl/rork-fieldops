@@ -12,7 +12,7 @@ struct WorkerLocationView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = WorkerLocationViewModel()
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     var body: some View {

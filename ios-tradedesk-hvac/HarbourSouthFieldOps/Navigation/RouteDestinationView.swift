@@ -27,6 +27,12 @@ struct RouteDestinationView: View {
                 InvoicesView()
             case .payments:
                 ReceivablesView()
+            case .fieldWorkers:
+                FieldWorkerRosterView()
+            case .reports:
+                ReportsView()
+            case .notifications:
+                NotificationsView()
             case .dataAccess:
                 RoleAccessView()
             case .integrations:
@@ -37,8 +43,6 @@ struct RouteDestinationView: View {
                 SettingsView()
             case .paymentLink:
                 PaymentLinkView()
-            default:
-                SectionShellView(section: section)
             }
         }
     }

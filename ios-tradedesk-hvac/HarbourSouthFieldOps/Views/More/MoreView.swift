@@ -5,15 +5,19 @@ struct MoreView: View {
     @State private var viewModel = MoreViewModel()
     @State private var path = NavigationPath()
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     /// Sections in the approved order, filtered by what the data layer will
     /// actually serve this role.
     private var visibleSections: [MoreSection] {
         guard let session else { return [] }
-        return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports, .settings, .dataAccess, .integrations]
+        return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports, .notifications, .settings, .dataAccess, .integrations]
             .filter { section in
+                // Job alerts need a real device registration against a real
+                // signed-in user, so the row is only offered where turning them
+                // on actually does something.
+                if section == .notifications, !env.isProductionSession { return false }
                 guard let permission = section.requiredPermission else { return true }
                 return session.can(permission)
             }
@@ -21,8 +25,12 @@ struct MoreView: View {
 
     /// Development-only tooling, kept in its own labelled group so it is easy to
     /// find and obviously not part of the customer-facing product surface.
+    ///
+    /// Empty for a production session: the acceptance suite runs against a
+    /// freshly seeded in-memory store, so it is meaningless — and misleading —
+    /// inside a real company's app.
     private var developmentSections: [MoreSection] {
-        session == nil ? [] : [.developmentTests]
+        env.isDevelopmentSession ? [.developmentTests] : []
     }
 
     var body: some View {
@@ -103,7 +111,15 @@ struct MoreView: View {
                 }
 
                 Button {
-                    env.signOut()
+                    // Each stack owns its own sign-out. The production path also
+                    // removes this device's push registration before the session
+                    // that owns it is discarded, which the development path has
+                    // nothing to do.
+                    if env.isProductionSession {
+                        Task { await env.signOutOfProduction() }
+                    } else {
+                        env.signOut()
+                    }
                 } label: {
                     Text("Sign out")
                         .font(.headline)
@@ -113,7 +129,9 @@ struct MoreView: View {
                 }
                 .buttonStyle(PressableTileStyle())
 
-                SimulatedServicesBanner()
+                if env.isDevelopmentSession {
+                    SimulatedServicesBanner()
+                }
             }
             .padding(.horizontal, Theme.margin)
             .padding(.bottom, 24)
@@ -156,7 +174,9 @@ struct MoreView: View {
                     Text(subscription)
                         .font(.footnote)
                         .foregroundStyle(Theme.secondary)
-                    SimulatedBadge()
+                    if env.isDevelopmentSession {
+                        SimulatedBadge()
+                    }
                 }
             }
 

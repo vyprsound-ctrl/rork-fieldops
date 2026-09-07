@@ -176,6 +176,19 @@ final class AppEnvironment {
 
     var isProductionAvailable: Bool { productionAuth != nil }
 
+    /// True when the signed-in identity is a real one, authenticated against the
+    /// live database.
+    ///
+    /// Keyed off exactly the same condition as `gateway`, `push` and `location`,
+    /// so a screen can never disagree with the data layer about which stack it
+    /// is running on.
+    var isProductionSession: Bool { productionSession != nil }
+
+    /// True when the seeded account picker is driving the app. Used to keep
+    /// development-only tooling and simulated-service messaging out of a real
+    /// user's app entirely, rather than merely restyling it.
+    var isDevelopmentSession: Bool { productionSession == nil && session != nil }
+
     // MARK: - Development sign-in (unchanged behaviour)
 
     func signIn(accountID: String) async {

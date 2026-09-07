@@ -5,7 +5,7 @@ struct QuotesView: View {
     @State private var viewModel = QuotesViewModel()
     @State private var isCreating: Bool = false
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

@@ -12,7 +12,7 @@ struct FieldWorkerDayView: View {
     @State private var navigationHandoff: NavigationHandoff?
     @State private var travelEstimate: RouteEstimate?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -134,7 +134,7 @@ struct FieldWorkerDayView: View {
                 }
                 .buttonStyle(PressableTileStyle())
 
-                SimulatedServicesBanner()
+                if env.isDevelopmentSession { SimulatedServicesBanner() }
             }
             .padding(.horizontal, Theme.margin)
             .padding(.bottom, 24)

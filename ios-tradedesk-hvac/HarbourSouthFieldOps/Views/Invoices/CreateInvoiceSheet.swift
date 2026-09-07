@@ -18,7 +18,7 @@ struct CreateInvoiceSheet: View {
     @State private var isWorking: Bool = false
     @State private var errorMessage: String?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     private enum SourceTab: String, CaseIterable, Identifiable {
         case jobs

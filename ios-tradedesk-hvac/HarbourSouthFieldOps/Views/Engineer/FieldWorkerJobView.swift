@@ -12,7 +12,7 @@ struct FieldWorkerJobView: View {
     @State private var navigationHandoff: NavigationHandoff?
     @State private var travelEstimate: RouteEstimate?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     var body: some View {

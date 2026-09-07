@@ -15,7 +15,7 @@ struct TravelModeView: View {
     @State private var viewModel = TravelViewModel()
     @State private var navigationHandoff: NavigationHandoff?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

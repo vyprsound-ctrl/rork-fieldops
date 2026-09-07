@@ -19,7 +19,7 @@ struct QuoteEditorView: View {
     @State private var hasExpiry: Bool = true
     @State private var validUntil: Date = Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date()
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     private var selectedCustomer: CustomerOption? {
         options.customers.first { $0.id == customerID }

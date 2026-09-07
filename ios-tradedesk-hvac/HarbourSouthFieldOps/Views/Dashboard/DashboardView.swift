@@ -6,7 +6,7 @@ struct DashboardView: View {
     @State private var path = NavigationPath()
     @State private var pendingAction: QuickAction?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     private var availableActions: [QuickAction] {
         guard let session else { return [] }
@@ -65,7 +65,7 @@ struct DashboardView: View {
                 if !availableActions.isEmpty { actionGrid }
                 schedule(snapshot)
                 if !snapshot.financialTiles.isEmpty { financials(snapshot) }
-                SimulatedServicesBanner()
+                if env.isDevelopmentSession { SimulatedServicesBanner() }
             }
             .padding(.horizontal, Theme.margin)
             .padding(.bottom, 24)

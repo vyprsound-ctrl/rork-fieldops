@@ -6,7 +6,7 @@ struct RoleAccessView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var decisions: [AccessDecision] = []
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     private var groups: [(name: String, permissions: [Permission])] {
         guard let session else { return [] }

@@ -42,6 +42,14 @@ protocol DataGateway: Sendable {
     func moreOverview(session: TenantSession) async throws -> MoreOverview
     func recentAccessDecisions(session: TenantSession) async throws -> [AccessDecision]
 
+    /// The company's field workers, for the roster screen.
+    ///
+    /// Requires `usersRead`. A default implementation derives the list from the
+    /// assignable-worker options, so an implementation that cannot read user
+    /// records still answers something truthful; gateways that can read them
+    /// override it to include invited and suspended people too.
+    func fieldWorkerRoster(session: TenantSession) async throws -> FieldWorkerRoster
+
     // Jobs
     func jobs(session: TenantSession, query: JobQuery) async throws -> [JobRow]
     func jobFormOptions(session: TenantSession) async throws -> JobFormOptions

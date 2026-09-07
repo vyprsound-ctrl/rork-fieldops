@@ -11,7 +11,7 @@ struct JobEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = JobEditorViewModel()
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     /// Values carried across when a job is raised from a quote.

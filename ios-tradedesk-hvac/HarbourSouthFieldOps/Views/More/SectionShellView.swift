@@ -7,7 +7,7 @@ struct SectionShellView: View {
 
     @Environment(AppEnvironment.self) private var env
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     private var isPermitted: Bool {
@@ -72,6 +72,7 @@ struct SectionShellView: View {
         case .invoices: return "Invoicing with line items, balances and accounts receivable uses the invoice entities already defined."
         case .payments: return "Payments received are recorded by hand against an invoice. TradeDesk never processes the customer's card — the contractor's own payment provider does, through their own payment link."
         case .reports: return "Operational and financial reporting, split by the same permissions that gate the rest of the app."
+        case .notifications: return "Job alerts for this device, and the alerts already sent to you."
         case .settings: return "Company profile, users, roles, trade configuration and subscription management."
         case .paymentLink: return "The company's own online payment destination, shown to customers on their invoice."
         case .dataAccess: return "Permission inspector."

@@ -13,7 +13,7 @@ struct QuoteDetailView: View {
     @State private var invoiceError: String?
     @State private var raisedInvoiceID: String?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

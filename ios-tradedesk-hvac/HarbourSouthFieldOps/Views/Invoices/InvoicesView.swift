@@ -5,7 +5,7 @@ struct InvoicesView: View {
     @State private var viewModel = InvoicesViewModel()
     @State private var isCreating: Bool = false
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
 
     var body: some View {
         ZStack {

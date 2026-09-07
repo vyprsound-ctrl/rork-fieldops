@@ -13,7 +13,7 @@ struct CalendarView: View {
     @State private var reschedulingJob: JobRow?
     @State private var assigningJob: JobRow?
 
-    private var session: TenantSession? { env.session }
+    private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
 
     var body: some View {
