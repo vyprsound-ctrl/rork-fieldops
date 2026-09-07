@@ -96,9 +96,29 @@ final class JobDetailViewModel {
         }
     }
 
-    func addPhoto(gateway: DataGateway, session: TenantSession, jobID: String, kind: JobPhotoKind, caption: String?) async {
-        await perform(gateway: gateway, session: session, jobID: jobID, confirmation: "Photo record added") {
-            try await gateway.addJobPhoto(session: session, jobID: jobID, kind: kind, caption: caption)
+    /// Attaches real images to the job. Each upload reports its own outcome, so
+    /// a partial failure is stated rather than hidden behind a refresh.
+    func attachPhotos(
+        gateway: DataGateway,
+        session: TenantSession,
+        jobID: String,
+        uploads: [JobMediaUpload]
+    ) async {
+        guard !uploads.isEmpty else { return }
+        let confirmation = uploads.count == 1 ? "Photo attached" : "\(uploads.count) photos attached"
+        await perform(gateway: gateway, session: session, jobID: jobID, confirmation: confirmation) {
+            var failures = 0
+            for upload in uploads {
+                let result = try await gateway.attachJobMedia(session: session, jobID: jobID, upload: upload)
+                if !result.stored { failures += 1 }
+            }
+            if failures > 0 {
+                throw DataError.unexpected(
+                    failures == 1
+                        ? "One photo couldn't be attached. Try it again."
+                        : "\(failures) photos couldn't be attached. Try them again."
+                )
+            }
         }
     }
 

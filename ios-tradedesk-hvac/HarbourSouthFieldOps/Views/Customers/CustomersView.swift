@@ -4,8 +4,10 @@ struct CustomersView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = CustomersViewModel()
     @State private var path = NavigationPath()
+    @State private var isAddingCustomer: Bool = false
 
     private var session: TenantSession? { env.activeSession }
+    private var canManage: Bool { session?.can(.customersManage) ?? false }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -18,6 +20,24 @@ struct CustomersView: View {
             .searchable(text: $viewModel.query, prompt: "Search customers")
             .navigationDestination(for: AppRoute.self) { route in
                 RouteDestinationView(route: route)
+            }
+            .toolbar {
+                if canManage {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isAddingCustomer = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add customer")
+                    }
+                }
+            }
+            .sheet(isPresented: $isAddingCustomer) {
+                CustomerEditorView { customerID in
+                    Task { await reload(showLoading: false) }
+                    path.append(AppRoute.customer(customerID))
+                }
             }
         }
         .task(id: session?.userID) { await reload() }
@@ -38,8 +58,10 @@ struct CustomersView: View {
                         symbolName: "person.2",
                         title: viewModel.query.isEmpty ? "No customers yet" : "No matches",
                         message: viewModel.query.isEmpty
-                            ? "Customers you add will be listed here."
-                            : "Try a different name."
+                            ? "Add your first customer and their service address, then you can book work for them."
+                            : "Try a different name.",
+                        actionTitle: viewModel.query.isEmpty && canManage ? "Add customer" : nil,
+                        action: viewModel.query.isEmpty && canManage ? { isAddingCustomer = true } : nil
                     )
                 }
             } else {

@@ -9,6 +9,8 @@ struct FieldWorkerJobView: View {
     @State private var viewModel = FieldWorkerJobViewModel()
     @State private var isAddingNote: Bool = false
     @State private var isAddingPhoto: Bool = false
+    @State private var isCompleting: Bool = false
+    @State private var completionSummary: String?
     @State private var navigationHandoff: NavigationHandoff?
     @State private var travelEstimate: RouteEstimate?
 
@@ -30,9 +32,23 @@ struct FieldWorkerJobView: View {
             }
         }
         .sheet(isPresented: $isAddingPhoto) {
-            AddPhotoSheet { kind, caption in
+            AddPhotoSheet { uploads in
                 guard let session else { return }
-                Task { await viewModel.addPhoto(gateway: env.gateway, session: session, jobID: jobID, kind: kind, caption: caption) }
+                Task { await viewModel.attachPhotos(gateway: env.gateway, session: session, jobID: jobID, uploads: uploads) }
+            }
+        }
+        .sheet(isPresented: $isCompleting) {
+            if let job = viewModel.state.value {
+                JobCompletionView(
+                    jobID: jobID,
+                    jobNumber: job.number,
+                    customerName: job.customerName,
+                    destination: Coordinate(latitude: job.latitude, longitude: job.longitude)
+                ) { outcome in
+                    completionSummary = outcome.summary
+                    guard let session else { return }
+                    Task { await viewModel.reload(gateway: env.gateway, session: session, jobID: jobID) }
+                }
             }
         }
         .sheet(item: $navigationHandoff) { handoff in
@@ -94,6 +110,22 @@ struct FieldWorkerJobView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Theme.red.opacity(0.08))
                         .clipShape(.rect(cornerRadius: Theme.cardRadius))
+                }
+
+                if let completionSummary {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(Theme.green)
+                        Text(completionSummary)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.green.opacity(0.1))
+                    .clipShape(.rect(cornerRadius: Theme.cardRadius))
                 }
 
                 // Only appears when a step genuinely could not record a
@@ -271,6 +303,13 @@ struct FieldWorkerJobView: View {
         VStack(spacing: 8) {
             ForEach(job.transitions) { transition in
                 Button {
+                    // Completing is the one step that carries a record with it,
+                    // so it opens the completion sheet instead of writing a
+                    // bare status change.
+                    guard transition.toStatus != .completed else {
+                        isCompleting = true
+                        return
+                    }
                     guard let session else { return }
                     Task {
                         await viewModel.advance(

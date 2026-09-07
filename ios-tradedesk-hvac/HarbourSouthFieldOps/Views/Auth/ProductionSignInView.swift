@@ -10,13 +10,15 @@ struct ProductionSignInView: View {
 
     private enum Flow: String, CaseIterable, Identifiable {
         case signIn
+        case join
         case createCompany
 
         var id: String { rawValue }
         var title: String {
             switch self {
             case .signIn: return "Sign in"
-            case .createCompany: return "Create company"
+            case .join: return "Join"
+            case .createCompany: return "New company"
             }
         }
     }
@@ -29,6 +31,8 @@ struct ProductionSignInView: View {
     @State private var trade: Trade = .hvac
     @State private var countryCode: String = "US"
     @State private var currencyCode: String = "USD"
+    @State private var joinName: String = ""
+    @State private var joinCode: String = ""
 
     private var canSubmit: Bool {
         guard !env.authPhase.isBusy else { return false }
@@ -36,6 +40,10 @@ struct ProductionSignInView: View {
         switch flow {
         case .signIn:
             return hasCredentials
+        case .join:
+            return hasCredentials
+                && !joinName.trimmingCharacters(in: .whitespaces).isEmpty
+                && joinCode.trimmingCharacters(in: .whitespaces).count >= 6
         case .createCompany:
             return hasCredentials
                 && !ownerName.trimmingCharacters(in: .whitespaces).isEmpty
@@ -60,6 +68,10 @@ struct ProductionSignInView: View {
 
                 if flow == .createCompany {
                     companyFields
+                }
+
+                if flow == .join {
+                    joinFields
                 }
 
                 submitButton
@@ -172,13 +184,42 @@ struct ProductionSignInView: View {
         }
     }
 
+    private var joinFields: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Join a company")
+                .sectionLabelStyle()
+
+            VStack(spacing: 0) {
+                TextField("Your name", text: $joinName)
+                    .textContentType(.name)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: Theme.minTap)
+
+                Divider().padding(.leading, 14)
+
+                TextField("Join code", text: $joinCode)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: Theme.minTap)
+            }
+            .cardSurface()
+
+            Text("Your office sends you this code. It decides which company you join and what you can do — this app cannot choose either.")
+                .font(.caption)
+                .foregroundStyle(Theme.meta)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var submitButton: some View {
         Button {
             Task { await submit() }
         } label: {
             HStack(spacing: 8) {
                 if env.authPhase.isBusy { ProgressView().tint(.white) }
-                Text(flow == .signIn ? "Sign in" : "Create company")
+                Text(submitTitle)
                     .font(.body.weight(.semibold))
             }
             .frame(maxWidth: .infinity)
@@ -189,6 +230,14 @@ struct ProductionSignInView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSubmit)
+    }
+
+    private var submitTitle: String {
+        switch flow {
+        case .signIn: return "Sign in"
+        case .join: return "Join company"
+        case .createCompany: return "Create company"
+        }
     }
 
     private var footnote: some View {
@@ -221,6 +270,15 @@ struct ProductionSignInView: View {
         switch flow {
         case .signIn:
             await env.signInToProduction(email: email, password: password)
+        case .join:
+            await env.joinCompany(
+                InvitationRedemption(
+                    email: email,
+                    password: password,
+                    name: joinName,
+                    token: joinCode
+                )
+            )
         case .createCompany:
             let registration = CompanyRegistration(
                 email: email,

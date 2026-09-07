@@ -40,10 +40,10 @@ struct JobDetailView: View {
             }
         }
         .sheet(isPresented: $isAddingPhoto) {
-            AddPhotoSheet { kind, caption in
+            AddPhotoSheet { uploads in
                 guard let session else { return }
                 Task {
-                    await viewModel.addPhoto(gateway: env.gateway, session: session, jobID: jobID, kind: kind, caption: caption)
+                    await viewModel.attachPhotos(gateway: env.gateway, session: session, jobID: jobID, uploads: uploads)
                 }
             }
         }

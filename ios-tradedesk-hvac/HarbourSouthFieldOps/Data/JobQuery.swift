@@ -103,12 +103,34 @@ nonisolated struct EquipmentOption: Identifiable, Hashable, Sendable {
     let name: String
 }
 
+/// One of a customer's service addresses, with whatever is installed there.
+nonisolated struct CustomerSiteOption: Identifiable, Hashable, Sendable {
+    let id: String
+    let line: String
+    let equipment: [EquipmentOption]
+}
+
 nonisolated struct CustomerOption: Identifiable, Hashable, Sendable {
     let id: String
     let name: String
+    /// The main site — the oldest address on the account.
     let addressID: String
     let addressLine: String
     let equipment: [EquipmentOption]
+    /// Every site this customer has. Defaults to empty so a gateway that only
+    /// serves the main site keeps working unchanged.
+    var sites: [CustomerSiteOption] = []
+
+    /// The sites to offer in a picker, always including the main one.
+    var selectableSites: [CustomerSiteOption] {
+        sites.isEmpty
+            ? [CustomerSiteOption(id: addressID, line: addressLine, equipment: equipment)]
+            : sites
+    }
+
+    func site(_ addressID: String) -> CustomerSiteOption? {
+        selectableSites.first { $0.id == addressID }
+    }
 }
 
 /// Reference data for the filter sheet and the job form, permission-gated: a
@@ -125,6 +147,7 @@ nonisolated struct JobFormOptions: Hashable, Sendable {
 /// takes it from the session so a caller can never write into another tenant.
 nonisolated struct NewJobInput: Hashable, Sendable {
     var customerID: String
+    /// The site the work happens at. One of the customer's own addresses.
     var addressID: String
     var equipmentID: String?
     var title: String

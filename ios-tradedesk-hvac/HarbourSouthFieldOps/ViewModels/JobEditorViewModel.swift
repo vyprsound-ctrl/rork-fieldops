@@ -9,7 +9,21 @@ final class JobEditorViewModel {
     var errorMessage: String?
     var createdJobID: String?
 
-    var customerID: String = ""
+    var customerID: String = "" {
+        didSet {
+            guard customerID != oldValue else { return }
+            // A site belongs to one customer, so changing the customer must not
+            // leave the previous customer's address selected.
+            addressID = selectedCustomer?.addressID ?? ""
+            equipmentID = nil
+        }
+    }
+    var addressID: String = "" {
+        didSet {
+            guard addressID != oldValue else { return }
+            equipmentID = nil
+        }
+    }
     var equipmentID: String?
     var title: String = ""
     var jobDescription: String = ""
@@ -24,8 +38,15 @@ final class JobEditorViewModel {
         options.customers.first { $0.id == customerID }
     }
 
+    var sites: [CustomerSiteOption] { selectedCustomer?.selectableSites ?? [] }
+
+    var selectedSite: CustomerSiteOption? { selectedCustomer?.site(addressID) }
+
+    var equipmentOptions: [EquipmentOption] { selectedSite?.equipment ?? [] }
+
     var canSave: Bool {
         !customerID.isEmpty
+            && !addressID.isEmpty
             && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && selectedCustomer != nil
     }
@@ -35,6 +56,11 @@ final class JobEditorViewModel {
         options = (try? await gateway.jobFormOptions(session: session)) ?? .empty
         if customerID.isEmpty, let first = options.customers.first {
             customerID = first.id
+        }
+        // The picker's own default has to match the model's, or the form opens
+        // showing one site and saves against another.
+        if addressID.isEmpty || selectedSite == nil {
+            addressID = selectedCustomer?.addressID ?? ""
         }
         isLoadingOptions = false
     }
@@ -47,7 +73,7 @@ final class JobEditorViewModel {
         let end = Calendar.current.date(byAdding: .minute, value: durationMinutes, to: scheduledStart)
         let input = NewJobInput(
             customerID: customer.id,
-            addressID: customer.addressID,
+            addressID: addressID.isEmpty ? customer.addressID : addressID,
             equipmentID: equipmentID,
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             jobDescription: jobDescription.trimmingCharacters(in: .whitespacesAndNewlines),

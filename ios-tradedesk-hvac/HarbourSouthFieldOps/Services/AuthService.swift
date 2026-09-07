@@ -51,6 +51,36 @@ nonisolated struct CompanyRegistration: Sendable {
     }
 }
 
+/// Everything the client supplies when joining a company that already exists.
+///
+/// Like `CompanyRegistration`, there is deliberately no company id and no role
+/// here. Both come off the invitation row inside the database, so an invited
+/// person cannot choose their own tenancy or promote themselves.
+nonisolated struct InvitationRedemption: Sendable {
+    let email: String
+    let password: String
+    let name: String
+    /// The code the office read out of the app and passed on.
+    let token: String
+
+    init(email: String, password: String, name: String, token: String) {
+        self.email = email
+        self.password = password
+        self.name = name
+        self.token = token
+    }
+}
+
+/// How joining an existing company ended.
+nonisolated enum JoinOutcome: Sendable {
+    /// Confirmation is disabled, or the account already existed and signed in:
+    /// the membership is live and this is the session.
+    case joined(TenantSession)
+    /// Confirmation is required first. The account exists; the invitation is
+    /// redeemed on the first authenticated session.
+    case confirmationSent(email: String)
+}
+
 /// How a sign-up ended.
 ///
 /// Email confirmation being enabled is a normal, successful outcome — not a
@@ -84,6 +114,8 @@ nonisolated enum AuthError: LocalizedError, Equatable {
     /// PKCE verifier is not held here.
     case confirmationLinkUnusable
     case notAvailableInDevelopment
+    /// The invitation code does not match a live, unexpired invitation.
+    case invitationUnusable
     case server(String)
 
     var errorDescription: String? {
@@ -114,6 +146,8 @@ nonisolated enum AuthError: LocalizedError, Equatable {
             return "We couldn't complete that link on this device. Sign in with your email and password — your company setup finishes automatically."
         case .notAvailableInDevelopment:
             return "That action needs the production backend. Switch to Production sign-in."
+        case .invitationUnusable:
+            return "That invitation code isn't valid any more. Ask your office for a new one."
         case .server(let message):
             return message
         }
@@ -147,6 +181,13 @@ protocol AuthService: Sendable {
     /// tenancy exactly as a normal sign-in would — including founding a company
     /// that is still pending from sign-up.
     func completeAuthCallback(url: URL) async throws -> TenantSession
+
+    /// Joins a company that already exists, using an invitation code.
+    ///
+    /// Production only. This is how everybody except the founder gets in: the
+    /// membership row is created by the database from the invitation, never by
+    /// this app.
+    func joinCompany(_ redemption: InvitationRedemption) async throws -> JoinOutcome
 }
 
 extension AuthService {
@@ -167,6 +208,10 @@ extension AuthService {
     }
 
     func completeAuthCallback(url: URL) async throws -> TenantSession {
+        throw AuthError.notAvailableInDevelopment
+    }
+
+    func joinCompany(_ redemption: InvitationRedemption) async throws -> JoinOutcome {
         throw AuthError.notAvailableInDevelopment
     }
 }

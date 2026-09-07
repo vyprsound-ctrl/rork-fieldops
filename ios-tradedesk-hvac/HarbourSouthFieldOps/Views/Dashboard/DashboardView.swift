@@ -32,8 +32,14 @@ struct DashboardView: View {
                     QuoteEditorView { quoteID in
                         path.append(AppRoute.quote(quoteID))
                     }
-                default:
-                    PhaseTwoSheet(title: action.title, permission: action.requiredPermission)
+                case .addCustomer:
+                    CustomerEditorView { customerID in
+                        path.append(AppRoute.customer(customerID))
+                    }
+                case .newInvoice:
+                    NewInvoiceLauncher { invoiceID in
+                        path.append(AppRoute.invoice(invoiceID))
+                    }
                 }
             }
         }

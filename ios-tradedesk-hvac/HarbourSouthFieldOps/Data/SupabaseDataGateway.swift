@@ -987,9 +987,11 @@ actor SupabaseDataGateway: DataGateway {
                 AddressRecord.self,
                 client.from("addresses").select(AddressRecord.columns)
             )
-            var addressByCustomer: [String: AddressRecord] = [:]
-            for row in addresses where addressByCustomer[row.customerID.uuidString] == nil {
-                addressByCustomer[row.customerID.uuidString] = row
+            // Every site, not just the first: a commercial customer with four
+            // buildings needs the job pointed at the right one.
+            var addressesByCustomer: [String: [AddressRecord]] = [:]
+            for row in addresses {
+                addressesByCustomer[row.customerID.uuidString, default: []].append(row)
             }
 
             var equipmentByAddress: [String: [EquipmentOption]] = [:]
@@ -1009,14 +1011,24 @@ actor SupabaseDataGateway: DataGateway {
             customerOptions = customers
                 .sorted { $0.name < $1.name }
                 .compactMap { customer in
-                    guard let address = addressByCustomer[customer.id.uuidString] else { return nil }
-                    let addressKey = address.id.uuidString
+                    let rows = addressesByCustomer[customer.id.uuidString] ?? []
+                    guard let main = rows.first else { return nil }
+                    let mainKey = main.id.uuidString
+                    let sites = rows.map { row in
+                        let key = row.id.uuidString
+                        return CustomerSiteOption(
+                            id: key,
+                            line: "\(row.line1), \(row.city) \(row.state) \(row.postalCode)",
+                            equipment: equipmentByAddress[key] ?? []
+                        )
+                    }
                     return CustomerOption(
                         id: customer.id.uuidString,
                         name: customer.name,
-                        addressID: addressKey,
-                        addressLine: "\(address.line1), \(address.city) \(address.state) \(address.postalCode)",
-                        equipment: equipmentByAddress[addressKey] ?? []
+                        addressID: mainKey,
+                        addressLine: "\(main.line1), \(main.city) \(main.state) \(main.postalCode)",
+                        equipment: equipmentByAddress[mainKey] ?? [],
+                        sites: sites
                     )
                 }
         }

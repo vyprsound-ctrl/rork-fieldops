@@ -30,8 +30,8 @@ struct JobEditorView: View {
                     ScrollView {
                         EmptyStateView(
                             symbolName: "person.2.slash",
-                            title: "No customers available",
-                            message: "Your role can't create jobs without customer records."
+                            title: "No customers yet",
+                            message: "A job needs a customer and a service address. Add your first customer from the Customers tab, then book the work."
                         )
                     }
                 } else {
@@ -71,17 +71,23 @@ struct JobEditorView: View {
                         Text(customer.name).tag(customer.id)
                     }
                 }
-                if let customer = viewModel.selectedCustomer {
-                    Text(customer.addressLine)
+                if viewModel.sites.count > 1 {
+                    Picker("Service address", selection: $viewModel.addressID) {
+                        ForEach(viewModel.sites) { site in
+                            Text(site.line).tag(site.id)
+                        }
+                    }
+                } else if let site = viewModel.selectedSite {
+                    Text(site.line)
                         .font(.footnote)
                         .foregroundStyle(Theme.secondary)
+                }
 
-                    if !customer.equipment.isEmpty {
-                        Picker(terms.Asset, selection: equipmentBinding) {
-                            Text("None").tag("")
-                            ForEach(customer.equipment) { unit in
-                                Text(unit.name).tag(unit.id)
-                            }
+                if !viewModel.equipmentOptions.isEmpty {
+                    Picker(terms.Asset, selection: equipmentBinding) {
+                        Text("None").tag("")
+                        ForEach(viewModel.equipmentOptions) { unit in
+                            Text(unit.name).tag(unit.id)
                         }
                     }
                 }

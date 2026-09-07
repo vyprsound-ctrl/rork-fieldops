@@ -135,6 +135,103 @@ struct SupabaseAuthService: AuthService {
         }
     }
 
+    // MARK: - Joining an existing company
+
+    /// Joins a company that already exists, using an invitation code.
+    ///
+    /// Three shapes of caller arrive here and all three end in the same place:
+    /// a brand new person, a person whose address is already registered, and a
+    /// person who has to confirm by email first. The membership row itself is
+    /// always created by `accept_invitation()` inside the database, from the
+    /// invitation's own company and role — this app never writes it and could
+    /// not choose either value if it tried.
+    func joinCompany(_ redemption: InvitationRedemption) async throws -> JoinOutcome {
+        let normalised = redemption.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let token = redemption.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw AuthError.invitationUnusable }
+
+        let setup = PendingInvitationSetup(token: token, name: redemption.name)
+
+        do {
+            let response = try await client.auth.signUp(
+                email: normalised,
+                password: redemption.password,
+                data: setup.signUpMetadata,
+                redirectTo: AuthCallback.url
+            )
+
+            guard response.session != nil else {
+                // Confirmation required. The code is parked on the identity and
+                // redeemed on the first authenticated session.
+                return .confirmationSent(email: normalised)
+            }
+            return .joined(try await redeem(setup, for: response.user.id))
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            // An address that already has an account is not a failure here: the
+            // person may have been invited after signing up, or be moving
+            // between companies. Authenticate them and redeem the code.
+            guard Self.isAlreadyRegistered(error) else { throw Self.translate(error) }
+            let response = try await client.auth.signIn(email: normalised, password: redemption.password)
+            return .joined(try await redeem(setup, for: response.user.id))
+        }
+    }
+
+    /// Redeems the invitation, then resolves the resulting membership.
+    private func redeem(_ setup: PendingInvitationSetup, for userID: UUID) async throws -> TenantSession {
+        do {
+            try await client.rpc("accept_invitation", params: ["p_token": setup.token]).execute()
+        } catch {
+            // Already a member of the company this invitation points at — the
+            // code was redeemed by an earlier attempt. Resolve rather than fail.
+            guard Self.isAlreadyProvisioned(error) else {
+                print("[auth] invitation could not be redeemed: \(error.localizedDescription)")
+                throw AuthError.invitationUnusable
+            }
+        }
+
+        await clearPendingInvitationFlag()
+        try await applyInvitedName(setup.name, for: userID)
+        return try await resolveSession(for: userID)
+    }
+
+    /// Puts the joiner's own name on their membership row.
+    ///
+    /// The invitation carries an email address and a role, not a name, so
+    /// without this every invited person would appear on the roster as whatever
+    /// the database defaulted them to. Deliberately cannot fail the join.
+    private func applyInvitedName(_ name: String, for userID: UUID) async throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try await client
+                .from("app_users")
+                .update(["name": trimmed])
+                .eq("id", value: userID)
+                .execute()
+        } catch {
+            print("[auth] joined, but the display name could not be set: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearPendingInvitationFlag() async {
+        do {
+            _ = try await client.auth.update(
+                user: UserAttributes(data: PendingInvitationSetup.clearedMetadata)
+            )
+        } catch {
+            print("[auth] joined, but the pending invitation flag could not be cleared: \(error.localizedDescription)")
+        }
+    }
+
+    private static func isAlreadyRegistered(_ error: Error) -> Bool {
+        let text = error.localizedDescription.lowercased()
+        return text.contains("already registered")
+            || text.contains("already been registered")
+            || text.contains("user already exists")
+    }
+
     // MARK: - Session lifecycle
 
     /// Restores a persisted session on launch. Returns `nil` when signed out.
@@ -240,15 +337,24 @@ struct SupabaseAuthService: AuthService {
         do {
             return try await resolveSession(for: userID)
         } catch AuthError.noMembership {
-            guard let setup = try await pendingSetup() else { throw AuthError.noMembership }
+            let metadata = try await identityMetadata()
+
+            // An invitation is checked first: somebody joining a company that
+            // already exists never has company details parked, and a person who
+            // has both is joining, not founding.
+            if let invitation = PendingInvitationSetup(metadata: metadata) {
+                return try await redeem(invitation, for: userID)
+            }
+
+            guard let setup = PendingCompanySetup(metadata: metadata) else { throw AuthError.noMembership }
             return try await provisionCompany(setup, for: userID)
         }
     }
 
-    /// Reads the parked company details off the authenticated identity.
-    private func pendingSetup() async throws -> PendingCompanySetup? {
+    /// Reads the parked sign-up details off the authenticated identity.
+    private func identityMetadata() async throws -> [String: AnyJSON] {
         let session = try await client.auth.session
-        return PendingCompanySetup(metadata: session.user.userMetadata)
+        return session.user.userMetadata
     }
 
     /// Founds the company through the RPC, then resolves the owner session.

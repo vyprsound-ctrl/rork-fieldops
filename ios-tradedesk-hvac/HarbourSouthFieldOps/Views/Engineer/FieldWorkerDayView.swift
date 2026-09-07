@@ -38,7 +38,17 @@ struct FieldWorkerDayView: View {
                 }
             }
             .sheet(isPresented: $isReportingDelay) {
-                PhaseTwoSheet(title: "Notify dispatch")
+                AddNoteSheet(showsVisibilityPicker: false) { body, _ in
+                    guard let session, let jobID = viewModel.state.value?.currentStopID else { return }
+                    Task {
+                        await viewModel.notifyDispatch(
+                            gateway: env.gateway,
+                            session: session,
+                            jobID: jobID,
+                            body: body
+                        )
+                    }
+                }
             }
             .sheet(item: $navigationHandoff) { handoff in
                 NavigationHandoffSheet(handoff: handoff, estimate: travelEstimate)
@@ -110,29 +120,48 @@ struct FieldWorkerDayView: View {
                     LocationPermissionNotice(state: refused, worker: env.terms.worker)
                 }
 
-                Button {
-                    isReportingDelay = true
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "clock")
+                if let confirmation = viewModel.lastConfirmation {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Theme.green)
+                        Text(confirmation)
                             .font(.footnote)
-                            .foregroundStyle(Theme.primary)
-                            .frame(width: 32, height: 32)
-                            .background(Theme.primaryTint)
-                            .clipShape(.circle)
-                        Text("Running late? Notify dispatch")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(Theme.primary)
+                            .foregroundStyle(Theme.ink)
                         Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.meta)
                     }
-                    .padding(.horizontal, 13)
-                    .frame(minHeight: Theme.minTap)
-                    .cardSurface()
+                    .padding(12)
+                    .background(Theme.green.opacity(0.1))
+                    .clipShape(.rect(cornerRadius: Theme.cardRadius))
                 }
-                .buttonStyle(PressableTileStyle())
+
+                // Writes a note the office reads on the job itself. Only
+                // offered while there is a live stop to attach it to — a
+                // message with no job on it helps nobody.
+                if snapshot.currentStopID != nil {
+                    Button {
+                        isReportingDelay = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "clock")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.primary)
+                                .frame(width: 32, height: 32)
+                                .background(Theme.primaryTint)
+                                .clipShape(.circle)
+                            Text("Running late? Tell the office")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(Theme.primary)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.meta)
+                        }
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: Theme.minTap)
+                        .cardSurface()
+                    }
+                    .buttonStyle(PressableTileStyle())
+                }
 
                 if env.isDevelopmentSession { SimulatedServicesBanner() }
             }

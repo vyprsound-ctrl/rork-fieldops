@@ -174,12 +174,7 @@ struct JobPhotosSection: View {
                 } else {
                     ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
                         HStack(spacing: 12) {
-                            Image(systemName: "photo")
-                                .font(.system(size: 16))
-                                .foregroundStyle(Theme.primary)
-                                .frame(width: 46, height: 46)
-                                .background(Theme.primaryTint)
-                                .clipShape(.rect(cornerRadius: 10))
+                            JobPhotoThumbnail(reference: photo.storageReference, size: 46)
 
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(photo.caption ?? photo.kindTitle)
@@ -193,7 +188,12 @@ struct JobPhotosSection: View {
                             }
 
                             Spacer(minLength: 0)
-                            SimulatedBadge(text: "No file")
+
+                            // Only a reference with nothing behind it is called
+                            // out. A real image simply shows.
+                            if !JobMediaReference.parse(photo.storageReference).hasImage {
+                                SimulatedBadge(text: "No file")
+                            }
                         }
                         .padding(14)
 
@@ -205,12 +205,6 @@ struct JobPhotosSection: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .cardSurface()
-
-            if !photos.isEmpty {
-                Text("Development build: photo records are real, the image files are not uploaded anywhere.")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.meta)
-            }
         }
     }
 }
@@ -279,53 +273,27 @@ struct AddNoteSheet: View {
     }
 }
 
+/// Attaches real photos to a job.
+///
+/// The image is captured or picked on the device, compressed here, and stored
+/// against the job. Nothing is attached without an image behind it.
 struct AddPhotoSheet: View {
-    let onSave: (JobPhotoKind, String?) -> Void
+    let onSave: ([JobMediaUpload]) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var kind: JobPhotoKind = .before
-    @State private var caption: String = ""
-
-    private let kinds: [JobPhotoKind] = [.before, .after, .part, .proof]
+    @State private var uploads: [JobMediaUpload] = []
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 10) {
-                    Image(systemName: "camera.fill")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.amber)
-                        .frame(width: 32, height: 32)
-                        .background(Theme.amber.opacity(0.12))
-                        .clipShape(.circle)
-                    Text("The camera isn't wired up yet. Saving attaches a photo record to the job with a simulated file reference.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    JobPhotoCollector(uploads: $uploads)
+                    Spacer(minLength: 0)
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.amber.opacity(0.08))
-                .clipShape(.rect(cornerRadius: Theme.cardRadius))
-
-                Picker("Type", selection: $kind) {
-                    ForEach(kinds, id: \.self) { kind in
-                        Text(kind.title).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                TextField("Caption (optional)", text: $caption)
-                    .textFieldStyle(.plain)
-                    .padding(14)
-                    .frame(minHeight: Theme.minTap)
-                    .cardSurface()
-
-                Spacer(minLength: 0)
+                .padding(Theme.margin)
             }
-            .padding(Theme.margin)
             .background(Theme.canvas)
-            .navigationTitle("Attach photo")
+            .navigationTitle(uploads.count > 1 ? "Attach photos" : "Attach photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -333,13 +301,13 @@ struct AddPhotoSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(kind, caption.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty)
+                        onSave(uploads)
                         dismiss()
                     }
+                    .disabled(uploads.isEmpty)
                 }
             }
         }
-        .presentationDetents([.medium])
     }
 }
 

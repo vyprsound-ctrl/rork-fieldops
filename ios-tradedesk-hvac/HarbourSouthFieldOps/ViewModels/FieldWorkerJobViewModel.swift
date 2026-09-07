@@ -49,10 +49,34 @@ final class FieldWorkerJobViewModel {
         }
     }
 
-    func addPhoto(gateway: DataGateway, session: TenantSession, jobID: String, kind: JobPhotoKind, caption: String?) async {
+    /// Attaches real images. Each one reports its own outcome, so "three of
+    /// four went up" is said out loud rather than hidden behind a refresh.
+    func attachPhotos(
+        gateway: DataGateway,
+        session: TenantSession,
+        jobID: String,
+        uploads: [JobMediaUpload]
+    ) async {
+        guard !uploads.isEmpty else { return }
         await perform(gateway: gateway, session: session, jobID: jobID) {
-            try await gateway.addJobPhoto(session: session, jobID: jobID, kind: kind, caption: caption)
+            var failures = 0
+            for upload in uploads {
+                let result = try await gateway.attachJobMedia(session: session, jobID: jobID, upload: upload)
+                if !result.stored { failures += 1 }
+            }
+            if failures > 0 {
+                throw DataError.unexpected(
+                    failures == 1
+                        ? "One photo couldn't be attached. Try it again."
+                        : "\(failures) photos couldn't be attached. Try them again."
+                )
+            }
         }
+    }
+
+    /// Refreshes after the completion sheet has done its own writing.
+    func reload(gateway: DataGateway, session: TenantSession, jobID: String) async {
+        await load(gateway: gateway, session: session, jobID: jobID, showLoading: false)
     }
 
     private func perform(

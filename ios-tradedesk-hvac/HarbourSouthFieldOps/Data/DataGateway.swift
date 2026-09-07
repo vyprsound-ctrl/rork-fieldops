@@ -50,6 +50,72 @@ protocol DataGateway: Sendable {
     /// override it to include invited and suspended people too.
     func fieldWorkerRoster(session: TenantSession) async throws -> FieldWorkerRoster
 
+    // MARK: Customers, sites and assets
+    //
+    // These are protocol *requirements* with default implementations in
+    // `CrmWorkflow.swift`, not extension-only members. The difference matters:
+    // the app holds a `DataGateway` existential, and only a requirement
+    // dispatches dynamically to the Supabase implementation. An extension-only
+    // member would silently call the default on every caller.
+
+    /// The full customer record: contacts, sites, assets, jobs and documents,
+    /// each narrowed to what the caller's role may read.
+    func customerProfile(session: TenantSession, customerID: String) async throws -> CustomerProfile
+
+    /// Creates a customer with their first service address and main contact.
+    /// Requires `customersManage`. Returns the new customer's id.
+    func createCustomer(session: TenantSession, draft: CustomerDraft) async throws -> String
+
+    func updateCustomer(session: TenantSession, customerID: String, draft: CustomerDraft) async throws
+
+    /// Removes a customer that has no job, quote or invoice history. A customer
+    /// with history is never removed.
+    func deleteCustomer(session: TenantSession, customerID: String) async throws
+
+    /// Adds or edits one service address. Returns its id.
+    func saveCustomerAddress(session: TenantSession, customerID: String, draft: AddressDraft) async throws -> String
+
+    /// Adds or edits one contact. Promoting a contact to main demotes the
+    /// previous one in the same call.
+    func saveCustomerContact(session: TenantSession, customerID: String, draft: ContactDraft) async throws -> String
+
+    /// Registers or edits a serviceable asset at one of the customer's sites.
+    /// Requires `equipmentManage`.
+    func saveEquipment(session: TenantSession, customerID: String, draft: EquipmentDraft) async throws -> String
+
+    // MARK: Team
+
+    /// Everybody in the company, plus outstanding invitations. Requires
+    /// `usersRead`; invitations additionally require `usersManage`.
+    func teamRoster(session: TenantSession) async throws -> TeamRoster
+
+    /// Issues an invitation and returns its one-time join code. The company and
+    /// the role are stamped onto the invitation inside the database.
+    func inviteTeamMember(session: TenantSession, draft: TeamInviteDraft) async throws -> TeamInvite
+
+    func revokeInvitation(session: TenantSession, invitationID: String) async throws
+    func updateTeamMemberStatus(session: TenantSession, userID: String, status: UserStatus) async throws
+    func updateTeamMemberRole(session: TenantSession, userID: String, role: Role) async throws
+    func updateTeamMemberDetails(session: TenantSession, userID: String, name: String, phone: String) async throws
+
+    // MARK: Job completion and media
+
+    /// Records the completion — work performed, parts, labour, signature,
+    /// photos, asset history — and only then moves the job to completed.
+    func completeJob(
+        session: TenantSession,
+        jobID: String,
+        draft: JobCompletionDraft,
+        locationFix: LocationFix?
+    ) async throws -> JobCompletionOutcome
+
+    /// Stores one image against a job and writes its photo record.
+    func attachJobMedia(session: TenantSession, jobID: String, upload: JobMediaUpload) async throws -> JobMediaResult
+
+    /// A URL for an uploaded image, or `nil` when the image is held with the
+    /// record itself or was never captured.
+    func jobMediaURL(session: TenantSession, reference: String) async throws -> URL?
+
     // Jobs
     func jobs(session: TenantSession, query: JobQuery) async throws -> [JobRow]
     func jobFormOptions(session: TenantSession) async throws -> JobFormOptions

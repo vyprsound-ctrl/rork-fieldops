@@ -276,6 +276,37 @@ final class AppEnvironment {
         }
     }
 
+    /// Joins a company that already exists, using an invitation code.
+    ///
+    /// The counterpart to `signUpToProduction`: one founds a company, the other
+    /// joins one. Neither chooses a company id or a role — both come from the
+    /// database.
+    func joinCompany(_ redemption: InvitationRedemption) async {
+        guard let productionAuth else {
+            authPhase = .failed(AuthError.notConfigured.localizedDescription)
+            return
+        }
+        authPhase = .working
+        passwordResetNotice = nil
+        signUpNotice = nil
+        do {
+            switch try await productionAuth.joinCompany(redemption) {
+            case .joined(let session):
+                productionSession = session
+                authPhase = .signedIn
+
+            case .confirmationSent(let address):
+                productionSession = nil
+                authPhase = .signedOut
+                signUpNotice = "Check your email. We've sent a confirmation link to \(address). "
+                    + "Confirm it, then sign in here — you'll join the company automatically."
+            }
+        } catch {
+            productionSession = nil
+            authPhase = .failed(Self.message(for: error))
+        }
+    }
+
     func signOutOfProduction() async {
         guard let productionAuth else { return }
 
