@@ -1196,7 +1196,18 @@ begin
     raise exception 'No "%" document sequence for company %', p_kind, p_company;
   end if;
 
-  return v_prefix || lpad(v_value::text, greatest(coalesce(v_pad, 4), 1), '0');
+  -- Formatting mirrors the app's own DocumentSequence.format(_:) exactly:
+  --   pad_width > 0  -> zero-pad to that width
+  --   pad_width = 0  -> no padding at all (the model's default)
+  -- lpad() TRUNCATES when the target width is shorter than the string, so a
+  -- pad_width of 0 or 3 would silently turn 1050 into '' or '105'. Widening to
+  -- length(v_value) when the number has outgrown the pad width makes that
+  -- impossible: a number is never shortened to fit its own padding.
+  return v_prefix || case
+    when coalesce(v_pad, 0) > 0
+      then lpad(v_value::text, greatest(v_pad, length(v_value::text)), '0')
+    else v_value::text
+  end;
 end $$;
 
 -- Generates the jobs that are due, for one company or for all of them.
@@ -1517,9 +1528,12 @@ commit;
 --    RECURRING JOBS. next_document_number_for_company() allocates from the same
 --    document_sequences row as Phase 1's next_document_number(), but this file
 --    was written without being able to read Phase 1's body, so its formatting is
---    an assumption: prefix || lpad(next_value, pad_width, '0'), with any
---    separator living inside `prefix`, and next_value meaning "the number to use
---    next". Confirm with:
+--    an assumption: prefix || (pad_width > 0 ? zero-padded : plain) next_value,
+--    with any separator living inside `prefix`, and next_value meaning "the
+--    number to use next". That shape is corroborated by the app's own
+--    DocumentSequence.format(_:) (Models/DocumentNumbering.swift) and by the
+--    MockDataStore fixtures, but NOT by Phase 1's SQL, which was never read.
+--    Confirm with:
 --
 --      select pg_get_functiondef(p.oid)
 --      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
