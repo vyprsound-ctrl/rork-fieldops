@@ -437,6 +437,7 @@ as $$
 declare
   v_company uuid := coalesce(p_company, public.current_company_id());
   v_q       record;
+  v_updated integer;
 begin
   if v_company is null then
     raise exception 'No company in context';
@@ -459,6 +460,25 @@ begin
       seats_synced_at       = now(),
       updated_at            = now()
   where s.company_id = v_company;
+
+  -- An UPDATE that matches nothing is not an error in SQL, so without this the
+  -- function returned a freshly computed seat count and price that were stored
+  -- NOWHERE, and the Stripe webhook would read that as a successful sync. The
+  -- company would then be billed against whatever the subscription row last
+  -- said, with no signal that the roster had moved.
+  --
+  -- The row is NOT created here. company_subscriptions is one row per company
+  -- (company_id is unique, per the one-to-one foreign key to companies) and it
+  -- is Phase 1 that owns creating it; inventing one would fabricate a billing
+  -- relationship, complete with a default 19.99 price, for a company that may
+  -- never have subscribed. Failing is the honest outcome, and the only caller
+  -- is the Stripe webhook under the service role.
+  get diagnostics v_updated = row_count;
+
+  if v_updated = 0 then
+    raise exception 'No subscription row for company %; seats were not synced', v_company
+      using errcode = 'no_data_found';
+  end if;
 
   active_paid_users   := v_q.active_paid_users;
   tier_id             := v_q.tier_id;
@@ -1066,13 +1086,23 @@ alter table public.companies
 -- "Due on completion" is a rule, not a number of days: the due date is the day
 -- the work finished, not a horizon from the invoice date. Encoding it as 0 days
 -- only works because the caller passes the completion date as the reference.
+-- STABLE, not IMMUTABLE. IMMUTABLE is a promise that the result depends on
+-- nothing but the arguments, and this function's result is whatever
+-- payment_terms_days() returns. That function belongs to Phase 1 and its body
+-- is not in this repository, so the promise cannot be made: if it reads a table
+-- (a company default, a terms lookup) the result depends on database state.
+-- PostgreSQL does not verify the claim — it trusts it, and constant-folds
+-- IMMUTABLE calls into cached plans and index expressions, which is how a due
+-- date silently freezes at a stale value. STABLE is accurate either way: an
+-- immutable dependency trivially satisfies it, and a table-reading one is
+-- exactly what it describes. Nothing about the calculation changes.
 create or replace function public.resolve_due_date(
   p_label     text,
   p_reference date default current_date
 )
 returns date
 language sql
-immutable
+stable
 set search_path = public
 as $$
   select case
@@ -1293,7 +1323,17 @@ begin
         (r.next_due_date::timestamp at time zone coalesce(r.time_zone_identifier, 'UTC')) + interval '11 hours',
         r.id, r.next_due_date
       )
-      on conflict (service_agreement_id, generated_for_date) do nothing
+      -- The WHERE repeats jobs_recurring_period_idx's predicate verbatim, and is
+      -- NOT optional. That index is PARTIAL, and PostgreSQL will only infer a
+      -- partial index as the ON CONFLICT arbiter when the statement restates
+      -- its predicate. Without it every insert here raises 42P10, 'there is no
+      -- unique or exclusion constraint matching the ON CONFLICT specification'
+      -- — which the handler below would have turned into a 'failed:' row, so
+      -- recurring generation would have reported itself as running while never
+      -- creating a single job.
+      on conflict (service_agreement_id, generated_for_date)
+        where service_agreement_id is not null and generated_for_date is not null
+      do nothing
       returning id into v_job;
     exception when others then
       service_agreement_id := r.id; job_id := null;
