@@ -714,20 +714,33 @@ $$;
 -- 6d. Race-free consumption for a customer message.
 --
 -- THE RULE THIS ENFORCES: a company with one credit and two simultaneous send
--- requests sends exactly one message. The advisory lock is taken on the company
--- id and held to the end of the transaction, so the balance read and the ledger
--- insert cannot interleave with another consumer. A caller that loses the race
--- sees the post-lock balance, not the stale one.
+-- requests sends exactly one message — whichever paths those two requests take.
+--
+-- THE ONE SERIALISATION POINT. Every function that reads or changes a company's
+-- SMS credit balance takes the SAME lock, a row lock on that company's row in
+-- public.companies:
+--
+--     perform 1 from public.companies where id = v_company for update;
+--
+-- That is: Phase 1's queue_invoice_notification (which already locks this row),
+-- and consume_sms_credit / refund_sms_credit / credit_sms_purchase below.
+--
+-- An earlier draft of this file used pg_advisory_xact_lock() here instead.
+-- Advisory locks and row locks live in different lock spaces and do not block
+-- each other at all, so a manual customer SMS could run concurrently with an
+-- invoice SMS, both read a balance of 1, and both spend it — each writing
+-- balance_after = 0, so even the ledger's balance_after >= 0 CHECK would not
+-- catch it. The advisory mechanism has been removed rather than kept alongside
+-- the row lock; two locking systems that ignore each other are worse than one.
+--
+-- The lock is held to the end of the transaction, so the balance read and the
+-- ledger insert cannot interleave with another consumer. Every balance read and
+-- every ledger write below therefore happens AFTER the lock is acquired, and a
+-- caller that loses the race sees the post-lock balance, not the stale one.
+-- Different companies lock different rows and never block each other.
 --
 -- Returns the outcome rather than raising, so the Edge Function can report
 -- "insufficient credits" as a clean business answer instead of a 500.
---
--- NOTE FOR REVIEW: Phase 1's queue_invoice_notification also debits this
--- ledger. Its body could not be inspected from this environment (no database
--- credentials), so whether it takes the same advisory lock is unverified. If it
--- does not, a manual SMS racing an invoice notification remains theoretically
--- possible. Confirm against the live function body and, if needed, add the same
--- pg_advisory_xact_lock line to it.
 create or replace function public.consume_sms_credit(
   p_notification uuid,
   p_credits      integer default null,
@@ -758,9 +771,19 @@ begin
     return next; return;
   end if;
 
-  -- Serialise every consumer of THIS company's balance. Different companies
-  -- take different locks and never block each other.
-  perform pg_advisory_xact_lock(hashtextextended(v_company::text, 0));
+  -- Serialise every consumer of THIS company's balance, including Phase 1's
+  -- queue_invoice_notification, which locks this same row. Nothing below this
+  -- line reads or writes the balance until the lock is held.
+  perform 1
+  from public.companies
+  where id = v_company
+  for update;
+
+  if not found then
+    -- No row means no lock was taken, and an unserialised debit is precisely
+    -- how one credit gets spent twice. Refuse instead of proceeding unlocked.
+    raise exception 'Company % not found; refusing to spend SMS credit unserialised', v_company;
+  end if;
 
   select coalesce(p_credits,
                   (select (value #>> '{}')::integer from public.platform_settings
@@ -831,8 +854,9 @@ declare
   v_refunded integer;
   v_balance  integer;
 begin
-  select company_id, credits_charged, credits_refunded
-    into v_company, v_charged, v_refunded
+  -- First read is only to learn which company row to lock. Nothing is decided
+  -- on it.
+  select company_id into v_company
   from public.notifications where id = p_notification;
 
   if v_company is null then
@@ -840,7 +864,24 @@ begin
     return next; return;
   end if;
 
-  perform pg_advisory_xact_lock(hashtextextended(v_company::text, 0));
+  -- The single serialisation point (section 6d): the same row that
+  -- queue_invoice_notification and consume_sms_credit lock.
+  perform 1
+  from public.companies
+  where id = v_company
+  for update;
+
+  if not found then
+    raise exception 'Company % not found; refusing to refund SMS credit unserialised', v_company;
+  end if;
+
+  -- Re-read the charge state AFTER the lock. Read committed gives this
+  -- statement a fresh snapshot, so a refund that committed while we were
+  -- waiting is visible here — which is what makes the idempotency check below
+  -- hold under two simultaneous status callbacks for the same message.
+  select credits_charged, credits_refunded
+    into v_charged, v_refunded
+  from public.notifications where id = p_notification;
 
   if coalesce(v_charged, 0) <= 0 or coalesce(v_refunded, 0) > 0 then
     outcome := 'nothingToRefund'; credits_refunded := 0;
@@ -878,23 +919,41 @@ declare
   v_done    timestamptz;
   v_balance integer;
 begin
-  select company_id, credits, credited_at
-    into v_company, v_credits, v_done
-  from public.sms_credit_purchases where id = p_purchase
-  for update;
+  -- Unlocked read, only to learn which company row to lock.
+  select company_id into v_company
+  from public.sms_credit_purchases where id = p_purchase;
 
   if v_company is null then
     outcome := 'unknownPurchase'; credits_added := 0; balance_after := null;
     return next; return;
   end if;
 
+  -- The single serialisation point (section 6d), taken BEFORE the purchase row
+  -- lock. Every SMS-credit path acquires the companies row first and only then
+  -- any narrower row, so the lock order is the same everywhere and two of these
+  -- functions cannot deadlock against each other.
+  perform 1
+  from public.companies
+  where id = v_company
+  for update;
+
+  if not found then
+    raise exception 'Company % not found; refusing to credit SMS purchase unserialised', v_company;
+  end if;
+
+  -- Now claim the purchase itself. Re-read under FOR UPDATE after the company
+  -- lock: a replayed webhook that was waiting on either lock sees the
+  -- credited_at written by the winner and takes the no-op branch below.
+  select credits, credited_at
+    into v_credits, v_done
+  from public.sms_credit_purchases where id = p_purchase
+  for update;
+
   if v_done is not null then
     outcome := 'alreadyCredited'; credits_added := 0;
     balance_after := public.sms_credit_balance(v_company);
     return next; return;
   end if;
-
-  perform pg_advisory_xact_lock(hashtextextended(v_company::text, 0));
 
   v_balance := public.sms_credit_balance(v_company) + v_credits;
 
@@ -1160,6 +1219,16 @@ commit;
 --    - select * from public.subscription_quote(5);   -- expect 1999 + 4*1299  = 7195
 --    - select * from public.subscription_quote(15);  -- expect 1999 + 14*999  = 15985
 --    - select * from public.subscription_quote(35);  -- expect 1999 + 34*799  = 29165
---    - confirm queue_invoice_notification's body takes the same advisory lock
---      as consume_sms_credit (see the note in section 6d).
+--    - CONFIRMED, and this file was corrected accordingly: Phase 1's
+--      queue_invoice_notification serialises on `select 1 from companies
+--      where id = v_company for update`. Section 6d's functions now take that
+--      same row lock; the pg_advisory_xact_lock mechanism has been removed.
+--      Re-confirm after applying, with:
+--        select pg_get_functiondef(p.oid)
+--        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--        where n.nspname = 'public'
+--          and p.proname in ('queue_invoice_notification','consume_sms_credit',
+--                            'refund_sms_credit','credit_sms_purchase');
+--      Every one of the four must contain `for update` on public.companies and
+--      none may contain pg_advisory_xact_lock.
 -- =============================================================================
