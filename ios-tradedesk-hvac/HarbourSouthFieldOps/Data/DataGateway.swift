@@ -224,6 +224,47 @@ protocol DataGateway: Sendable {
         channels: Set<NotificationChannel>
     ) async throws -> InvoiceSendOutcome
 
+    // MARK: Phase 2 — the commercial layer
+    //
+    // Requirements, not extension-only members, for the same reason as the CRM
+    // surface above: the app holds a `DataGateway` existential, and only a
+    // requirement dispatches dynamically to the Supabase implementation.
+    // Defaults live in `CommerceWorkflow.swift`.
+
+    /// The company's SaaS subscription, with the price itemised from the live
+    /// head count rather than a stored total.
+    func subscriptionOverview(session: TenantSession) async throws -> SubscriptionOverview
+
+    /// The company's own Stripe account — where *their* customers' money lands.
+    /// Nothing here concerns the Harbour South subscription.
+    func connectAccountStatus(session: TenantSession) async throws -> ConnectAccountStatus
+
+    /// A one-time Stripe onboarding link. Requires `companyProfileManage`.
+    func beginConnectOnboarding(session: TenantSession) async throws -> URL
+
+    /// A login link to the merchant's own Stripe dashboard.
+    func connectDashboardLink(session: TenantSession) async throws -> URL
+
+    /// Balance, price list, ledger and recent messages.
+    func smsCreditOverview(session: TenantSession) async throws -> SmsCreditOverview
+
+    /// Sends one customer message. The credit is consumed atomically server-side
+    /// *before* the provider is called, and returned if the provider refuses.
+    func sendCustomerSms(session: TenantSession, draft: SmsSendDraft) async throws -> SmsSendOutcome
+
+    /// Starts a credit purchase and returns the checkout URL. Credits are only
+    /// granted once Stripe confirms the money arrived — never here.
+    func purchaseSmsCredits(session: TenantSession, bundleID: String?, credits: Int?) async throws -> URL
+
+    // Recurring service
+    func recurringServices(session: TenantSession) async throws -> RecurringServiceBoard
+    func saveRecurringService(session: TenantSession, draft: RecurringServiceDraft) async throws -> String
+    func deleteRecurringService(session: TenantSession, id: String) async throws
+
+    // Payment terms
+    func paymentTermsSettings(session: TenantSession) async throws -> PaymentTermsSettings
+    func updatePaymentTerms(session: TenantSession, option: PaymentTermOption, customDays: Int) async throws
+
     // MARK: Push notifications
 
     /// Registers this device against the signed-in user.

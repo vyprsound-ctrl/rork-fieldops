@@ -747,9 +747,90 @@ actor SupabaseDataGateway: DataGateway {
                 )
             )
         }
+        // Outstanding and overdue money. Overdue is derived from the due date
+        // and the balance rather than stored, so an invoice becomes overdue by
+        // the clock alone and a paid invoice can never read as overdue.
         if session.can(.invoicesRead) {
-            record("dashboard.unpaidTile", session, allowed: false, "Invoice money is not read in this phase")
+            let invoices = try await fetch(
+                InvoiceRecord.self,
+                client.from("invoices").select(InvoiceRecord.columns)
+            ).map { $0.model(companyID: session.companyID) }
+
+            let now = Date()
+            let code = try await currencyCode(session)
+
+            let outstanding = invoices.filter { $0.isReceivable(asOf: now) }
+            let overdue = invoices.filter { $0.isOverdue(asOf: now) }
+
+            tiles.append(
+                DashboardFinancialTile(
+                    id: "outstanding",
+                    caption: "Outstanding",
+                    amount: Formatters.currencyRounded(
+                        Money.rounded(outstanding.reduce(Decimal(0)) { $0 + $1.balance }),
+                        code: code
+                    ),
+                    symbolName: "doc.plaintext"
+                )
+            )
+
+            if !overdue.isEmpty {
+                tiles.append(
+                    DashboardFinancialTile(
+                        id: "overdue",
+                        caption: overdue.count == 1 ? "Overdue (1)" : "Overdue (\(overdue.count))",
+                        amount: Formatters.currencyRounded(
+                            Money.rounded(overdue.reduce(Decimal(0)) { $0 + $1.balance }),
+                            code: code
+                        ),
+                        symbolName: "exclamationmark.triangle"
+                    )
+                )
+            }
+
+            // Settled in the last 30 days — the number that tells an owner
+            // whether collection is actually working.
+            let since = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+            let collected = invoices.filter { ($0.paidAt ?? .distantPast) >= since }
+            if !collected.isEmpty {
+                tiles.append(
+                    DashboardFinancialTile(
+                        id: "collected",
+                        caption: "Paid (30 days)",
+                        amount: Formatters.currencyRounded(
+                            Money.rounded(collected.reduce(Decimal(0)) { $0 + $1.total }),
+                            code: code
+                        ),
+                        symbolName: "checkmark.circle"
+                    )
+                )
+            }
+
+            record("dashboard.invoiceTiles", session, allowed: true, "Invoice money read in company scope by RLS")
         }
+
+        // Message credit. Absent rather than zero for a role that may not read
+        // the ledger, so nobody is shown a balance that isn't theirs to see.
+        var smsBalance: Int?
+        if session.can(.smsLedgerRead) {
+            smsBalance = await {
+                do {
+                    let data = try await client.rpc("sms_credit_balance").execute().data
+                    return try? SupabaseCoding.decoder.decode(Int.self, from: data)
+                } catch {
+                    return nil
+                }
+            }()
+        }
+
+        // Work that is finished as far as the field is concerned. Invoiced and
+        // paid count too: the visit happened, it is just further down the
+        // money pipeline. Cancelled is neither done nor remaining.
+        let completedToday = todayJobs.filter {
+            $0.status == .completed || $0.status == .invoiced || $0.status == .paid
+        }.count
+        let assignedWorkers = Set(todayJobs.compactMap { reference.primaryWorkerByJob[$0.id] })
+        let unassigned = todayJobs.filter { reference.primaryWorkerByJob[$0.id] == nil && $0.status.isOpen }.count
 
         record(
             "dashboard",
@@ -762,7 +843,12 @@ actor SupabaseDataGateway: DataGateway {
             headline: headline,
             subline: subline,
             todayJobs: todayJobs.map { jobRow($0, session, reference) },
-            financialTiles: tiles
+            financialTiles: tiles,
+            completedToday: completedToday,
+            remainingToday: openToday.count,
+            workersOnToday: assignedWorkers.count,
+            unassignedToday: unassigned,
+            smsBalance: smsBalance
         )
     }
 

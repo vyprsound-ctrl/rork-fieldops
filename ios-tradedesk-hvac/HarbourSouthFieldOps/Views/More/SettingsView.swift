@@ -1,7 +1,11 @@
 import SwiftUI
 
-/// Settings shell. Company profile and subscription are read-only in this
-/// phase; editing arrives with the management flows.
+/// Settings shell.
+///
+/// Every row that belongs to the commercial layer now goes to a real screen.
+/// The two that remain placeholders — company profile and tax defaults' wider
+/// settings — are genuinely outside this phase, and they say so plainly rather
+/// than pretending to work.
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var pendingSection: String?
@@ -15,8 +19,18 @@ struct SettingsView: View {
                     title: "Company",
                     rows: [
                         SettingsRow(title: "Company profile", symbol: "building.2.fill", permission: .companyProfileManage),
-                        SettingsRow(title: "Users and roles", symbol: "person.2.badge.gearshape.fill", permission: .usersManage),
-                        SettingsRow(title: "Tax and defaults", symbol: "percent", permission: .companyProfileManage),
+                        SettingsRow(
+                            title: "Users and roles",
+                            symbol: "person.2.badge.gearshape.fill",
+                            permission: .usersManage,
+                            route: .fieldWorkers
+                        ),
+                        SettingsRow(
+                            title: "Payment terms",
+                            symbol: "calendar.badge.clock",
+                            permission: .companyProfileRead,
+                            route: .paymentTerms
+                        ),
                         SettingsRow(
                             title: "Online payment link",
                             symbol: "link",
@@ -29,8 +43,24 @@ struct SettingsView: View {
                 group(
                     title: "Platform subscription",
                     rows: [
-                        SettingsRow(title: "Plan and seats", symbol: "creditcard.fill", permission: .saasBillingManage),
-                        SettingsRow(title: "SMS credits", symbol: "message.fill", permission: .smsCreditsPurchase)
+                        SettingsRow(
+                            title: "Plan and seats",
+                            symbol: "creditcard.fill",
+                            permission: .saasBillingRead,
+                            route: .subscription
+                        ),
+                        SettingsRow(
+                            title: "SMS credits",
+                            symbol: "message.fill",
+                            permission: .smsLedgerRead,
+                            route: .smsCredits
+                        ),
+                        SettingsRow(
+                            title: "Recurring service",
+                            symbol: "arrow.triangle.2.circlepath",
+                            permission: .jobsReadAll,
+                            route: .recurring
+                        )
                     ]
                 )
 

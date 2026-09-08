@@ -82,6 +82,12 @@ final class AppEnvironment {
     private(set) var productionSession: TenantSession?
     private(set) var authPhase: AuthPhase = .signedOut
     private(set) var passwordResetNotice: String?
+    /// Set when a recovery link has authenticated somebody who has not yet
+    /// chosen a new password. Held here rather than published as the live
+    /// session, so a half-finished reset never reaches the app shell.
+    private(set) var pendingPasswordReset: TenantSession?
+    private(set) var isCompletingPasswordReset: Bool = false
+    var passwordResetError: String?
     /// Set when sign-up succeeded but the address still needs confirming. The
     /// company is founded automatically on the first sign-in after that.
     private(set) var signUpNotice: String?
@@ -362,9 +368,23 @@ final class AppEnvironment {
         passwordResetNotice = nil
         signUpNotice = nil
 
+        // A recovery link is not a sign-in. It authenticates the user only so
+        // they can choose a new password, so the app has to stop and ask for
+        // one instead of dropping them into the shell — which is exactly the
+        // dead end this flow used to have.
+        let isRecovery = AuthCallback.isPasswordRecovery(url)
+
         do {
-            productionSession = try await productionAuth.completeAuthCallback(url: url)
-            authPhase = .signedIn
+            let session = try await productionAuth.completeAuthCallback(url: url)
+            if isRecovery {
+                // Held back deliberately. The session exists, but nothing is
+                // published to the UI until a new password has been set.
+                pendingPasswordReset = session
+                authPhase = .signedOut
+            } else {
+                productionSession = session
+                authPhase = .signedIn
+            }
         } catch {
             if let existingSession {
                 // Restore exactly what was there before. An unusable link is
@@ -377,6 +397,51 @@ final class AppEnvironment {
                 authPhase = .failed(Self.message(for: error))
             }
         }
+    }
+
+    /// Finishes a password reset.
+    ///
+    /// Only reachable while `pendingPasswordReset` is set, so it cannot be used
+    /// to change the password of an ordinary signed-in session by accident.
+    /// On success the held session is published and the user is simply in —
+    /// no second sign-in, which is what makes this a complete flow rather than
+    /// a detour.
+    func completePasswordReset(newPassword: String) async -> Bool {
+        guard let productionAuth, let session = pendingPasswordReset else {
+            passwordResetError = AuthError.recoverySessionExpired.errorDescription
+            return false
+        }
+
+        isCompletingPasswordReset = true
+        passwordResetError = nil
+        defer { isCompletingPasswordReset = false }
+
+        do {
+            try await productionAuth.updatePassword(newPassword)
+            pendingPasswordReset = nil
+            productionSession = session
+            authPhase = .signedIn
+            passwordResetNotice = "Your password has been changed."
+            return true
+        } catch {
+            passwordResetError = Self.message(for: error)
+            // An expired recovery session cannot be retried, so send the user
+            // back to sign-in rather than leaving them on a form that will
+            // never succeed.
+            if case AuthError.recoverySessionExpired = error {
+                pendingPasswordReset = nil
+            }
+            return false
+        }
+    }
+
+    /// Abandons a reset without setting a password. The recovery session is
+    /// discarded rather than left usable in the background.
+    func cancelPasswordReset() async {
+        pendingPasswordReset = nil
+        passwordResetError = nil
+        try? await productionAuth?.signOut()
+        authPhase = .signedOut
     }
 
     func clearAuthError() {

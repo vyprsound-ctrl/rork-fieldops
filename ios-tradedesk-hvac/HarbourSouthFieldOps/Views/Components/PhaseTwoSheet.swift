@@ -1,7 +1,11 @@
 import SwiftUI
 
-/// Honest placeholder for capabilities that are intentionally out of scope in
-/// the foundation phase. It never pretends the feature exists.
+/// Honest placeholder for capabilities that are genuinely still out of scope.
+///
+/// The commercial layer no longer uses this: quotes, invoices, payments,
+/// subscription, seats, SMS credits, recurring service and payment terms all go
+/// to real screens. What is left behind this sheet is company-profile editing,
+/// which has not been built and says so rather than pretending.
 struct PhaseTwoSheet: View {
     let title: String
     var permission: Permission?
@@ -22,7 +26,7 @@ struct PhaseTwoSheet: View {
                         .font(.title2.weight(.bold))
                         .foregroundStyle(Theme.ink)
 
-                    Text("The foundation phase builds the architecture, permissions and navigation only. This flow is scheduled for the next phase and has not been implemented yet.")
+                    Text("This screen hasn't been built yet, so nothing here would save. Everything it would change can still be set up directly in your company record.")
                         .font(.subheadline)
                         .foregroundStyle(Theme.secondary)
 
@@ -50,6 +54,7 @@ struct PhaseTwoSheet: View {
             }
             .background(Theme.canvas)
             .navigationTitle("Not built yet")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

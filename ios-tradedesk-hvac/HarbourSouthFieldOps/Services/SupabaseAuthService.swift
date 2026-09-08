@@ -280,6 +280,40 @@ struct SupabaseAuthService: AuthService {
         }
     }
 
+    /// Sets a new password for whoever the recovery link just authenticated.
+    ///
+    /// A reset link signs the user in with a short-lived recovery session, and
+    /// this is the only thing that session is good for. Without this call the
+    /// flow reached the app and then stopped, which is a dead end: the user had
+    /// a valid session and no way to choose a password with it.
+    ///
+    /// The user is NOT identified from anything passed in. Supabase applies the
+    /// change to the session's own identity, so this cannot set somebody else's
+    /// password even if the caller wanted to.
+    func updatePassword(_ newPassword: String) async throws {
+        guard newPassword.count >= 8 else { throw AuthError.passwordTooWeak }
+
+        // A recovery session that has already lapsed produces a confusing
+        // provider error, so check for it first and say what actually happened.
+        guard (try? await client.auth.session) != nil else {
+            throw AuthError.recoverySessionExpired
+        }
+
+        do {
+            _ = try await client.auth.update(user: UserAttributes(password: newPassword))
+        } catch {
+            let text = error.localizedDescription.lowercased()
+            if text.contains("weak") || text.contains("at least") || text.contains("characters") {
+                throw AuthError.passwordTooWeak
+            }
+            if text.contains("expired") || text.contains("session") || text.contains("jwt") {
+                throw AuthError.recoverySessionExpired
+            }
+            print("[auth] password update failed: \(error.localizedDescription)")
+            throw AuthError.server("We couldn't change your password. Try the reset link again.")
+        }
+    }
+
     // MARK: - Email link callback
 
     /// Completes an email link that reopened the app.

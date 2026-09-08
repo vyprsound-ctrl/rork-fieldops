@@ -1,10 +1,14 @@
 import Foundation
 
-nonisolated enum ServiceFrequency: String, Codable, Sendable {
+nonisolated enum ServiceFrequency: String, CaseIterable, Codable, Hashable, Sendable {
     case monthly
     case quarterly
     case semiAnnual
     case annual
+    /// An interval the four fixed options cannot express — every 45 days, every
+    /// 18 months. The interval itself lives on the agreement, not here, because
+    /// two custom agreements rarely share one.
+    case custom
 
     var title: String {
         switch self {
@@ -12,6 +16,7 @@ nonisolated enum ServiceFrequency: String, Codable, Sendable {
         case .quarterly: return "Quarterly"
         case .semiAnnual: return "Twice a year"
         case .annual: return "Annual"
+        case .custom: return "Custom interval"
         }
     }
 }
@@ -26,6 +31,8 @@ nonisolated struct ServiceAgreement: Identifiable, Codable, Hashable, Sendable {
     let addressID: String
     var equipmentID: String?
     var frequency: ServiceFrequency
+    /// Only meaningful when `frequency` is `.custom`.
+    var intervalDays: Int?
     var nextDueDate: Date
     var templateJobKind: JobKind
     var templateTitle: String

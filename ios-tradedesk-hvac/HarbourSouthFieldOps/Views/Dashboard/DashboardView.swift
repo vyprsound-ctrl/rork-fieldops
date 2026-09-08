@@ -68,9 +68,11 @@ struct DashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header(snapshot)
+                todayProgress(snapshot)
                 if !availableActions.isEmpty { actionGrid }
                 schedule(snapshot)
                 if !snapshot.financialTiles.isEmpty { financials(snapshot) }
+                if let balance = snapshot.smsBalance { smsRow(balance) }
                 if env.isDevelopmentSession { SimulatedServicesBanner() }
             }
             .padding(.horizontal, Theme.margin)
@@ -94,6 +96,82 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
         .accessibilityElement(children: .combine)
+    }
+
+    /// Today at a glance: what is done, what is left, who is out and what has
+    /// nobody on it. The unassigned count is the one that needs acting on, so it
+    /// is the only one that ever changes colour.
+    @ViewBuilder
+    private func todayProgress(_ snapshot: DashboardSnapshot) -> some View {
+        if !snapshot.todayJobs.isEmpty {
+            HStack(spacing: 0) {
+                progressTile("Done", value: snapshot.completedToday, tone: Theme.green)
+                Divider().frame(height: 32)
+                progressTile("Left", value: snapshot.remainingToday, tone: Theme.ink)
+                Divider().frame(height: 32)
+                progressTile("\(env.terms.WorkerPlural) out", value: snapshot.workersOnToday, tone: Theme.ink)
+
+                if snapshot.unassignedToday > 0 {
+                    Divider().frame(height: 32)
+                    progressTile("Unassigned", value: snapshot.unassignedToday, tone: Theme.amber)
+                }
+            }
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .cardSurface()
+        }
+    }
+
+    private func progressTile(_ title: String, value: Int, tone: Color) -> some View {
+        VStack(spacing: 3) {
+            Text("\(value)")
+                .font(.title2.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(tone)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(Theme.meta)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Only shown to a role that may read the ledger, and only ever the real
+    /// balance — an empty account says so rather than showing a cheerful zero.
+    private func smsRow(_ balance: Int) -> some View {
+        NavigationLink(value: AppRoute.more(.smsCredits)) {
+            HStack(spacing: 12) {
+                Image(systemName: "message.fill")
+                    .font(.footnote)
+                    .foregroundStyle(balance > 0 ? Theme.primary : Theme.amber)
+                    .frame(width: 32, height: 32)
+                    .background(balance > 0 ? Theme.primaryTint : Theme.amber.opacity(0.12))
+                    .clipShape(.rect(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(balance == 1 ? "1 SMS credit" : "\(balance) SMS credits")
+                        .font(.subheadline.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.ink)
+                    if balance <= 0 {
+                        Text("Messages can't be sent until you top up")
+                            .font(.caption)
+                            .foregroundStyle(Theme.amber)
+                    }
+                }
+
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.meta)
+            }
+            .padding(.horizontal, 13)
+            .frame(minHeight: Theme.minTap)
+            .contentShape(.rect)
+            .cardSurface()
+        }
+        .buttonStyle(.plain)
     }
 
     private var actionGrid: some View {

@@ -31,6 +31,14 @@ struct RouteDestinationView: View {
                 TeamView()
             case .reports:
                 ReportsView()
+            case .recurring:
+                RecurringServiceView()
+            case .subscription:
+                SubscriptionView()
+            case .smsCredits:
+                SmsCreditsView()
+            case .paymentTerms:
+                PaymentTermsView()
             case .notifications:
                 NotificationsView()
             case .dataAccess:

@@ -70,8 +70,16 @@ struct SectionShellView: View {
         case .fieldWorkers: return "The \(terms.worker) roster and availability build on the assignment records already in the schema."
         case .quotes: return "Quote building with multiple line items, tax and SMS delivery sits on the quote and line-item entities already defined."
         case .invoices: return "Invoicing with line items, balances and accounts receivable uses the invoice entities already defined."
-        case .payments: return "Payments received are recorded by hand against an invoice. TradeDesk never processes the customer's card — the contractor's own payment provider does, through their own payment link."
+        case .payments: return "Outstanding, overdue and settled invoices, with the payments recorded against them."
         case .reports: return "Operational and financial reporting, split by the same permissions that gate the rest of the app."
+        // The four below are built and routed by `RouteDestinationView`, so this
+        // shell is unreachable for them. The cases exist because the switch is
+        // exhaustive, and they describe the real screen rather than claiming it
+        // is still to come.
+        case .recurring: return "Recurring maintenance agreements, and the visits the scheduler books from them."
+        case .subscription: return "The company's Harbour South plan, its active seats and how the monthly price is calculated."
+        case .smsCredits: return "Message credit balance, bundles and the full consumption ledger."
+        case .paymentTerms: return "The company's default payment terms, which any single invoice can still override."
         case .notifications: return "Job alerts for this device, and the alerts already sent to you."
         case .settings: return "Company profile, users, roles, trade configuration and subscription management."
         case .paymentLink: return "The company's own online payment destination, shown to customers on their invoice."

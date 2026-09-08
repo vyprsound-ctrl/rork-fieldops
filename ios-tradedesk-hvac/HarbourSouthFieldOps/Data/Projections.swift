@@ -177,6 +177,19 @@ nonisolated struct DashboardSnapshot: Hashable, Sendable {
     let todayJobs: [JobRow]
     /// Empty for roles without financial permissions.
     let financialTiles: [DashboardFinancialTile]
+
+    // Everything below defaults, so a gateway that does not yet supply these
+    // keeps compiling and simply shows nothing rather than showing zero.
+
+    /// Today's progress, so the headline is progress rather than a bare count.
+    var completedToday: Int = 0
+    var remainingToday: Int = 0
+    /// Distinct people with work booked today, and work with nobody on it.
+    var workersOnToday: Int = 0
+    var unassignedToday: Int = 0
+    /// Message credit remaining. `nil` for a role that may not read the ledger,
+    /// so the tile is absent rather than showing a misleading zero.
+    var smsBalance: Int?
 }
 
 // MARK: - Calendar

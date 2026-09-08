@@ -18,9 +18,18 @@ struct CustomerDetailView: View {
     @State private var editingContact: ContactDraft?
     @State private var editingEquipment: EquipmentDraft?
     @State private var isConfirmingDelete: Bool = false
+    @State private var isMessaging: Bool = false
 
     private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
+
+    /// Messaging needs the permission *and* somebody to message. Offering the
+    /// button to a customer with no phone number on file would be a dead end.
+    private var canMessage: Bool {
+        guard session?.can(.smsCreditsConsume) == true else { return false }
+        guard let profile = viewModel.state.value else { return false }
+        return profile.contacts.contains { ($0.phone?.tidied.isEmpty == false) }
+    }
 
     var body: some View {
         ZStack {
@@ -31,6 +40,20 @@ struct CustomerDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            // Messaging is its own action rather than a menu item: texting the
+            // customer is a frequent, one-tap job for the office, and burying it
+            // under an ellipsis makes it a chore.
+            if canMessage {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isMessaging = true
+                    } label: {
+                        Image(systemName: "message")
+                    }
+                    .accessibilityLabel("Send a message")
+                }
+            }
+
             if let profile = viewModel.state.value, profile.canManage {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -74,6 +97,12 @@ struct CustomerDetailView: View {
         .task(id: customerID) { await reload() }
         .onChange(of: viewModel.isDeleted) { _, deleted in
             if deleted { dismiss() }
+        }
+        .sheet(isPresented: $isMessaging) {
+            SendSmsSheet(
+                customerID: customerID,
+                customerName: viewModel.state.value?.name ?? "this customer"
+            )
         }
         .sheet(item: $editingCustomer) { profile in
             CustomerEditorView(existing: profile) { _ in

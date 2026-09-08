@@ -104,6 +104,11 @@ nonisolated enum AuthError: LocalizedError, Equatable {
     case sessionExpired
     case identityMismatch
     case passwordResetFailed
+    /// The chosen password does not meet the minimum the database enforces.
+    case passwordTooWeak
+    /// The recovery link's session has gone, so there is nothing to change the
+    /// password *of*. The reset has to be started again.
+    case recoverySessionExpired
     /// Signed in and confirmed, but the parked company details are missing or
     /// unreadable, so there is nothing to found a company from.
     case companyDetailsUnavailable
@@ -140,6 +145,10 @@ nonisolated enum AuthError: LocalizedError, Equatable {
             return "The account record didn't match the signed-in user. You've been signed out."
         case .passwordResetFailed:
             return "We couldn't send a reset email. Check the address and try again."
+        case .passwordTooWeak:
+            return "Choose a longer password — at least 8 characters."
+        case .recoverySessionExpired:
+            return "That reset link has expired. Request a new one and try again."
         case .confirmationLinkExpired:
             return "That link has expired or has already been used. Sign in below, or sign up again to get a new one."
         case .confirmationLinkUnusable:
@@ -188,6 +197,13 @@ protocol AuthService: Sendable {
     /// membership row is created by the database from the invitation, never by
     /// this app.
     func joinCompany(_ redemption: InvitationRedemption) async throws -> JoinOutcome
+
+    /// Sets a new password for the user a recovery link just authenticated.
+    ///
+    /// Production only. Tapping a reset link signs the user in with a
+    /// short-lived recovery session; this is what that session is *for*.
+    /// Without it the reset flow ends on a screen with nowhere to go.
+    func updatePassword(_ newPassword: String) async throws
 }
 
 extension AuthService {
@@ -212,6 +228,10 @@ extension AuthService {
     }
 
     func joinCompany(_ redemption: InvitationRedemption) async throws -> JoinOutcome {
+        throw AuthError.notAvailableInDevelopment
+    }
+
+    func updatePassword(_ newPassword: String) async throws {
         throw AuthError.notAvailableInDevelopment
     }
 }

@@ -12,7 +12,9 @@ struct MoreView: View {
     /// actually serve this role.
     private var visibleSections: [MoreSection] {
         guard let session else { return [] }
-        return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports, .notifications, .settings, .dataAccess, .integrations]
+        return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments,
+                .recurring, .reports, .smsCredits, .subscription, .notifications, .settings,
+                .dataAccess, .integrations]
             .filter { section in
                 // Job alerts need a real device registration against a real
                 // signed-in user, so the row is only offered where turning them
@@ -234,6 +236,8 @@ struct MoreView: View {
         case .quotes: return overview.quoteCount.map(String.init)
         case .invoices: return overview.outstandingLabel
         case .payments: return overview.paymentCount.map(String.init)
+        case .smsCredits: return overview.smsBalance.map(String.init)
+        case .subscription: return overview.subscriptionSummary
         default: return nil
         }
     }

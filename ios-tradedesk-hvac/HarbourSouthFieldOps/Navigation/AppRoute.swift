@@ -11,6 +11,10 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     case payments
     case reports
     case notifications
+    case recurring
+    case subscription
+    case smsCredits
+    case paymentTerms
     case settings
     case paymentLink
     case dataAccess
@@ -29,6 +33,10 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .invoices: return "Invoices"
         case .payments: return "Accounts receivable"
         case .reports: return "Reports"
+        case .recurring: return "Recurring service"
+        case .subscription: return "Subscription & seats"
+        case .smsCredits: return "SMS credits"
+        case .paymentTerms: return "Payment terms"
         case .notifications: return "Job alerts"
         case .settings: return "Settings"
         case .paymentLink: return "Online payment link"
@@ -55,6 +63,10 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .invoices: return "doc.plaintext.fill"
         case .payments: return "chart.line.uptrend.xyaxis"
         case .reports: return "chart.bar.fill"
+        case .recurring: return "arrow.triangle.2.circlepath"
+        case .subscription: return "creditcard.fill"
+        case .smsCredits: return "message.fill"
+        case .paymentTerms: return "calendar.badge.clock"
         case .notifications: return "bell.fill"
         case .settings: return "gearshape.fill"
         case .paymentLink: return "link"
@@ -77,6 +89,14 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         // reporting are separate grants held by different roles, so each block
         // is gated inside the screen instead.
         case .reports: return nil
+        // Recurring visits produce jobs, so seeing them is a jobs read.
+        case .recurring: return .jobsReadAll
+        case .subscription: return .saasBillingRead
+        // The SMS screen serves three different people: whoever reads the
+        // ledger, whoever sends, and whoever buys. The narrowest of those is
+        // the gate; the screen gates each block individually beneath it.
+        case .smsCredits: return .smsLedgerRead
+        case .paymentTerms: return .companyProfileRead
         // Anyone with a session may manage their own device's alerts.
         case .notifications: return nil
         case .settings: return .companyProfileRead
@@ -89,7 +109,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
 
     var isBuilt: Bool {
         switch self {
-        case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports, .notifications, .dataAccess, .integrations, .settings, .paymentLink, .developmentTests: return true
+        case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports,
+             .recurring, .subscription, .smsCredits, .paymentTerms, .notifications, .dataAccess,
+             .integrations, .settings, .paymentLink, .developmentTests: return true
         }
     }
 }

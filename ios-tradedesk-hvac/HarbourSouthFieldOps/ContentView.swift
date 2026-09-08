@@ -26,6 +26,12 @@ struct ContentView: View {
                     Theme.canvas.ignoresSafeArea()
                     LoadingStateView(message: "Restoring your session")
                 }
+            } else if env.pendingPasswordReset != nil {
+                // A recovery link authenticated somebody who has not chosen a
+                // password yet. This takes precedence over every other signed-in
+                // state: the session exists but is deliberately withheld until
+                // the reset finishes, so nobody lands in the shell mid-flow.
+                ChooseNewPasswordView()
             } else if let session = env.activeSession {
                 if session.role.usesFieldShell {
                     FieldWorkerDayView()
@@ -38,6 +44,7 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: env.session)
         .animation(.easeInOut(duration: 0.25), value: env.productionSession)
+        .animation(.easeInOut(duration: 0.25), value: env.pendingPasswordReset)
         .sheet(item: $deepLinkRoute) { route in
             NavigationStack {
                 RouteDestinationView(route: route)
