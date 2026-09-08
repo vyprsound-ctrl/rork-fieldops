@@ -287,12 +287,49 @@ create unique index if not exists company_subscriptions_stripe_customer_idx
   on public.company_subscriptions (stripe_customer_id)
   where stripe_customer_id is not null;
 
+-- WHICH COMPANY MAY THIS CALLER ASK ABOUT?
+--
+-- Several helpers below take an optional company id, so the service role can
+-- ask about a company it is not signed in as. Left unchecked, that same
+-- parameter is a tenancy hole: these functions are SECURITY DEFINER, RLS does
+-- not apply inside them, and any signed-in user could pass somebody else's
+-- company id and read across the boundary. Every such parameter goes through
+-- here first:
+--
+--   nothing passed     -> the caller's own company
+--   service role       -> whatever it asked for; it has no company of its own
+--   own company passed -> allowed
+--   another company    -> NULL, and every caller treats NULL as "no company",
+--                         returning zero/false rather than another tenant's data
+--
+-- push_caller_is_service_role() is Phase 1's existing service-role test. This
+-- does not introduce a second one.
+create or replace function public.commerce_company_scope(p_company uuid default null)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when p_company is null                        then public.current_company_id()
+    when public.push_caller_is_service_role()     then p_company
+    when p_company = public.current_company_id()  then p_company
+    else null
+  end;
+$$;
+
 -- How many people the company is actually paying for.
 --
 -- Only 'active' counts. An invited user has not accepted and a suspended user
 -- cannot sign in, so neither is a paid seat — that is the whole rule, in one
 -- place, server-side.
-create or replace function public.company_active_paid_users(p_company uuid default null)
+--
+-- Split in two: the _for variant is the implementation and takes the company as
+-- given, for use inside other SECURITY DEFINER functions that have already
+-- established which company they are working on. It is granted to nobody. The
+-- public entry point below is the one the app calls, and it is scoped.
+create or replace function public.company_active_paid_users_for(p_company uuid)
 returns integer
 language sql
 stable
@@ -301,8 +338,18 @@ set search_path = public
 as $$
   select count(*)::integer
   from public.app_users u
-  where u.company_id = coalesce(p_company, public.current_company_id())
+  where u.company_id = p_company
     and u.status = 'active';
+$$;
+
+create or replace function public.company_active_paid_users(p_company uuid default null)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.company_active_paid_users_for(public.commerce_company_scope(p_company));
 $$;
 
 -- The authoritative price calculation. The iOS app renders what this returns
@@ -407,7 +454,10 @@ begin
     raise exception 'No company in context';
   end if;
 
-  select * into v_q from public.subscription_quote(public.company_active_paid_users(v_company));
+  -- _for, not the scoped entry point: the company is already established from
+  -- the argument or the caller's own context, and this runs as the service role
+  -- from the webhook, which has no company of its own.
+  select * into v_q from public.subscription_quote(public.company_active_paid_users_for(v_company));
 
   update public.company_subscriptions s
   set seat_count            = v_q.active_paid_users,
@@ -478,7 +528,7 @@ as $$
   select coalesce(
     (select charges_enabled
      from public.stripe_connect_accounts
-     where company_id = coalesce(p_company, public.current_company_id())),
+     where company_id = public.commerce_company_scope(p_company)),
     false);
 $$;
 
@@ -503,6 +553,34 @@ alter table public.payments
   add column if not exists currency_code            text,
   add column if not exists failure_reason           text,
   add column if not exists paid_by_customer         boolean not null default false;
+
+-- WHO RECORDED A STRIPE PAYMENT? Nobody did.
+--
+-- Phase 1 made recorded_by_user_id NOT NULL because every payment it knew about
+-- was typed in by a person. A customer card payment has no person: the customer
+-- is not a Supabase user, and the office user who raised the invoice is not the
+-- one who took the money.
+--
+-- There is no system identity in app_users to point at instead. The roster is
+-- owner / admin / dispatcher / fieldWorker / accounts — all real people who sign
+-- in — and a synthetic "system" user would be a row that can be assigned jobs,
+-- counted as an active paid seat by company_active_paid_users(), and shown in
+-- pickers. That is a worse lie than a NULL.
+--
+-- So the column becomes nullable and NULL carries exactly one meaning: recorded
+-- by the system from a verified provider webhook, never by a user.
+-- paid_by_customer = true and a non-null stripe_payment_intent_id say the same
+-- thing from the other direction.
+--
+-- What this does NOT change:
+--   * manual recording still names the user — Phase 1's record_payment() passes
+--     the authenticated user, and the insert policy on payments still governs
+--     what any user may write;
+--   * tenancy — company_id is still NOT NULL and is still what every policy
+--     filters on, so no row becomes reachable to anyone new;
+--   * existing rows — dropping NOT NULL rewrites no data and invalidates no
+--     foreign key. The FK to app_users survives; NULL simply does not reference.
+alter table public.payments alter column recorded_by_user_id drop not null;
 
 -- The idempotency spine for customer payments. One Stripe PaymentIntent can
 -- produce at most one payment row, no matter how many times its webhook is
@@ -573,6 +651,9 @@ declare
   v_status   public.invoice_status;
 begin
   -- Claim the intent first. A duplicate loses here and changes nothing.
+  --
+  -- recorded_by_user_id is deliberately NULL: see the ALTER above. It is the
+  -- honest value, not a placeholder.
   begin
     insert into public.payments (
       company_id, invoice_id, amount, method, status,
@@ -699,7 +780,11 @@ create unique index if not exists notifications_provider_reference_idx
 
 -- 6c. The balance, derived from the ledger rather than stored as a mutable
 --     integer, so the history is the truth.
-create or replace function public.sms_credit_balance(p_company uuid default null)
+--     Split the same way as the seat count: _for is the implementation used by
+--     the locked credit paths below, which have already established the
+--     company; the public entry point is scoped so a caller cannot read another
+--     tenant's balance by passing its id.
+create or replace function public.sms_credit_balance_for(p_company uuid)
 returns integer
 language sql
 stable
@@ -708,7 +793,17 @@ set search_path = public
 as $$
   select coalesce(sum(amount), 0)::integer
   from public.sms_credit_ledger
-  where company_id = coalesce(p_company, public.current_company_id());
+  where company_id = p_company;
+$$;
+
+create or replace function public.sms_credit_balance(p_company uuid default null)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.sms_credit_balance_for(public.commerce_company_scope(p_company));
 $$;
 
 -- 6d. Race-free consumption for a customer message.
@@ -793,11 +888,11 @@ begin
 
   if v_cost <= 0 then
     outcome := 'invalidCost'; credits_charged := 0;
-    balance_after := public.sms_credit_balance(v_company);
+    balance_after := public.sms_credit_balance_for(v_company);
     return next; return;
   end if;
 
-  v_balance := public.sms_credit_balance(v_company);
+  v_balance := public.sms_credit_balance_for(v_company);
 
   if v_balance < v_cost then
     -- Not an error, and emphatically not a send. Balance untouched.
@@ -885,11 +980,11 @@ begin
 
   if coalesce(v_charged, 0) <= 0 or coalesce(v_refunded, 0) > 0 then
     outcome := 'nothingToRefund'; credits_refunded := 0;
-    balance_after := public.sms_credit_balance(v_company);
+    balance_after := public.sms_credit_balance_for(v_company);
     return next; return;
   end if;
 
-  v_balance := public.sms_credit_balance(v_company) + v_charged;
+  v_balance := public.sms_credit_balance_for(v_company) + v_charged;
 
   insert into public.sms_credit_ledger
     (company_id, transaction_type, amount, balance_after, notification_id, purchase_reference)
@@ -951,11 +1046,11 @@ begin
 
   if v_done is not null then
     outcome := 'alreadyCredited'; credits_added := 0;
-    balance_after := public.sms_credit_balance(v_company);
+    balance_after := public.sms_credit_balance_for(v_company);
     return next; return;
   end if;
 
-  v_balance := public.sms_credit_balance(v_company) + v_credits;
+  v_balance := public.sms_credit_balance_for(v_company) + v_credits;
 
   insert into public.sms_credit_ledger
     (company_id, transaction_type, amount, balance_after, purchase_reference)
@@ -1047,6 +1142,75 @@ as $$
   end::date;
 $$;
 
+-- The company-scoped twin of Phase 1's next_document_number(document_kind).
+--
+-- NOT a second numbering system. It allocates from the SAME
+-- public.document_sequences row, under the same row lock, and formats the
+-- number from that row's own prefix and pad_width. It exists for one reason:
+-- Phase 1's function derives the company from current_company_id(), and a
+-- scheduled generation run has no JWT and no single company — it walks every
+-- company with work due. Calling the one-argument function from that loop would
+-- resolve to NULL and allocate from nobody's sequence, which is exactly the
+-- cross-company hazard this avoids: the company is passed explicitly, taken
+-- from the service agreement's own row, and can never be another tenant's.
+create or replace function public.next_document_number_for_company(
+  p_company uuid,
+  p_kind    public.document_kind
+)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_rows   integer;
+  v_prefix text;
+  v_pad    integer;
+  v_value  integer;
+begin
+  if p_company is null then
+    raise exception 'next_document_number_for_company requires an explicit company';
+  end if;
+
+  -- Two sequence rows for one (company, kind) would hand the same number out
+  -- twice. Refuse rather than pick one arbitrarily.
+  select count(*) into v_rows
+  from public.document_sequences
+  where company_id = p_company and kind = p_kind;
+
+  if v_rows > 1 then
+    raise exception 'Company % has % "%" document sequences; expected exactly one',
+      p_company, v_rows, p_kind;
+  end if;
+
+  if v_rows = 0 then
+    -- Create the row from the TABLE's own defaults for prefix, pad_width and
+    -- next_value. No format and no starting number is invented here.
+    begin
+      insert into public.document_sequences (company_id, kind) values (p_company, p_kind);
+    exception when unique_violation then
+      null;  -- another transaction created it first; the UPDATE below finds it
+    end;
+  end if;
+
+  -- The UPDATE takes the row lock, so two concurrent allocations for the same
+  -- company queue here and receive consecutive numbers. next_value is the value
+  -- to use next, so the number allocated is the pre-increment value.
+  update public.document_sequences
+  set next_value = next_value + 1,
+      updated_at = now()
+  where company_id = p_company and kind = p_kind
+  returning prefix, pad_width, next_value - 1
+  into v_prefix, v_pad, v_value;
+
+  if v_value is null then
+    raise exception 'No "%" document sequence for company %', p_kind, p_company;
+  end if;
+
+  return v_prefix || lpad(v_value::text, greatest(coalesce(v_pad, 4), 1), '0');
+end $$;
+
 -- Generates the jobs that are due, for one company or for all of them.
 --
 -- Runs as the service role from a scheduled Edge Function, so recurring work
@@ -1084,18 +1248,45 @@ begin
     order by a.next_due_date
   loop
     v_job := null;
+    v_number := null;
+
+    -- Already generated for this period by an earlier run. Checked BEFORE a
+    -- number is allocated: the unique index would swallow the insert, but it
+    -- would not give the number back, and every no-op run would leave a gap in
+    -- the company's job numbering. Advance anyway so the agreement does not get
+    -- stuck retrying the same period forever.
+    if exists (
+      select 1 from public.jobs
+      where service_agreement_id = r.id
+        and generated_for_date   = r.next_due_date
+    ) then
+      update public.service_agreements
+      set next_due_date = public.next_service_date(next_due_date, frequency, interval_days),
+          updated_at = now()
+      where id = r.id;
+
+      service_agreement_id := r.id; job_id := null;
+      scheduled_for := r.next_due_date; outcome := 'alreadyGenerated';
+      return next;
+      continue;
+    end if;
 
     -- A job number still comes from the company's own sequence, so recurring
-    -- work is numbered indistinguishably from work booked by hand.
+    -- work is numbered indistinguishably from work booked by hand. jobs.number
+    -- is NOT NULL with no default: without this the insert below cannot succeed
+    -- at all, and every agreement would report 'failed: null value in column
+    -- "number"' forever.
     begin
+      v_number := public.next_document_number_for_company(r.company_id, 'job');
+
       insert into public.jobs (
-        company_id, customer_id, address_id, equipment_id,
+        company_id, number, customer_id, address_id, equipment_id,
         title, job_description, kind, priority, status,
         scheduled_start, scheduled_end,
         service_agreement_id, generated_for_date
       )
       values (
-        r.company_id, r.customer_id, r.address_id, r.equipment_id,
+        r.company_id, v_number, r.customer_id, r.address_id, r.equipment_id,
         coalesce(nullif(r.template_title, ''), 'Scheduled service'),
         coalesce(r.template_description, ''),
         r.template_job_kind, 'standard', 'scheduled',
@@ -1113,8 +1304,9 @@ begin
     end;
 
     if v_job is null then
-      -- Already generated for this date by an earlier run. Advance anyway so
-      -- the agreement does not get stuck retrying the same period forever.
+      -- Lost a race: a concurrent run generated this same period between the
+      -- check above and the insert. The unique index arbitrated correctly and
+      -- one number is spent for nothing — a gap, never a duplicate visit.
       update public.service_agreements
       set next_due_date = public.next_service_date(next_due_date, frequency, interval_days),
           updated_at = now()
@@ -1140,28 +1332,103 @@ begin
 end $$;
 
 -- -----------------------------------------------------------------------------
--- 9. Grants
+-- 9. EXECUTE privileges
 -- -----------------------------------------------------------------------------
--- Read-only helpers the app calls directly. The mutating ones are deliberately
--- NOT granted to `authenticated`: seat sync, credit purchase settlement and
--- recurring generation are server-side operations only.
-grant execute on function public.subscription_quote(integer)          to authenticated;
-grant execute on function public.company_active_paid_users(uuid)      to authenticated;
-grant execute on function public.sms_credit_balance(uuid)             to authenticated;
-grant execute on function public.company_can_accept_payments(uuid)    to authenticated;
-grant execute on function public.resolve_due_date(text, date)         to authenticated;
-grant execute on function public.next_service_date(date, public.service_frequency, integer) to authenticated;
+-- WHY THIS SECTION WAS REWRITTEN.
+--
+-- PostgreSQL grants EXECUTE on a newly created function to PUBLIC by default,
+-- and every function in this file is SECURITY DEFINER. An earlier draft of this
+-- section revoked from `authenticated` and `anon` — which removes an explicit
+-- grant those roles never had, and leaves the inherited PUBLIC grant completely
+-- intact. The privileged functions therefore stayed callable by anyone holding
+-- any JWT, by name, over PostgREST:
+--
+--   record_payment_from_stripe(p_invoice, p_company, ...) — both ids are
+--     arguments, so any signed-in user could mark ANY company's invoice paid;
+--   credit_sms_purchase(p_purchase)  — grant credits without paying;
+--   generate_due_recurring_jobs(null) — write jobs into EVERY company;
+--   sync_subscription_seats(p_company) — rewrite another company's billed seats.
+--
+-- The model below is: revoke the PUBLIC default on everything this migration
+-- defines, then grant to the one role that has a reason to call it. Nothing is
+-- granted to `anon`. Nothing is granted "just in case".
+--
+-- Note that revoking from PUBLIC does not affect calls made from INSIDE another
+-- SECURITY DEFINER function: those execute with the definer's rights, and the
+-- definer (the role applying this migration) owns these functions.
 
-revoke execute on function public.sync_subscription_seats(uuid)          from authenticated, anon;
-revoke execute on function public.credit_sms_purchase(uuid)              from authenticated, anon;
-revoke execute on function public.refund_sms_credit(uuid, text)          from authenticated, anon;
-revoke execute on function public.generate_due_recurring_jobs(uuid, integer) from authenticated, anon;
-revoke execute on function public.record_payment_from_stripe(uuid, uuid, integer, text, text, text, integer, integer, integer, text) from authenticated, anon;
+-- 9a. Remove the default PUBLIC grant from every function defined above.
+revoke execute on function public.commerce_company_scope(uuid)                              from public;
+revoke execute on function public.company_active_paid_users_for(uuid)                       from public;
+revoke execute on function public.company_active_paid_users(uuid)                           from public;
+revoke execute on function public.subscription_quote(integer)                               from public;
+revoke execute on function public.sync_subscription_seats(uuid)                             from public;
+revoke execute on function public.company_can_accept_payments(uuid)                         from public;
+revoke execute on function public.sms_credit_balance_for(uuid)                              from public;
+revoke execute on function public.sms_credit_balance(uuid)                                  from public;
+revoke execute on function public.consume_sms_credit(uuid, integer, uuid, uuid)             from public;
+revoke execute on function public.refund_sms_credit(uuid, text)                             from public;
+revoke execute on function public.credit_sms_purchase(uuid)                                 from public;
+revoke execute on function public.resolve_due_date(text, date)                              from public;
+revoke execute on function public.next_service_date(date, public.service_frequency, integer) from public;
+revoke execute on function public.next_document_number_for_company(uuid, public.document_kind) from public;
+revoke execute on function public.generate_due_recurring_jobs(uuid, integer)                from public;
+revoke execute on function public.record_payment_from_stripe(
+  uuid, uuid, integer, text, text, text, integer, integer, integer, text)                    from public;
 
--- consume_sms_credit runs as the caller's company and checks smsCreditsConsume
--- itself, but it is only ever reached through the send-sms Edge Function, which
--- is the only place a Twilio credential exists.
-revoke execute on function public.consume_sms_credit(uuid, integer, uuid, uuid) from anon;
+-- Belt and braces: if any of these names existed before this migration ran, an
+-- explicit grant to anon/authenticated may survive the PUBLIC revoke above.
+revoke execute on function public.sync_subscription_seats(uuid)                             from anon, authenticated;
+revoke execute on function public.credit_sms_purchase(uuid)                                 from anon, authenticated;
+revoke execute on function public.refund_sms_credit(uuid, text)                             from anon, authenticated;
+revoke execute on function public.generate_due_recurring_jobs(uuid, integer)                from anon, authenticated;
+revoke execute on function public.next_document_number_for_company(uuid, public.document_kind) from anon, authenticated;
+revoke execute on function public.company_active_paid_users_for(uuid)                       from anon, authenticated;
+revoke execute on function public.sms_credit_balance_for(uuid)                              from anon, authenticated;
+revoke execute on function public.record_payment_from_stripe(
+  uuid, uuid, integer, text, text, text, integer, integer, integer, text)                    from anon, authenticated;
+
+-- 9b. Callable by a signed-in app user.
+--
+-- Each of these either takes no company at all, or routes its company argument
+-- through commerce_company_scope(), so passing another tenant's id returns
+-- nothing rather than that tenant's data. subscription_quote takes a head count
+-- and no company: it is arithmetic over the published price list.
+-- resolve_due_date and next_service_date are pure date arithmetic.
+grant execute on function public.commerce_company_scope(uuid)                to authenticated, service_role;
+grant execute on function public.company_active_paid_users(uuid)             to authenticated, service_role;
+grant execute on function public.subscription_quote(integer)                 to authenticated, service_role;
+grant execute on function public.company_can_accept_payments(uuid)           to authenticated, service_role;
+grant execute on function public.sms_credit_balance(uuid)                    to authenticated, service_role;
+grant execute on function public.resolve_due_date(text, date)                to authenticated, service_role;
+grant execute on function public.next_service_date(date, public.service_frequency, integer) to authenticated, service_role;
+
+-- consume_sms_credit MUST stay callable by `authenticated`: the sms-send Edge
+-- Function calls it with the end user's own JWT precisely so that
+-- current_company_id() and has_perm('smsCreditsConsume') resolve to the real
+-- person, not to the service role. It spends only the caller's own company's
+-- credits, checks the permission itself, and cannot name another tenant.
+grant execute on function public.consume_sms_credit(uuid, integer, uuid, uuid) to authenticated, service_role;
+
+-- 9c. Service role only — the Edge Functions, which authenticate the outside
+--     world by Stripe signature, Twilio signature or the cron secret before
+--     they call anything here.
+grant execute on function public.record_payment_from_stripe(
+  uuid, uuid, integer, text, text, text, integer, integer, integer, text)     to service_role;
+grant execute on function public.credit_sms_purchase(uuid)                    to service_role;
+grant execute on function public.refund_sms_credit(uuid, text)                to service_role;
+grant execute on function public.sync_subscription_seats(uuid)                to service_role;
+grant execute on function public.generate_due_recurring_jobs(uuid, integer)   to service_role;
+
+-- 9d. Granted to NOBODY. These are internal implementations reached only from
+--     inside the SECURITY DEFINER functions above, which run with the owner's
+--     rights. They take a company id and do not scope it, which is safe only
+--     because no external caller can reach them:
+--       company_active_paid_users_for(uuid)
+--       sms_credit_balance_for(uuid)
+--       next_document_number_for_company(uuid, document_kind)
+--     If a future Edge Function genuinely needs one, grant it to service_role
+--     then — deliberately, and only that one.
 
 commit;
 
@@ -1231,4 +1498,53 @@ commit;
 --                            'refund_sms_credit','credit_sms_purchase');
 --      Every one of the four must contain `for update` on public.companies and
 --      none may contain pg_advisory_xact_lock.
+--
+-- 8. VERIFY THE PRIVILEGE MODEL ACTUALLY TOOK (section 9 was rewritten because
+--    the previous version silently did nothing). This must return NO rows:
+--
+--      select p.proname, r.rolname
+--      from pg_proc p
+--      join pg_namespace n on n.oid = p.pronamespace
+--      cross join lateral (values ('public'),('anon'),('authenticated')) as r(rolname)
+--      where n.nspname = 'public'
+--        and p.proname in ('record_payment_from_stripe','credit_sms_purchase',
+--                          'refund_sms_credit','sync_subscription_seats',
+--                          'generate_due_recurring_jobs',
+--                          'next_document_number_for_company',
+--                          'company_active_paid_users_for','sms_credit_balance_for')
+--        and has_function_privilege(r.rolname, p.oid, 'execute');
+--
+--    And this must return true for each of them:
+--      select has_function_privilege('service_role', 'public.record_payment_from_stripe(
+--        uuid,uuid,integer,text,text,text,integer,integer,integer,text)', 'execute');
+--
+-- 9. VERIFY THE DOCUMENT NUMBER FORMAT MATCHES PHASE 1 BEFORE TRUSTING
+--    RECURRING JOBS. next_document_number_for_company() allocates from the same
+--    document_sequences row as Phase 1's next_document_number(), but this file
+--    was written without being able to read Phase 1's body, so its formatting is
+--    an assumption: prefix || lpad(next_value, pad_width, '0'), with any
+--    separator living inside `prefix`, and next_value meaning "the number to use
+--    next". Confirm with:
+--
+--      select pg_get_functiondef(p.oid)
+--      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--      where n.nspname = 'public' and p.proname = 'next_document_number';
+--
+--    If it differs, change next_document_number_for_company to match EXACTLY.
+--    Then check no company has duplicate sequence rows (the new function refuses
+--    to allocate if it finds any, which would show up as a 'failed: ...' row):
+--
+--      select company_id, kind, count(*)
+--      from public.document_sequences group by 1,2 having count(*) > 1;
+--
+--    Then dry-run one company before scheduling the cron:
+--      select * from public.generate_due_recurring_jobs('<company-uuid>', 0);
+--    Expect 'generated' with a job_id, and a second identical call to return
+--    'alreadyGenerated' with no new job and no new number consumed.
+--
+-- 10. VERIFY THE PAYMENTS COLUMN CHANGE:
+--      select is_nullable from information_schema.columns
+--      where table_name = 'payments' and column_name = 'recorded_by_user_id';
+--     Expect YES. The iOS decoder already reads it as an optional UUID
+--     (SupabaseFinancialRecords.swift), so no app change accompanies this.
 -- =============================================================================
