@@ -32,125 +32,113 @@
 --    7. Company default payment terms.
 --    8. Recurring service generation that cannot double-book a period.
 --
---  ORDERING NOTE — READ BEFORE APPLYING
---  Section 0 adds values to existing enums. PostgreSQL will not let a new enum
---  value be *used* in the same transaction that created it, so section 0 runs
---  outside the transaction and nothing later in this file references any of the
---  new labels literally. If your tooling wraps the whole file in one
---  transaction (`supabase db push` does), apply section 0 on its own first, or
---  paste this file into the SQL editor, which does not.
+--  ORDERING — THIS IS ONE MIGRATION, APPLIED THE NORMAL WAY.
+--
+--  This file requires the eight enum labels added by
+--  0003_commercial_enum_values.sql. They live in their own migration because
+--  PostgreSQL refuses to let a new enum value be used in the transaction that
+--  added it (SQLSTATE 55P04), and a migration file is applied as one
+--  transaction — so the labels must be COMMITTED by an earlier migration, not
+--  by an earlier section of this one. There is no manual pre-step:
+--  `supabase db push` applies 0003 then 0004 in filename order, and the
+--  boundary between them is the commit this file needs.
+--
+--  Section 0 below verifies those labels are present AND usable, and aborts
+--  the whole migration if they are not, so a mis-ordered or partial deployment
+--  fails at statement one having created nothing.
 --
 --  APPLY WITH, from an authenticated shell:
 --    supabase db push --project-ref srfnfimskixjqjyyftak
---  or paste into the SQL editor for project srfnfimskixjqjyyftak.
+--  or, in the SQL editor for project srfnfimskixjqjyyftak, run
+--  0003_commercial_enum_values.sql first, then this file separately.
 --
 --  Every statement is guarded so re-running it is safe.
 -- =============================================================================
 
 
 -- =============================================================================
--- SECTION 0 — enum extensions (NOT inside a transaction; see ordering note)
--- =============================================================================
-
--- Two more subscription tiers. Phase 1 shipped soloTrader / team / business,
--- which is three names for a four-tier price list. 'business' is retained so
--- existing rows stay valid and is treated as a synonym for 'growingBusiness'
--- by the calculator below.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'subscription_plan' and e.enumlabel = 'growingBusiness'
-  ) then
-    alter type public.subscription_plan add value 'growingBusiness';
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'subscription_plan' and e.enumlabel = 'largerBusiness'
-  ) then
-    alter type public.subscription_plan add value 'largerBusiness';
-  end if;
-end $$;
-
--- Twilio reports more than "sent" and "delivered". Without these two labels an
--- undelivered message has to be recorded as a plain failure, which loses the
--- distinction that decides whether a credit is refunded.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'notification_status' and e.enumlabel = 'accepted'
-  ) then
-    alter type public.notification_status add value 'accepted';
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'notification_status' and e.enumlabel = 'undelivered'
-  ) then
-    alter type public.notification_status add value 'undelivered';
-  end if;
-end $$;
-
--- A card payment is not instantaneous. 'processing' is the window between
--- confirmation and the webhook, 'cancelled' is an abandoned intent — neither of
--- which is a failure, and neither of which may look like success.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'payment_status' and e.enumlabel = 'processing'
-  ) then
-    alter type public.payment_status add value 'processing';
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'payment_status' and e.enumlabel = 'cancelled'
-  ) then
-    alter type public.payment_status add value 'cancelled';
-  end if;
-end $$;
-
--- Customer payments arrive through Stripe, which is neither card-on-file taken
--- by the office nor cash in hand.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'payment_method' and e.enumlabel = 'stripe'
-  ) then
-    alter type public.payment_method add value 'stripe';
-  end if;
-end $$;
-
--- Recurring work needs a frequency the four fixed options cannot express.
-do $$
-begin
-  if not exists (
-    select 1 from pg_enum e join pg_type t on t.oid = e.enumtypid
-    where t.typname = 'service_frequency' and e.enumlabel = 'custom'
-  ) then
-    alter type public.service_frequency add value 'custom';
-  end if;
-end $$;
-
-
--- =============================================================================
--- SECTION 1 onwards — everything else, in one transaction
+-- SECTION 0 — prerequisite check, then everything else in one transaction
 -- =============================================================================
 
 begin;
+
+-- The enum labels this migration depends on are added by
+-- 0003_commercial_enum_values.sql. Two separate things are checked here,
+-- because they fail in different ways:
+--
+--   0a. Is the label in the catalogue at all? If 0003 was never applied, name
+--       the missing labels now rather than failing hundreds of lines later, in
+--       the middle of a function body, on a message that does not mention 0003.
+--   0b. Is it COMMITTED, and therefore usable? A label added by the CURRENT
+--       transaction is visible in pg_enum but cannot be evaluated, and
+--       PostgreSQL only says so at the moment of use. The casts below force
+--       that moment to be here — at statement one of the migration — instead
+--       of at the first customer card payment weeks later.
+--
+-- Both abort the transaction, so a failure leaves the database exactly as it
+-- was. Neither is a comment asking somebody to go and run something by hand.
+
+-- 0a. Presence.
+do $$
+declare
+  v_missing text;
+begin
+  select string_agg(
+           format('%s.%s', required.type_name, required.label),
+           ', ' order by required.type_name, required.label)
+    into v_missing
+  from (values
+    ('subscription_plan',   'growingBusiness'),
+    ('subscription_plan',   'largerBusiness'),
+    ('notification_status', 'accepted'),
+    ('notification_status', 'undelivered'),
+    ('payment_status',      'processing'),
+    ('payment_status',      'cancelled'),
+    ('payment_method',      'stripe'),
+    ('service_frequency',   'custom')
+  ) as required(type_name, label)
+  where not exists (
+    select 1
+    from pg_enum e
+    join pg_type t      on t.oid = e.enumtypid
+    join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname   = 'public'
+      and t.typname   = required.type_name
+      and e.enumlabel = required.label
+  );
+
+  if v_missing is not null then
+    raise exception 'Missing enum values required by this migration: %', v_missing
+      using errcode = 'undefined_object',
+            hint    = 'Apply 0003_commercial_enum_values.sql first. With '
+                      'supabase db push that happens automatically, in '
+                      'filename order.';
+  end if;
+end $$;
+
+-- 0b. Committed, and therefore usable.
+do $$
+begin
+  perform 'growingBusiness'::text::public.subscription_plan;
+  perform 'largerBusiness'::text::public.subscription_plan;
+  perform 'accepted'::text::public.notification_status;
+  perform 'undelivered'::text::public.notification_status;
+  perform 'processing'::text::public.payment_status;
+  perform 'cancelled'::text::public.payment_status;
+  perform 'stripe'::text::public.payment_method;
+  perform 'custom'::text::public.service_frequency;
+exception
+  -- 55P04 = object_not_in_prerequisite_state. On an enum cast it means exactly
+  -- one thing: the label was added by the transaction that is running now.
+  when object_not_in_prerequisite_state then
+    raise exception
+      'Enum values required by this migration are not committed yet: %', sqlerrm
+      using errcode = 'object_not_in_prerequisite_state',
+            hint    = 'The ALTER TYPE ... ADD VALUE statements belong to '
+                      '0003_commercial_enum_values.sql and must COMMIT before '
+                      'this file runs. Do not paste both files into one editor '
+                      'tab, and do not wrap both in a single transaction.';
+end $$;
 
 -- -----------------------------------------------------------------------------
 -- 1. Platform pricing configuration
@@ -1436,6 +1424,13 @@ commit;
 -- =============================================================================
 -- AFTER APPLYING
 -- =============================================================================
+-- 0. MIGRATION ORDER, for the record:
+--      0002_field_service_core_workflow.sql   (field service core)
+--      0003_commercial_enum_values.sql        (enum labels; commits on its own)
+--      0004_commercial_layer.sql              (this file)
+--    0003 exists only so its ALTER TYPE ... ADD VALUE statements commit before
+--    anything uses them. Section 0 of this file proves that happened.
+--
 -- 1. Regenerate the typed schema:
 --      supabase gen types typescript --project-ref srfnfimskixjqjyyftak > backend/types.ts
 --
@@ -1547,4 +1542,22 @@ commit;
 --      where table_name = 'payments' and column_name = 'recorded_by_user_id';
 --     Expect YES. The iOS decoder already reads it as an optional UUID
 --     (SupabaseFinancialRecords.swift), so no app change accompanies this.
+--
+-- 11. VERIFY THE ENUM LABELS ARE USABLE AT RUNTIME, not merely present. The
+--     three paths that actually evaluate a new label do so inside PL/pgSQL,
+--     which means they are compiled at apply time but not resolved until they
+--     first run — so a missing label surfaces as a failed customer payment,
+--     not as a failed migration. Force it now, in a NEW session:
+--
+--       select 'stripe'::text::public.payment_method,
+--              'custom'::text::public.service_frequency,
+--              'undelivered'::text::public.notification_status;
+--
+--     Then exercise the one that matters most, against a real invoice in a
+--     throwaway company, and confirm the payment row lands with method =
+--     'stripe' and recorded_by_user_id null:
+--
+--       select * from public.record_payment_from_stripe(
+--         '<invoice-uuid>', '<company-uuid>', 1000,
+--         'pi_test', 'ch_test', 'acct_test', 3, 59, 938, 'usd');
 -- =============================================================================
