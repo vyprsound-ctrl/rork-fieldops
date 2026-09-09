@@ -20,6 +20,23 @@ import { isStripeConfigured, StripeError, stripeRequest } from "../_shared/strip
 interface ConnectRequest {
   action?: "status" | "onboard" | "dashboard";
   refresh?: boolean;
+  /// Sole trader or incorporated business. Only consulted the first time an
+  /// account is created, and only ever as a PREFILL: it is not a money field,
+  /// it cannot change where funds land, and Stripe re-verifies whatever is
+  /// claimed here during onboarding. Omitted or unrecognised means "we do not
+  /// know", and Stripe asks the merchant itself rather than us guessing.
+  businessType?: string;
+}
+
+type StripeBusinessType = "individual" | "company";
+
+/// Anything outside the allowlist is discarded rather than forwarded, so a
+/// malformed or hostile value can never reach Stripe.
+function normaliseBusinessType(raw: string | undefined): StripeBusinessType | null {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "individual" || value === "sole_trader" || value === "soletrader") return "individual";
+  if (value === "company") return "company";
+  return null;
 }
 
 interface StripeAccount {
@@ -103,20 +120,43 @@ Deno.serve(async (req) => {
         .eq("id", companyId)
         .maybeSingle();
 
-      const created = await stripeRequest<StripeAccount>("/accounts", {
+      // SOLE TRADER OR COMPANY.
+      //
+      // This used to be hardcoded to "company", which locked every sole trader
+      // out of onboarding: Stripe validates an individual's identity against
+      // company registration data that a sole trader does not have. The type is
+      // now taken from the owner's own answer when they gave one, and OMITTED
+      // otherwise — an absent business_type makes Stripe ask the merchant during
+      // Express onboarding, which is correct and never dead-ends.
+      const businessType = normaliseBusinessType(body.businessType);
+      const tradingName = (company?.name ?? "").trim();
+
+      const accountPayload: Record<string, unknown> = {
         type: "express",
         country: company?.country_code ?? "US",
         default_currency: (company?.currency_code ?? "usd").toLowerCase(),
-        business_type: "company",
-        company: { name: company?.name ?? "" },
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
         },
+        // Valid for BOTH business types, unlike `company[name]`, so the trading
+        // name reaches Stripe either way.
+        business_profile: tradingName ? { name: tradingName } : undefined,
         // Stamped so the webhook can resolve account -> company without
         // trusting anything a client ever sends.
         metadata: { company_id: companyId, connected_by_user_id: userId },
-      }, {
+      };
+
+      if (businessType) {
+        accountPayload.business_type = businessType;
+        // `company[name]` is only meaningful — and only accepted — for an
+        // incorporated account. Sending it for an individual is an error.
+        if (businessType === "company" && tradingName) {
+          accountPayload.company = { name: tradingName };
+        }
+      }
+
+      const created = await stripeRequest<StripeAccount>("/accounts", accountPayload, {
         // Prevents a double-tap creating two Stripe accounts for one company.
         idempotencyKey: `connect-create-${companyId}`,
       });

@@ -1,5 +1,5 @@
 import { corsHeaders, createAdminClient, jsonResponse } from "../_shared/auth.ts";
-import { verifyStripeSignature } from "../_shared/stripe.ts";
+import { isStripeConfigured, StripeError, stripeRequest, verifyStripeSignature } from "../_shared/stripe.ts";
 
 /// The authoritative source of payment truth.
 ///
@@ -140,6 +140,10 @@ Deno.serve(async (req) => {
         outcome = await handlePaymentFailed(admin, object, "cancelled");
         break;
 
+      case "charge.refunded":
+        outcome = await handleChargeRefunded(admin, object, companyId);
+        break;
+
       case "account.updated":
         outcome = await handleAccountUpdated(admin, object);
         break;
@@ -211,19 +215,15 @@ async function handlePaymentSucceeded(
   if (!record) return "unknownIntent";
   if (companyId && record.company_id !== companyId) return "companyMismatch";
 
-  const charges = (intent.charges ?? {}) as { data?: Array<Record<string, unknown>> };
-  const charge = charges.data?.[0];
   const amountReceived = Number(intent.amount_received ?? intent.amount ?? record.amount_cents);
   const applicationFee = Number(intent.application_fee_amount ?? record.application_fee_cents ?? 0);
 
-  // Stripe's own processing fee, which is a DIFFERENT number from Harbour
-  // South's application fee and is only known once the balance transaction has
-  // settled. Absent is recorded as null, never as zero.
-  let processingFee: number | null = null;
-  const balanceTransaction = charge?.balance_transaction;
-  if (balanceTransaction && typeof balanceTransaction === "object") {
-    processingFee = Number((balanceTransaction as { fee?: number }).fee ?? 0);
-  }
+  // The charge id and Stripe's own processing fee. That fee is a DIFFERENT
+  // number from Harbour South's application fee and is only known once the
+  // balance transaction has settled. Absent is recorded as null, never as zero.
+  const resolved = await resolveCharge(intent, account ?? record.stripe_account_id ?? null);
+  const chargeId = resolved.id;
+  const processingFee = resolved.processingFeeCents;
 
   const net = processingFee === null
     ? amountReceived - applicationFee
@@ -236,7 +236,7 @@ async function handlePaymentSucceeded(
     p_company: record.company_id,
     p_amount_cents: amountReceived,
     p_intent: intentId,
-    p_charge: charge?.id ? String(charge.id) : null,
+    p_charge: chargeId,
     p_account: account ?? record.stripe_account_id,
     p_application_fee_cents: applicationFee,
     p_processing_fee_cents: processingFee,
@@ -254,7 +254,7 @@ async function handlePaymentSucceeded(
       method: "stripe",
       status: "succeeded",
       stripe_payment_intent_id: intentId,
-      stripe_charge_id: charge?.id ? String(charge.id) : null,
+      stripe_charge_id: chargeId,
       stripe_account_id: account ?? record.stripe_account_id,
       application_fee_cents: applicationFee,
       processing_fee_cents: processingFee,
@@ -278,6 +278,66 @@ async function handlePaymentSucceeded(
     .eq("id", record.id);
 
   return "paymentRecorded";
+}
+
+/// Resolves the charge behind a PaymentIntent, and Stripe's processing fee.
+///
+/// `intent.charges` was REMOVED from the Stripe API in 2022-11-15 and does not
+/// exist on this project's pinned version, so reading it silently produced a
+/// null charge id and a null processing fee on every live payment. The current
+/// representation is `latest_charge`, which arrives as a bare id string in a
+/// webhook payload and has to be fetched to see its balance transaction.
+///
+/// The fetch is ON BEHALF OF the connected account, because a FLOW B charge
+/// lives on the merchant's account and is invisible to a platform-scoped read.
+///
+/// This NEVER throws. A payment we cannot fully annotate is still a real
+/// payment: the fee is recorded as null rather than guessed, and the invoice is
+/// still settled by the caller.
+async function resolveCharge(
+  intent: Record<string, unknown>,
+  account: string | null,
+): Promise<{ id: string | null; processingFeeCents: number | null }> {
+  const feeOf = (charge: Record<string, unknown> | undefined): number | null => {
+    const balanceTransaction = charge?.balance_transaction;
+    if (balanceTransaction && typeof balanceTransaction === "object") {
+      const fee = (balanceTransaction as { fee?: number }).fee;
+      return fee === undefined || fee === null ? null : Number(fee);
+    }
+    return null;
+  };
+
+  const latest = intent.latest_charge;
+
+  // Already expanded by whoever produced the payload.
+  if (latest && typeof latest === "object") {
+    const charge = latest as Record<string, unknown>;
+    return { id: charge.id ? String(charge.id) : null, processingFeeCents: feeOf(charge) };
+  }
+
+  if (typeof latest === "string" && latest.length > 0) {
+    if (!isStripeConfigured()) return { id: latest, processingFeeCents: null };
+    try {
+      const charge = await stripeRequest<Record<string, unknown>>(
+        `/charges/${latest}`,
+        { expand: ["balance_transaction"] },
+        { method: "GET", stripeAccount: account ?? undefined },
+      );
+      return { id: charge.id ? String(charge.id) : latest, processingFeeCents: feeOf(charge) };
+    } catch (err) {
+      // The id is still known and worth recording even when the expansion fails.
+      const detail = err instanceof StripeError ? err.message : String(err);
+      console.error("[stripe-webhook] could not expand the charge", detail);
+      return { id: latest, processingFeeCents: null };
+    }
+  }
+
+  // Pre-2022 payload shape, kept only so an old replayed event still resolves.
+  const legacy = (intent.charges ?? {}) as { data?: Array<Record<string, unknown>> };
+  const first = legacy.data?.[0];
+  if (first) return { id: first.id ? String(first.id) : null, processingFeeCents: feeOf(first) };
+
+  return { id: null, processingFeeCents: null };
 }
 
 // deno-lint-ignore no-explicit-any
@@ -316,6 +376,152 @@ async function handleAccountUpdated(admin: any, account: Record<string, unknown>
 
   if (error) throw new Error(error.message);
   return "accountUpdated";
+}
+
+/// Re-derives an invoice's paid amount, balance and status from its payment
+/// rows, exactly the way `record_payment_from_stripe` does on the way in.
+///
+/// Sums rather than increments, so a refund, a replay or a manual correction
+/// all converge on the same answer instead of drifting a counter. Every query
+/// is filtered on company_id as well as invoice id, so tenancy still holds even
+/// though this runs under the service role.
+// deno-lint-ignore no-explicit-any
+async function rederiveInvoice(admin: any, invoiceId: string, companyId: string): Promise<string> {
+  const { data: invoice, error: invoiceError } = await admin
+    .from("invoices")
+    .select("id,total,status")
+    .eq("id", invoiceId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+
+  if (invoiceError) throw new Error(invoiceError.message);
+  if (!invoice) return "unknownInvoice";
+
+  // A voided invoice is a closed book. A refund does not reopen it.
+  if (invoice.status === "void") return "void";
+
+  const { data: rows, error: rowsError } = await admin
+    .from("payments")
+    .select("amount")
+    .eq("invoice_id", invoiceId)
+    .eq("company_id", companyId)
+    .eq("status", "succeeded");
+
+  if (rowsError) throw new Error(rowsError.message);
+
+  const paid = (rows ?? []).reduce(
+    (running: number, row: { amount: number | string }) => running + Number(row.amount ?? 0),
+    0,
+  );
+  const total = Number(invoice.total ?? 0);
+  const balance = Math.max(total - paid, 0);
+
+  // Only ever moves a settled invoice back to what the money now says. An
+  // invoice that was never paid keeps whatever lifecycle status it already had
+  // (draft, sent, viewed, overdue) — a refund is not a reason to overwrite it.
+  let status: string = invoice.status;
+  if (paid > 0 && balance <= 0) {
+    status = "paid";
+  } else if (paid > 0) {
+    status = "partPaid";
+  } else if (invoice.status === "paid" || invoice.status === "partPaid") {
+    status = "sent";
+  }
+
+  const { error: updateError } = await admin.from("invoices").update({
+    amount_paid: paid,
+    balance,
+    status,
+    paid_at: paid > 0 && balance <= 0 ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
+  }).eq("id", invoiceId).eq("company_id", companyId);
+
+  if (updateError) throw new Error(updateError.message);
+  return status;
+}
+
+/// A customer payment was refunded by the trade business.
+///
+/// Uses the EXISTING payments row and the existing `refunded` payment_status.
+/// There is no separate refunds table and no second ledger: a full refund stops
+/// the row counting towards the invoice, and a partial refund reduces it to
+/// what the business actually kept, with the gross preserved in the note.
+///
+/// Refunds are issued by the merchant in their own Stripe dashboard, so this
+/// handler is the only way that fact ever reaches the invoice.
+// deno-lint-ignore no-explicit-any
+async function handleChargeRefunded(
+  admin: any,
+  charge: Record<string, unknown>,
+  companyId: string | null,
+): Promise<string> {
+  const chargeId = String(charge.id);
+  const intentId = typeof charge.payment_intent === "string" ? charge.payment_intent : null;
+
+  const columns =
+    "id,company_id,invoice_id,amount,status,note,processing_fee_cents,application_fee_cents";
+
+  // Match on the charge first, then on the intent: a payment recorded before
+  // the latest_charge fix may carry a null stripe_charge_id.
+  const { data: byCharge } = await admin
+    .from("payments").select(columns).eq("stripe_charge_id", chargeId).maybeSingle();
+
+  let payment = byCharge ?? null;
+
+  if (!payment && intentId) {
+    const { data: byIntent } = await admin
+      .from("payments").select(columns).eq("stripe_payment_intent_id", intentId).maybeSingle();
+    payment = byIntent ?? null;
+  }
+
+  if (!payment) return "unknownCharge";
+  // The connected account that sent the event must own the payment.
+  if (companyId && payment.company_id !== companyId) return "companyMismatch";
+  if (payment.status === "refunded") return "alreadyRefunded";
+
+  const grossCents = Math.round(Number(payment.amount ?? 0) * 100);
+  const chargeCents = Number(charge.amount ?? grossCents);
+  const refundedCents = Number(charge.amount_refunded ?? 0);
+  if (refundedCents <= 0) return "noRefundAmount";
+
+  const fullyRefunded = charge.refunded === true || refundedCents >= chargeCents;
+  const stamp = new Date().toISOString();
+  const update: Record<string, unknown> = {};
+
+  if (fullyRefunded) {
+    // The gross stays on the row as the historical fact of what was taken. The
+    // status is what stops it counting towards the invoice.
+    update.status = "refunded";
+    update.note = appendNote(payment.note, `Refunded in full (${money(refundedCents)}) on ${stamp}.`);
+  } else {
+    const retainedCents = Math.max(grossCents - refundedCents, 0);
+    update.amount = retainedCents / 100;
+    update.net_cents = retainedCents -
+      Number(payment.application_fee_cents ?? 0) -
+      Number(payment.processing_fee_cents ?? 0);
+    update.note = appendNote(
+      payment.note,
+      `Partially refunded ${money(refundedCents)} of ${money(grossCents)} on ${stamp}.`,
+    );
+  }
+
+  const { error: paymentError } = await admin.from("payments").update(update).eq("id", payment.id);
+  if (paymentError) throw new Error(paymentError.message);
+
+  // What is owed has changed, so the invoice has to be re-derived. Without this
+  // a refunded invoice would still read "paid in full".
+  const status = await rederiveInvoice(admin, payment.invoice_id, payment.company_id);
+
+  return `refund:${fullyRefunded ? "full" : "partial"}:${status}`;
+}
+
+function appendNote(existing: string | null, addition: string): string {
+  const base = (existing ?? "").trim();
+  return base.length > 0 ? `${base}\n${addition}` : addition;
+}
+
+function money(cents: number): string {
+  return (cents / 100).toFixed(2);
 }
 
 // ---------------------------------------------------------------------------

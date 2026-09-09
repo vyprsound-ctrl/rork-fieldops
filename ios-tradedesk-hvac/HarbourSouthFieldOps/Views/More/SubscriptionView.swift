@@ -400,6 +400,31 @@ struct SubscriptionView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
+                    // Asked once, before the Stripe account exists. A sole
+                    // trader and a limited company are verified differently by
+                    // Stripe, and getting it wrong is what used to strand sole
+                    // traders part-way through onboarding.
+                    if connect.canManage, connect.readiness == .notConnected {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("How do you trade?")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.ink)
+
+                            Picker("How do you trade?", selection: $viewModel.businessType) {
+                                ForEach(ConnectBusinessType.allCases) { type in
+                                    Text(type.title).tag(type)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            Text(viewModel.businessType.detail)
+                                .font(.caption)
+                                .foregroundStyle(Theme.meta)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 2)
+                    }
+
                     if connect.canManage, connect.readiness != .notConfigured {
                         Button {
                             Task {

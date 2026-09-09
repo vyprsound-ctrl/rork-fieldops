@@ -82,6 +82,48 @@ nonisolated struct ConnectAccountStatus: Hashable, Sendable {
     var acceptsCards: Bool { readiness == .ready && chargesEnabled }
 }
 
+/// How the trade business is constituted, as Stripe understands it.
+///
+/// Stripe verifies a sole trader against personal identity documents and an
+/// incorporated business against company registration data — two different
+/// checks. Sending the wrong one stranded every sole trader in onboarding,
+/// because the account used to be created hardcoded as a company.
+///
+/// `unspecified` is a real, safe answer rather than a placeholder: it makes the
+/// server omit the field entirely so Stripe asks the owner directly during
+/// onboarding, which is better than this app guessing.
+nonisolated enum ConnectBusinessType: String, CaseIterable, Identifiable, Sendable {
+    case unspecified
+    case individual
+    case company
+
+    var id: String { rawValue }
+
+    /// The value sent to the Edge Function. Nil means "do not prefill".
+    var wireValue: String? {
+        self == .unspecified ? nil : rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .unspecified: return "Not sure"
+        case .individual: return "Sole trader"
+        case .company: return "Limited company"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .unspecified:
+            return "Stripe will ask you during setup."
+        case .individual:
+            return "You trade as yourself. Stripe verifies your personal identity."
+        case .company:
+            return "You trade through a registered company. Stripe verifies the company."
+        }
+    }
+}
+
 // MARK: - SMS
 
 nonisolated enum SmsLedgerKind: String, Codable, Hashable, Sendable {
@@ -532,7 +574,10 @@ extension DataGateway {
         throw DataError.rejected("Card payments are only available on a live company account.")
     }
 
-    func beginConnectOnboarding(session: TenantSession) async throws -> URL {
+    func beginConnectOnboarding(
+        session: TenantSession,
+        businessType: ConnectBusinessType
+    ) async throws -> URL {
         throw DataError.rejected("Card payments are only available on a live company account.")
     }
 

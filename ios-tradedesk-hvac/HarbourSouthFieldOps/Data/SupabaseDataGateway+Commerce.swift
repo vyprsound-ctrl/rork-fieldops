@@ -240,6 +240,14 @@ private nonisolated struct RecurringAgreementRecord: Decodable, Sendable {
 
 private nonisolated struct ConnectRequest: Encodable, Sendable {
     let action: String
+    /// Only sent for `onboard`, and only when the owner actually chose one.
+    /// Omitted otherwise so Stripe asks them during onboarding instead.
+    let businessType: String?
+
+    init(action: String, businessType: String? = nil) {
+        self.action = action
+        self.businessType = businessType
+    }
 }
 
 private nonisolated struct ConnectResponse: Decodable, Sendable {
@@ -480,12 +488,17 @@ extension SupabaseDataGateway {
         }
     }
 
-    func beginConnectOnboarding(session: TenantSession) async throws -> URL {
+    func beginConnectOnboarding(
+        session: TenantSession,
+        businessType: ConnectBusinessType
+    ) async throws -> URL {
         try require(.companyProfileManage, session, query: "payments.connect.onboard")
 
         let response: ConnectResponse = try await client.functions.invoke(
             "stripe-connect",
-            options: .init(body: ConnectRequest(action: "onboard"))
+            options: .init(
+                body: ConnectRequest(action: "onboard", businessType: businessType.wireValue)
+            )
         )
 
         if let error = response.error { throw DataError.rejected(error) }

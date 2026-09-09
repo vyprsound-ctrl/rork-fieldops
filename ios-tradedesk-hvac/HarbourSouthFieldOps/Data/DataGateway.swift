@@ -240,7 +240,14 @@ protocol DataGateway: Sendable {
     func connectAccountStatus(session: TenantSession) async throws -> ConnectAccountStatus
 
     /// A one-time Stripe onboarding link. Requires `companyProfileManage`.
-    func beginConnectOnboarding(session: TenantSession) async throws -> URL
+    ///
+    /// `businessType` prefills the very first account creation and nothing else.
+    /// It cannot move money, change a fee or reach another company, and Stripe
+    /// independently verifies whatever is claimed.
+    func beginConnectOnboarding(
+        session: TenantSession,
+        businessType: ConnectBusinessType
+    ) async throws -> URL
 
     /// A login link to the merchant's own Stripe dashboard.
     func connectDashboardLink(session: TenantSession) async throws -> URL

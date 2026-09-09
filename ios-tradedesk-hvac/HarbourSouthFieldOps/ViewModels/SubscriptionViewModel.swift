@@ -15,6 +15,10 @@ final class SubscriptionViewModel {
     var actionError: String?
     /// A Stripe onboarding or dashboard link ready to open in the browser.
     var pendingLink: URL?
+    /// Sole trader or limited company, asked once before the Stripe account is
+    /// created. Only a prefill — Stripe verifies it either way, and "not sure"
+    /// hands the question to Stripe rather than guessing on the owner's behalf.
+    var businessType: ConnectBusinessType = .unspecified
 
     func load(gateway: DataGateway, session: TenantSession, showLoading: Bool = true) async {
         if showLoading { state = .loading }
@@ -39,7 +43,10 @@ final class SubscriptionViewModel {
         isWorking = true
         actionError = nil
         do {
-            pendingLink = try await gateway.beginConnectOnboarding(session: session)
+            pendingLink = try await gateway.beginConnectOnboarding(
+                session: session,
+                businessType: businessType
+            )
         } catch {
             actionError = DataError.wrap(error).errorDescription
         }
