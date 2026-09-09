@@ -21,13 +21,22 @@ struct SimulatedBadge: View {
     }
 }
 
-/// Full-width banner used at the top of shells while any service is mocked.
+/// Full-width banner shown at the top of the shells during a development
+/// session.
+///
+/// The text is deliberately NOT a count from `IntegrationRegistry`. Every
+/// banner site is already gated on `isDevelopmentSession`, and in that session
+/// the whole stack is seeded — mock gateway, fixture positions, no real
+/// sending. The old count read from the registry, whose entries flip to
+/// production once a database is configured, so in a configured build this
+/// banner announced "0 services simulated" while sitting above entirely
+/// seeded data.
 struct SimulatedServicesBanner: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "wrench.and.screwdriver.fill")
                 .font(.caption)
-            Text("Development build · \(IntegrationRegistry.simulatedCount) services simulated")
+            Text("Development build · seeded data, nothing here is live")
                 .font(.caption.weight(.medium))
             Spacer(minLength: 0)
         }

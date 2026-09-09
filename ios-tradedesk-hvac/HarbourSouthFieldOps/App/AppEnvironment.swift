@@ -49,9 +49,15 @@ final class AppEnvironment {
     private let productionGateway: DataGateway?
 
     let auth: AuthService
-    let sms: SmsService
-    let email: EmailService
     let storeBilling: StoreBillingService
+    // NO `sms` OR `email` ADAPTER HERE, DELIBERATELY. Customer messaging is not
+    // a client capability: `sendInvoice` calls the `send-invoice` Edge
+    // Function, which holds the provider credentials and writes the real
+    // outcome to the notifications ledger. This class used to expose mock SMS
+    // and email services that returned a fabricated "sent" receipt. Nothing
+    // ever called them — but leaving them here implied the production app had a
+    // device-side messaging path that could silently report a false success.
+    // They have been deleted rather than re-wired.
 
     /// Routing and maps — straight-line fixtures for the development stack,
     /// Apple Maps for the production one. Split by the same condition as the
@@ -133,8 +139,6 @@ final class AppEnvironment {
         // DEVELOPMENT WIRING. Production adapters replace these one for one.
         self.developmentGateway = MockDataGateway(store: store)
         self.auth = MockAuthService(store: store)
-        self.sms = MockSmsService()
-        self.email = MockEmailService()
         self.developmentPush = MockPushService()
         self.storeBilling = MockStoreBillingService()
         self.developmentLocation = MockLocationService()
@@ -200,8 +204,17 @@ final class AppEnvironment {
         return productionMaps ?? developmentMaps
     }
 
-    /// True while any user-facing capability is still simulated.
+    /// True while any user-facing capability is still backed by a local
+    /// stand-in. Keyed off `simulatedCount`, not `notLiveCount`: a capability
+    /// that is real but awaiting a credential is not a simulation, and saying
+    /// so in a production build would be wrong.
     var hasSimulatedServices: Bool { IntegrationRegistry.simulatedCount > 0 }
+
+    /// Capabilities that are implemented but cannot succeed until an external
+    /// account is configured. Shown as configuration work, not as breakage.
+    var servicesNeedingConfiguration: [IntegrationStatus] {
+        IntegrationRegistry.needingConfiguration
+    }
 
     /// Vocabulary for the signed-in company's trade. Neutral before sign-in.
     var terms: Terminology { activeSession?.terms ?? .generic }

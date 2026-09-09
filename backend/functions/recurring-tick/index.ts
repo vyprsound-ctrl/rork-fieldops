@@ -2,26 +2,42 @@ import { corsHeaders, createAdminClient, jsonResponse } from "../_shared/auth.ts
 
 /// Generates the recurring service visits that have fallen due.
 ///
-/// WHY THIS IS A SERVER FUNCTION: a maintenance contract that only produces its
-/// next visit when somebody happens to open the app is not a maintenance
-/// contract. This runs on a schedule, under the service role, whether or not a
-/// single phone is switched on.
+/// THIS IS NO LONGER THE PRODUCTION SCHEDULER. Migration 0005 registers a
+/// pg_cron job that calls `public.run_recurring_tick(7)` inside the database
+/// every morning, so recurring visits appear whether or not anything invokes
+/// this endpoint — no phone, no network hop and no shared secret involved.
+/// This function remains as the MANUAL entry point: a backfill after downtime,
+/// or a deliberate run while investigating an agreement.
 ///
 /// SECURITY: there is no user here, so there is no JWT. The function is
 /// deployed with --no-verify-jwt and authenticates the CALLER with a shared
-/// secret header. Without CRON_SECRET set it refuses to run at all rather than
-/// leaving an unauthenticated job-creation endpoint on the internet.
+/// secret header, compared in constant time. Without CRON_SECRET set it
+/// refuses to run at all rather than leaving an unauthenticated
+/// job-creation endpoint on the internet.
 ///
-/// IDEMPOTENCY: the work is done by `generate_due_recurring_jobs`, which writes
-/// through a unique index on (service_agreement_id, generated_for_date). Two
-/// overlapping runs, a retry, or a manual invocation on the same day cannot
-/// produce two visits for one period — the second insert simply loses.
+/// IT CALLS THE SAME LOCKED PATH AS THE SCHEDULE. Previously this invoked
+/// `generate_due_recurring_jobs` directly, which meant a manual run could
+/// overlap the scheduled one. Overlapping runs cannot create a duplicate visit
+/// — the partial unique index on (service_agreement_id, generated_for_date)
+/// arbitrates that — but the loser of the race has already drawn a number from
+/// the company's job sequence, leaving a permanent gap in that company's job
+/// numbering. Going through `run_recurring_tick` means both paths contend for
+/// the same advisory lock, so the second one returns immediately instead.
+///
+/// The per-company argument this function used to accept has been removed. It
+/// had no caller, and it reached the generator by a route that skipped that
+/// lock — the two reasons not to keep an option.
 
-interface GenerationRow {
-  service_agreement_id: string;
-  job_id: string | null;
-  scheduled_for: string;
-  outcome: string;
+interface TickSummary {
+  ran: boolean;
+  skipped?: string;
+  at?: string;
+  horizonDays?: number;
+  considered?: number;
+  generated?: number;
+  alreadyGenerated?: number;
+  failed?: number;
+  failures?: string[];
 }
 
 Deno.serve(async (req) => {
@@ -41,16 +57,16 @@ Deno.serve(async (req) => {
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
   if (diff !== 0) return jsonResponse({ error: "Forbidden" }, 403);
 
-  const body = (await req.json().catch(() => ({}))) as { horizonDays?: number; companyId?: string };
+  const body = (await req.json().catch(() => ({}))) as { horizonDays?: number };
 
   // A small horizon lets visits appear on the schedule a little before they are
-  // strictly due, which is what a dispatcher actually wants.
-  const horizon = Math.max(0, Math.min(Number(body.horizonDays ?? 0), 90));
+  // strictly due, which is what a dispatcher actually wants. The scheduled job
+  // uses 7; this defaults to the same so a manual run behaves identically.
+  const horizon = Math.max(0, Math.min(Number(body.horizonDays ?? 7), 90));
 
   const admin = createAdminClient();
 
-  const { data, error } = await admin.rpc("generate_due_recurring_jobs", {
-    p_company: body.companyId ?? null,
+  const { data, error } = await admin.rpc("run_recurring_tick", {
     p_horizon_days: horizon,
   });
 
@@ -59,25 +75,20 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Generation failed" }, 500);
   }
 
-  const rows = (data ?? []) as GenerationRow[];
-  const generated = rows.filter((r) => r.outcome === "generated");
-  const skipped = rows.filter((r) => r.outcome === "alreadyGenerated");
-  const failed = rows.filter((r) => r.outcome.startsWith("failed"));
+  const summary = (data ?? { ran: false }) as TickSummary;
 
-  if (failed.length > 0) {
-    console.error(`[recurring-tick] ${failed.length} agreement(s) failed`, failed.map((f) => f.outcome));
+  // A run that generated nothing because another run held the lock is reported
+  // as exactly that, rather than as a successful no-op.
+  if (summary.ran === false) {
+    return jsonResponse({ ...summary, manual: true }, 200);
   }
 
-  return jsonResponse({
-    ran: true,
-    horizonDays: horizon,
-    generated: generated.length,
-    alreadyGenerated: skipped.length,
-    failed: failed.length,
-    jobs: generated.map((r) => ({
-      serviceAgreementId: r.service_agreement_id,
-      jobId: r.job_id,
-      scheduledFor: r.scheduled_for,
-    })),
-  });
+  if ((summary.failed ?? 0) > 0) {
+    console.error(
+      `[recurring-tick] ${summary.failed} agreement(s) failed`,
+      summary.failures ?? [],
+    );
+  }
+
+  return jsonResponse({ ...summary, manual: true });
 });

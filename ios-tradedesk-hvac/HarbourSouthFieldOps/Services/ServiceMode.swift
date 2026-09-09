@@ -1,12 +1,41 @@
 import Foundation
 
-/// Marks whether a capability is backed by a real integration or a local
-/// simulation. Nothing simulated is ever presented as production-ready.
+/// How a capability is currently backed.
+///
+/// There are three states rather than two, because "simulated" and "not
+/// configured" are different promises to the user and conflating them was
+/// actively misleading. SMS is the clearest case: no part of this app fakes an
+/// SMS any more. The send runs server-side against Twilio, and with no
+/// credentials configured the attempt is recorded as **failed** — so calling it
+/// "simulated" implied a pretend success that does not exist, while calling it
+/// "live" would imply messages are being delivered. It is neither: it is real
+/// code awaiting a credential.
 nonisolated enum ServiceMode: String, Sendable {
+    /// A local stand-in produces the result. Nothing leaves the device.
     case simulated
+    /// The real integration, connected and working.
     case production
+    /// The real integration is implemented and wired, but a credential or
+    /// external account is missing, so the capability cannot succeed yet.
+    /// Attempts fail honestly rather than pretending to work.
+    case needsConfiguration
 
+    /// True only for a local stand-in. Deliberately false for
+    /// `needsConfiguration`: that path fabricates nothing.
     var isSimulated: Bool { self == .simulated }
+
+    /// True when the capability cannot currently succeed, for either reason.
+    /// This — not `isSimulated` — is what "don't promise the user this works"
+    /// should be keyed off.
+    var isNotLive: Bool { self != .production }
+
+    var label: String {
+        switch self {
+        case .simulated: return "Simulated"
+        case .production: return "Live"
+        case .needsConfiguration: return "Needs configuration"
+        }
+    }
 }
 
 /// One integration surface and its current backing.
@@ -52,16 +81,16 @@ nonisolated enum IntegrationRegistry {
         IntegrationStatus(
             id: "sms",
             name: "SMS",
-            mode: .simulated,
+            mode: .needsConfiguration,
             plannedProvider: "Twilio, server-side",
-            detail: "Sending runs server-side, never from the device, and each attempt's real outcome is recorded against the invoice. With no provider credentials configured an attempt is recorded as failed — never as sent."
+            detail: "Not simulated and not live: the send is real server-side code, but Twilio credentials have not been configured. Sending never runs from the device, and each attempt's real outcome is recorded against the invoice — with no credentials an attempt is recorded as failed, never as sent, and any SMS credit it reserved is returned."
         ),
         IntegrationStatus(
             id: "email",
             name: "Email",
-            mode: .simulated,
+            mode: .needsConfiguration,
             plannedProvider: "Resend, server-side",
-            detail: "Sending runs server-side, never from the device, and each attempt's real outcome is recorded against the invoice. With no provider credentials configured an attempt is recorded as failed — never as sent."
+            detail: "Not simulated and not live: the send is real server-side code, but email provider credentials have not been configured. Sending never runs from the device, and each attempt's real outcome is recorded against the invoice — with no credentials an attempt is recorded as failed, never as sent."
         ),
         IntegrationStatus(
             id: "location",
@@ -102,11 +131,30 @@ nonisolated enum IntegrationRegistry {
         IntegrationStatus(
             id: "storeBilling",
             name: "Subscription billing",
-            mode: .simulated,
+            mode: .needsConfiguration,
             plannedProvider: "Apple In-App Purchase",
             detail: "Needs App Store Connect configuration. Seat counting and pricing are live and read from the database; the purchase itself is not, and no purchase is ever recorded as made. This is an iOS product — there is no Google Play billing path."
+        ),
+        IntegrationStatus(
+            id: "recurring",
+            name: "Recurring service",
+            mode: SupabaseClientProvider.isConfigured ? .production : .simulated,
+            plannedProvider: "Scheduled in the database",
+            detail: SupabaseClientProvider.isConfigured
+                ? "Due service agreements generate their next visit from a schedule inside the database itself, so visits appear whether or not anybody opens this app. A visit already generated for a period is never generated twice. The development stack generates nothing."
+                : "No schedule. Recurring agreements are listed but generate nothing."
         )
     ]
 
+    /// How many capabilities are backed by a local stand-in.
     static var simulatedCount: Int { all.filter { $0.mode.isSimulated }.count }
+
+    /// How many capabilities cannot currently succeed — simulated or awaiting a
+    /// credential. Used wherever the user is being told what does not yet work.
+    static var notLiveCount: Int { all.filter { $0.mode.isNotLive }.count }
+
+    /// The capabilities that are real but awaiting an external credential.
+    static var needingConfiguration: [IntegrationStatus] {
+        all.filter { $0.mode == .needsConfiguration }
+    }
 }

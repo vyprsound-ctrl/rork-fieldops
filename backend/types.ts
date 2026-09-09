@@ -26,6 +26,7 @@ export type Database = {
           created_at: string
           customer_id: string
           id: string
+          is_default: boolean
           latitude: number
           line1: string
           line2: string | null
@@ -41,6 +42,7 @@ export type Database = {
           created_at?: string
           customer_id: string
           id?: string
+          is_default?: boolean
           latitude?: number
           line1: string
           line2?: string | null
@@ -56,6 +58,7 @@ export type Database = {
           created_at?: string
           customer_id?: string
           id?: string
+          is_default?: boolean
           latitude?: number
           line1?: string
           line2?: string | null
@@ -155,6 +158,8 @@ export type Database = {
           country_code: string
           created_at: string
           currency_code: string
+          default_payment_terms_days: number
+          default_payment_terms_label: string
           default_tax_rate: number
           id: string
           name: string
@@ -172,6 +177,8 @@ export type Database = {
           country_code: string
           created_at?: string
           currency_code: string
+          default_payment_terms_days?: number
+          default_payment_terms_label?: string
           default_tax_rate?: number
           id?: string
           name: string
@@ -189,6 +196,8 @@ export type Database = {
           country_code?: string
           created_at?: string
           currency_code?: string
+          default_payment_terms_days?: number
+          default_payment_terms_label?: string
           default_tax_rate?: number
           id?: string
           name?: string
@@ -204,8 +213,11 @@ export type Database = {
       }
       company_subscriptions: {
         Row: {
+          active_paid_users: number
+          additional_user_cents: number
           additional_users: number
           apple_original_transaction_id: string | null
+          base_cents: number
           billing_period: Database["public"]["Enums"]["billing_period"]
           cancelled_at: string | null
           company_id: string
@@ -216,17 +228,29 @@ export type Database = {
           id: string
           included_users: number
           is_trial: boolean
+          last_payment_failed_at: string | null
+          last_payment_failure: string | null
+          monthly_price_cents: number
+          past_due_since: string | null
           plan: Database["public"]["Enums"]["subscription_plan"]
           renewal_date: string
           seat_count: number
+          seats_synced_at: string | null
           status: Database["public"]["Enums"]["subscription_status"]
           store: Database["public"]["Enums"]["billing_store"]
+          stripe_customer_id: string | null
+          stripe_price_id: string | null
+          stripe_subscription_id: string | null
+          tier_id: string | null
           trial_ends_at: string | null
           updated_at: string
         }
         Insert: {
+          active_paid_users?: number
+          additional_user_cents?: number
           additional_users?: number
           apple_original_transaction_id?: string | null
+          base_cents?: number
           billing_period?: Database["public"]["Enums"]["billing_period"]
           cancelled_at?: string | null
           company_id: string
@@ -237,17 +261,29 @@ export type Database = {
           id?: string
           included_users?: number
           is_trial?: boolean
+          last_payment_failed_at?: string | null
+          last_payment_failure?: string | null
+          monthly_price_cents?: number
+          past_due_since?: string | null
           plan?: Database["public"]["Enums"]["subscription_plan"]
           renewal_date?: string
           seat_count?: number
+          seats_synced_at?: string | null
           status?: Database["public"]["Enums"]["subscription_status"]
           store?: Database["public"]["Enums"]["billing_store"]
+          stripe_customer_id?: string | null
+          stripe_price_id?: string | null
+          stripe_subscription_id?: string | null
+          tier_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
         }
         Update: {
+          active_paid_users?: number
+          additional_user_cents?: number
           additional_users?: number
           apple_original_transaction_id?: string | null
+          base_cents?: number
           billing_period?: Database["public"]["Enums"]["billing_period"]
           cancelled_at?: string | null
           company_id?: string
@@ -258,11 +294,20 @@ export type Database = {
           id?: string
           included_users?: number
           is_trial?: boolean
+          last_payment_failed_at?: string | null
+          last_payment_failure?: string | null
+          monthly_price_cents?: number
+          past_due_since?: string | null
           plan?: Database["public"]["Enums"]["subscription_plan"]
           renewal_date?: string
           seat_count?: number
+          seats_synced_at?: string | null
           status?: Database["public"]["Enums"]["subscription_status"]
           store?: Database["public"]["Enums"]["billing_store"]
+          stripe_customer_id?: string | null
+          stripe_price_id?: string | null
+          stripe_subscription_id?: string | null
+          tier_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
         }
@@ -272,6 +317,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: true
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_subscriptions_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_tiers"
             referencedColumns: ["id"]
           },
         ]
@@ -348,6 +400,7 @@ export type Database = {
           id: string
           name: string
           notes: string | null
+          status: Database["public"]["Enums"]["customer_status"]
           type: Database["public"]["Enums"]["customer_type"]
           updated_at: string
         }
@@ -358,6 +411,7 @@ export type Database = {
           id?: string
           name: string
           notes?: string | null
+          status?: Database["public"]["Enums"]["customer_status"]
           type?: Database["public"]["Enums"]["customer_type"]
           updated_at?: string
         }
@@ -368,6 +422,7 @@ export type Database = {
           id?: string
           name?: string
           notes?: string | null
+          status?: Database["public"]["Enums"]["customer_status"]
           type?: Database["public"]["Enums"]["customer_type"]
           updated_at?: string
         }
@@ -429,8 +484,10 @@ export type Database = {
           category: string
           company_id: string
           created_at: string
+          customer_id: string | null
           id: string
           installed_on: string
+          is_active: boolean
           make: string
           model: string
           photo_url: string | null
@@ -444,8 +501,10 @@ export type Database = {
           category?: string
           company_id: string
           created_at?: string
+          customer_id?: string | null
           id?: string
           installed_on: string
+          is_active?: boolean
           make?: string
           model?: string
           photo_url?: string | null
@@ -459,8 +518,10 @@ export type Database = {
           category?: string
           company_id?: string
           created_at?: string
+          customer_id?: string | null
           id?: string
           installed_on?: string
+          is_active?: boolean
           make?: string
           model?: string
           photo_url?: string | null
@@ -1026,6 +1087,61 @@ export type Database = {
           },
         ]
       }
+      job_labour: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string
+          hourly_rate: number | null
+          id: string
+          job_id: string
+          minutes: number
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description: string
+          hourly_rate?: number | null
+          id?: string
+          job_id: string
+          minutes?: number
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string
+          hourly_rate?: number | null
+          id?: string
+          job_id?: string
+          minutes?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_labour_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_labour_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_labour_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_notes: {
         Row: {
           body: string
@@ -1072,6 +1188,61 @@ export type Database = {
           {
             foreignKeyName: "job_notes_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_parts: {
+        Row: {
+          company_id: string
+          created_at: string
+          description: string
+          id: string
+          job_id: string
+          quantity: number
+          recorded_by_user_id: string
+          unit_cost: number | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          description: string
+          id?: string
+          job_id: string
+          quantity?: number
+          recorded_by_user_id: string
+          unit_cost?: number | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          job_id?: string
+          quantity?: number
+          recorded_by_user_id?: string
+          unit_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_parts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_parts_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_parts_recorded_by_user_id_fkey"
+            columns: ["recorded_by_user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
             referencedColumns: ["id"]
@@ -1233,6 +1404,7 @@ export type Database = {
           created_at: string
           customer_id: string
           equipment_id: string | null
+          generated_for_date: string | null
           id: string
           job_description: string
           kind: Database["public"]["Enums"]["job_kind"]
@@ -1254,6 +1426,7 @@ export type Database = {
           created_at?: string
           customer_id: string
           equipment_id?: string | null
+          generated_for_date?: string | null
           id?: string
           job_description?: string
           kind?: Database["public"]["Enums"]["job_kind"]
@@ -1275,6 +1448,7 @@ export type Database = {
           created_at?: string
           customer_id?: string
           equipment_id?: string | null
+          generated_for_date?: string | null
           id?: string
           job_description?: string
           kind?: Database["public"]["Enums"]["job_kind"]
@@ -1361,21 +1535,29 @@ export type Database = {
           claimed_at: string | null
           company_id: string
           created_at: string
+          credits_charged: number
+          credits_refunded: number
           customer_id: string | null
           deep_link: string | null
           delivered_at: string | null
           failure_reason: string | null
+          from_number: string | null
           id: string
           invoice_id: string | null
           job_id: string | null
+          provider_error: string | null
           provider_reference: string | null
+          provider_status: string | null
           push_device_id: string | null
           recipient: string
+          segments: number | null
           sent_at: string | null
           status: Database["public"]["Enums"]["notification_status"]
           target_user_id: string | null
           template: string
           title: string | null
+          to_number: string | null
+          updated_at: string
         }
         Insert: {
           body?: string | null
@@ -1383,21 +1565,29 @@ export type Database = {
           claimed_at?: string | null
           company_id: string
           created_at?: string
+          credits_charged?: number
+          credits_refunded?: number
           customer_id?: string | null
           deep_link?: string | null
           delivered_at?: string | null
           failure_reason?: string | null
+          from_number?: string | null
           id?: string
           invoice_id?: string | null
           job_id?: string | null
+          provider_error?: string | null
           provider_reference?: string | null
+          provider_status?: string | null
           push_device_id?: string | null
           recipient?: string
+          segments?: number | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           target_user_id?: string | null
           template?: string
           title?: string | null
+          to_number?: string | null
+          updated_at?: string
         }
         Update: {
           body?: string | null
@@ -1405,21 +1595,29 @@ export type Database = {
           claimed_at?: string | null
           company_id?: string
           created_at?: string
+          credits_charged?: number
+          credits_refunded?: number
           customer_id?: string | null
           deep_link?: string | null
           delivered_at?: string | null
           failure_reason?: string | null
+          from_number?: string | null
           id?: string
           invoice_id?: string | null
           job_id?: string | null
+          provider_error?: string | null
           provider_reference?: string | null
+          provider_status?: string | null
           push_device_id?: string | null
           recipient?: string
+          segments?: number | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           target_user_id?: string | null
           template?: string
           title?: string | null
+          to_number?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -1473,48 +1671,135 @@ export type Database = {
           },
         ]
       }
+      payment_intents: {
+        Row: {
+          amount_cents: number
+          application_fee_cents: number
+          client_secret_issued_at: string | null
+          company_id: string
+          created_at: string
+          currency_code: string
+          id: string
+          invoice_id: string
+          status: string
+          stripe_account_id: string
+          stripe_payment_intent_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          application_fee_cents?: number
+          client_secret_issued_at?: string | null
+          company_id: string
+          created_at?: string
+          currency_code?: string
+          id?: string
+          invoice_id: string
+          status?: string
+          stripe_account_id: string
+          stripe_payment_intent_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          application_fee_cents?: number
+          client_secret_issued_at?: string | null
+          company_id?: string
+          created_at?: string
+          currency_code?: string
+          id?: string
+          invoice_id?: string
+          status?: string
+          stripe_account_id?: string
+          stripe_payment_intent_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_intents_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_intents_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payments: {
         Row: {
           amount: number
+          application_fee_cents: number | null
           company_id: string
           created_at: string
+          currency_code: string | null
+          failure_reason: string | null
           id: string
           invoice_id: string
           is_simulated: boolean
           method: Database["public"]["Enums"]["payment_method"]
+          net_cents: number | null
           note: string | null
+          paid_by_customer: boolean
+          processing_fee_cents: number | null
           received_at: string
-          recorded_by_user_id: string
+          recorded_by_user_id: string | null
           reference: string | null
           status: Database["public"]["Enums"]["payment_status"]
+          stripe_account_id: string | null
+          stripe_charge_id: string | null
+          stripe_payment_intent_id: string | null
         }
         Insert: {
           amount: number
+          application_fee_cents?: number | null
           company_id: string
           created_at?: string
+          currency_code?: string | null
+          failure_reason?: string | null
           id?: string
           invoice_id: string
           is_simulated?: boolean
           method: Database["public"]["Enums"]["payment_method"]
+          net_cents?: number | null
           note?: string | null
+          paid_by_customer?: boolean
+          processing_fee_cents?: number | null
           received_at?: string
-          recorded_by_user_id: string
+          recorded_by_user_id?: string | null
           reference?: string | null
           status?: Database["public"]["Enums"]["payment_status"]
+          stripe_account_id?: string | null
+          stripe_charge_id?: string | null
+          stripe_payment_intent_id?: string | null
         }
         Update: {
           amount?: number
+          application_fee_cents?: number | null
           company_id?: string
           created_at?: string
+          currency_code?: string | null
+          failure_reason?: string | null
           id?: string
           invoice_id?: string
           is_simulated?: boolean
           method?: Database["public"]["Enums"]["payment_method"]
+          net_cents?: number | null
           note?: string | null
+          paid_by_customer?: boolean
+          processing_fee_cents?: number | null
           received_at?: string
-          recorded_by_user_id?: string
+          recorded_by_user_id?: string | null
           reference?: string | null
           status?: Database["public"]["Enums"]["payment_status"]
+          stripe_account_id?: string | null
+          stripe_charge_id?: string | null
+          stripe_payment_intent_id?: string | null
         }
         Relationships: [
           {
@@ -1561,6 +1846,27 @@ export type Database = {
           id?: boolean
           permission_count?: number
           synced_at?: string
+        }
+        Relationships: []
+      }
+      platform_settings: {
+        Row: {
+          description: string
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          description?: string
+          key: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          description?: string
+          key?: string
+          updated_at?: string
+          value?: Json
         }
         Relationships: []
       }
@@ -1821,8 +2127,14 @@ export type Database = {
           equipment_id: string | null
           frequency: Database["public"]["Enums"]["service_frequency"]
           id: string
+          interval_days: number | null
           is_active: boolean
+          last_generated_job_id: string | null
+          last_generated_on: string | null
+          lead_time_days: number
           next_due_date: string
+          notes: string | null
+          template_description: string
           template_job_kind: Database["public"]["Enums"]["job_kind"]
           template_title: string
           updated_at: string
@@ -1835,8 +2147,14 @@ export type Database = {
           equipment_id?: string | null
           frequency: Database["public"]["Enums"]["service_frequency"]
           id?: string
+          interval_days?: number | null
           is_active?: boolean
+          last_generated_job_id?: string | null
+          last_generated_on?: string | null
+          lead_time_days?: number
           next_due_date: string
+          notes?: string | null
+          template_description?: string
           template_job_kind: Database["public"]["Enums"]["job_kind"]
           template_title?: string
           updated_at?: string
@@ -1849,8 +2167,14 @@ export type Database = {
           equipment_id?: string | null
           frequency?: Database["public"]["Enums"]["service_frequency"]
           id?: string
+          interval_days?: number | null
           is_active?: boolean
+          last_generated_job_id?: string | null
+          last_generated_on?: string | null
+          lead_time_days?: number
           next_due_date?: string
+          notes?: string | null
+          template_description?: string
           template_job_kind?: Database["public"]["Enums"]["job_kind"]
           template_title?: string
           updated_at?: string
@@ -1898,7 +2222,41 @@ export type Database = {
             referencedRelation: "equipment"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "service_agreements_last_generated_job_id_fkey"
+            columns: ["last_generated_job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
         ]
+      }
+      sms_bundles: {
+        Row: {
+          credits: number
+          id: string
+          is_active: boolean
+          price_cents: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          credits: number
+          id: string
+          is_active?: boolean
+          price_cents: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          credits?: number
+          id?: string
+          is_active?: boolean
+          price_cents?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       sms_credit_ledger: {
         Row: {
@@ -1974,6 +2332,212 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      sms_credit_purchases: {
+        Row: {
+          bundle_id: string | null
+          company_id: string
+          created_at: string
+          credited_at: string | null
+          credits: number
+          currency_code: string
+          id: string
+          price_cents: number
+          requested_by_user_id: string | null
+          status: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          bundle_id?: string | null
+          company_id: string
+          created_at?: string
+          credited_at?: string | null
+          credits: number
+          currency_code?: string
+          id?: string
+          price_cents: number
+          requested_by_user_id?: string | null
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          bundle_id?: string | null
+          company_id?: string
+          created_at?: string
+          credited_at?: string | null
+          credits?: number
+          currency_code?: string
+          id?: string
+          price_cents?: number
+          requested_by_user_id?: string | null
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_credit_purchases_bundle_id_fkey"
+            columns: ["bundle_id"]
+            isOneToOne: false
+            referencedRelation: "sms_bundles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_credit_purchases_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_credit_purchases_requested_by_user_id_fkey"
+            columns: ["requested_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_connect_accounts: {
+        Row: {
+          charges_enabled: boolean
+          company_id: string
+          country_code: string
+          created_at: string
+          default_currency: string
+          details_submitted: boolean
+          disabled_reason: string | null
+          last_synced_at: string
+          onboarded_at: string | null
+          payouts_enabled: boolean
+          requirements_due: string[]
+          stripe_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          charges_enabled?: boolean
+          company_id: string
+          country_code?: string
+          created_at?: string
+          default_currency?: string
+          details_submitted?: boolean
+          disabled_reason?: string | null
+          last_synced_at?: string
+          onboarded_at?: string | null
+          payouts_enabled?: boolean
+          requirements_due?: string[]
+          stripe_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          charges_enabled?: boolean
+          company_id?: string
+          country_code?: string
+          created_at?: string
+          default_currency?: string
+          details_submitted?: boolean
+          disabled_reason?: string | null
+          last_synced_at?: string
+          onboarded_at?: string | null
+          payouts_enabled?: boolean
+          requirements_due?: string[]
+          stripe_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_connect_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stripe_events: {
+        Row: {
+          account_id: string | null
+          company_id: string | null
+          error_detail: string | null
+          id: string
+          livemode: boolean
+          outcome: string | null
+          processed_at: string | null
+          received_at: string
+          type: string
+        }
+        Insert: {
+          account_id?: string | null
+          company_id?: string | null
+          error_detail?: string | null
+          id: string
+          livemode?: boolean
+          outcome?: string | null
+          processed_at?: string | null
+          received_at?: string
+          type: string
+        }
+        Update: {
+          account_id?: string | null
+          company_id?: string | null
+          error_detail?: string | null
+          id?: string
+          livemode?: boolean
+          outcome?: string | null
+          processed_at?: string | null
+          received_at?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscription_tiers: {
+        Row: {
+          additional_user_cents: number
+          base_cents: number
+          display_name: string
+          id: string
+          is_active: boolean
+          max_users: number
+          min_users: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          additional_user_cents: number
+          base_cents: number
+          display_name: string
+          id: string
+          is_active?: boolean
+          max_users: number
+          min_users: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          additional_user_cents?: number
+          base_cents?: number
+          display_name?: string
+          id?: string
+          is_active?: boolean
+          max_users?: number
+          min_users?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {
@@ -2188,7 +2752,33 @@ export type Database = {
           token: string
         }[]
       }
+      commerce_company_scope: { Args: { p_company?: string }; Returns: string }
+      company_active_paid_users: {
+        Args: { p_company?: string }
+        Returns: number
+      }
+      company_active_paid_users_for: {
+        Args: { p_company: string }
+        Returns: number
+      }
+      company_can_accept_payments: {
+        Args: { p_company?: string }
+        Returns: boolean
+      }
       company_currency_code: { Args: never; Returns: string }
+      consume_sms_credit: {
+        Args: {
+          p_credits?: number
+          p_customer?: string
+          p_job?: string
+          p_notification: string
+        }
+        Returns: {
+          balance_after: number
+          credits_charged: number
+          outcome: string
+        }[]
+      }
       convert_quote_to_job: {
         Args: {
           p_field_worker_user_id?: string
@@ -2293,6 +2883,14 @@ export type Database = {
         }
         Returns: string
       }
+      credit_sms_purchase: {
+        Args: { p_purchase: string }
+        Returns: {
+          balance_after: number
+          credits_added: number
+          outcome: string
+        }[]
+      }
       current_app_role: {
         Args: never
         Returns: Database["public"]["Enums"]["app_role"]
@@ -2318,6 +2916,15 @@ export type Database = {
           p_user: string
         }
         Returns: number
+      }
+      generate_due_recurring_jobs: {
+        Args: { p_company?: string; p_horizon_days?: number }
+        Returns: {
+          job_id: string
+          outcome: string
+          scheduled_for: string
+          service_agreement_id: string
+        }[]
       }
       has_perm: {
         Args: { p: Database["public"]["Enums"]["app_permission"] }
@@ -2345,6 +2952,21 @@ export type Database = {
       }
       next_document_number: {
         Args: { p_kind: Database["public"]["Enums"]["document_kind"] }
+        Returns: string
+      }
+      next_document_number_for_company: {
+        Args: {
+          p_company: string
+          p_kind: Database["public"]["Enums"]["document_kind"]
+        }
+        Returns: string
+      }
+      next_service_date: {
+        Args: {
+          p_frequency: Database["public"]["Enums"]["service_frequency"]
+          p_from: string
+          p_interval?: number
+        }
         Returns: string
       }
       payment_terms_days: { Args: { p_label: string }; Returns: number }
@@ -2392,6 +3014,34 @@ export type Database = {
         }
         Returns: undefined
       }
+      record_payment_from_stripe: {
+        Args: {
+          p_account?: string
+          p_amount_cents: number
+          p_application_fee_cents?: number
+          p_charge?: string
+          p_company: string
+          p_currency?: string
+          p_intent: string
+          p_invoice: string
+          p_net_cents?: number
+          p_processing_fee_cents?: number
+        }
+        Returns: {
+          amount_paid: number
+          balance: number
+          outcome: string
+          status: string
+        }[]
+      }
+      refund_sms_credit: {
+        Args: { p_notification: string; p_reason?: string }
+        Returns: {
+          balance_after: number
+          credits_refunded: number
+          outcome: string
+        }[]
+      }
       register_push_device: {
         Args: {
           p_app_version?: string
@@ -2415,6 +3065,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      resolve_due_date: {
+        Args: { p_label: string; p_reference?: string }
+        Returns: string
+      }
       revoke_invitation: {
         Args: { p_invitation_id: string }
         Returns: undefined
@@ -2423,6 +3077,7 @@ export type Database = {
         Args: { p_invoice: string }
         Returns: undefined
       }
+      run_recurring_tick: { Args: { p_horizon_days?: number }; Returns: Json }
       save_invoice_line_item: {
         Args: {
           p_description: string
@@ -2468,10 +3123,36 @@ export type Database = {
         }
         Returns: string
       }
+      sms_credit_balance: { Args: { p_company?: string }; Returns: number }
+      sms_credit_balance_for: { Args: { p_company: string }; Returns: number }
       sms_credits_per_message: { Args: never; Returns: number }
       snapshot_quote_lines: {
         Args: { p_invoice: string; p_quote: string }
         Returns: number
+      }
+      subscription_quote: {
+        Args: { p_users?: number }
+        Returns: {
+          active_paid_users: number
+          additional_cents: number
+          additional_user_cents: number
+          additional_users: number
+          base_cents: number
+          is_over_capacity: boolean
+          max_users: number
+          monthly_price_cents: number
+          next_user_cents: number
+          tier_id: string
+          tier_name: string
+        }[]
+      }
+      sync_subscription_seats: {
+        Args: { p_company?: string }
+        Returns: {
+          active_paid_users: number
+          monthly_price_cents: number
+          tier_id: string
+        }[]
       }
       try_advance_job: {
         Args: { p_job: string; p_to: Database["public"]["Enums"]["job_status"] }
@@ -2557,6 +3238,7 @@ export type Database = {
       app_user_status: "active" | "invited" | "suspended"
       billing_period: "monthly" | "annual"
       billing_store: "apple" | "google" | "none"
+      customer_status: "active" | "archived"
       customer_type:
         | "residential"
         | "commercial"
@@ -2572,7 +3254,7 @@ export type Database = {
         | "overdue"
         | "void"
       job_kind: "callOut" | "install" | "maintenance" | "warranty"
-      job_photo_kind: "before" | "after" | "part" | "proof"
+      job_photo_kind: "before" | "after" | "part" | "proof" | "signature"
       job_priority: "standard" | "urgent"
       job_status:
         | "scheduled"
@@ -2587,9 +3269,21 @@ export type Database = {
       location_capture_event: "travelStarted" | "arrived" | "completed"
       note_visibility: "internalOnly" | "customerVisible"
       notification_channel: "sms" | "email" | "push"
-      notification_status: "queued" | "sent" | "delivered" | "failed"
-      payment_method: "card" | "ach" | "cash" | "check"
-      payment_status: "pending" | "succeeded" | "failed" | "refunded"
+      notification_status:
+        | "queued"
+        | "sent"
+        | "delivered"
+        | "failed"
+        | "accepted"
+        | "undelivered"
+      payment_method: "card" | "ach" | "cash" | "check" | "stripe"
+      payment_status:
+        | "pending"
+        | "succeeded"
+        | "failed"
+        | "refunded"
+        | "processing"
+        | "cancelled"
       quote_status:
         | "draft"
         | "sent"
@@ -2597,13 +3291,23 @@ export type Database = {
         | "accepted"
         | "declined"
         | "expired"
-      service_frequency: "monthly" | "quarterly" | "semiAnnual" | "annual"
+      service_frequency:
+        | "monthly"
+        | "quarterly"
+        | "semiAnnual"
+        | "annual"
+        | "custom"
       sms_ledger_transaction_type:
         | "purchase"
         | "consumption"
         | "refund"
         | "adjustment"
-      subscription_plan: "soloTrader" | "team" | "business"
+      subscription_plan:
+        | "soloTrader"
+        | "team"
+        | "business"
+        | "growingBusiness"
+        | "largerBusiness"
       subscription_status:
         | "trialing"
         | "active"
@@ -2625,12 +3329,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2654,11 +3358,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2679,11 +3383,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2704,11 +3408,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2721,11 +3425,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -2793,6 +3497,7 @@ export const Constants = {
       app_user_status: ["active", "invited", "suspended"],
       billing_period: ["monthly", "annual"],
       billing_store: ["apple", "google", "none"],
+      customer_status: ["active", "archived"],
       customer_type: [
         "residential",
         "commercial",
@@ -2810,7 +3515,7 @@ export const Constants = {
         "void",
       ],
       job_kind: ["callOut", "install", "maintenance", "warranty"],
-      job_photo_kind: ["before", "after", "part", "proof"],
+      job_photo_kind: ["before", "after", "part", "proof", "signature"],
       job_priority: ["standard", "urgent"],
       job_status: [
         "scheduled",
@@ -2826,9 +3531,23 @@ export const Constants = {
       location_capture_event: ["travelStarted", "arrived", "completed"],
       note_visibility: ["internalOnly", "customerVisible"],
       notification_channel: ["sms", "email", "push"],
-      notification_status: ["queued", "sent", "delivered", "failed"],
-      payment_method: ["card", "ach", "cash", "check"],
-      payment_status: ["pending", "succeeded", "failed", "refunded"],
+      notification_status: [
+        "queued",
+        "sent",
+        "delivered",
+        "failed",
+        "accepted",
+        "undelivered",
+      ],
+      payment_method: ["card", "ach", "cash", "check", "stripe"],
+      payment_status: [
+        "pending",
+        "succeeded",
+        "failed",
+        "refunded",
+        "processing",
+        "cancelled",
+      ],
       quote_status: [
         "draft",
         "sent",
@@ -2837,14 +3556,26 @@ export const Constants = {
         "declined",
         "expired",
       ],
-      service_frequency: ["monthly", "quarterly", "semiAnnual", "annual"],
+      service_frequency: [
+        "monthly",
+        "quarterly",
+        "semiAnnual",
+        "annual",
+        "custom",
+      ],
       sms_ledger_transaction_type: [
         "purchase",
         "consumption",
         "refund",
         "adjustment",
       ],
-      subscription_plan: ["soloTrader", "team", "business"],
+      subscription_plan: [
+        "soloTrader",
+        "team",
+        "business",
+        "growingBusiness",
+        "largerBusiness",
+      ],
       subscription_status: [
         "trialing",
         "active",

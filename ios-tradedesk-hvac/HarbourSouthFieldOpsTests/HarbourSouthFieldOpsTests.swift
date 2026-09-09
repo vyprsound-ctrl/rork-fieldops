@@ -433,7 +433,57 @@ struct IntegrationStatusTests {
     @Test("Store billing is not claimed as live without App Store Connect")
     func storeBillingIsNotClaimed() {
         let billing = IntegrationRegistry.all.first { $0.id == "storeBilling" }
-        #expect(billing?.mode == .simulated)
+        #expect(billing?.mode == .needsConfiguration)
+        #expect(billing?.mode.isNotLive == true)
+    }
+
+    /// The specific dishonesty this guards against: reporting a message as
+    /// sent, or as merely "simulated", when the real server-side send exists
+    /// but has no credentials and therefore records a failure.
+    @Test("Customer messaging reports needs-configuration, not simulated and not live")
+    func messagingIsNeitherFakedNorClaimed() {
+        for id in ["sms", "email"] {
+            let status = IntegrationRegistry.all.first { $0.id == id }
+            #expect(status != nil, "\(id) is missing from the registry")
+            #expect(status?.mode == .needsConfiguration, "\(id) must not claim to be live")
+            #expect(status?.mode.isSimulated == false, "\(id) fabricates nothing, so it is not simulated")
+            #expect(status?.mode.isNotLive == true, "\(id) cannot succeed yet")
+            // The user must be told delivery is not happening.
+            #expect(
+                status?.detail.localizedCaseInsensitiveContains("never as sent") == true,
+                "\(id) must state that an unconfigured attempt is not recorded as sent"
+            )
+        }
+    }
+
+    /// `needsConfiguration` exists precisely so these two never collapse into
+    /// one another again.
+    @Test("Needs-configuration is not simulated, and only production is live")
+    func modeSemanticsHold() {
+        #expect(ServiceMode.simulated.isSimulated)
+        #expect(ServiceMode.simulated.isNotLive)
+        #expect(ServiceMode.needsConfiguration.isSimulated == false)
+        #expect(ServiceMode.needsConfiguration.isNotLive)
+        #expect(ServiceMode.production.isSimulated == false)
+        #expect(ServiceMode.production.isNotLive == false)
+    }
+
+    /// Recurring generation is server-side scheduled, so a configured build
+    /// must not describe it as simulated.
+    @Test("Recurring service appears in the registry and is never silently absent")
+    func recurringIsAccountedFor() {
+        let recurring = IntegrationRegistry.all.first { $0.id == "recurring" }
+        #expect(recurring != nil, "recurring generation must be listed")
+        #expect(recurring?.detail.localizedCaseInsensitiveContains("never generated twice") == true)
+    }
+
+    @Test("The not-live count includes both simulated and unconfigured services")
+    func notLiveCountIsTheUnion() {
+        let simulated = IntegrationRegistry.all.filter { $0.mode == .simulated }.count
+        let waiting = IntegrationRegistry.all.filter { $0.mode == .needsConfiguration }.count
+        #expect(IntegrationRegistry.notLiveCount == simulated + waiting)
+        #expect(IntegrationRegistry.simulatedCount == simulated)
+        #expect(IntegrationRegistry.needingConfiguration.count == waiting)
     }
 
     @Test("Every integration states a provider and an explanation")
