@@ -471,6 +471,56 @@ nonisolated struct PaymentTermsSettings: Hashable, Sendable {
     let canManage: Bool
 }
 
+// MARK: - Company profile
+
+/// The company's own details, as they appear on quotes and invoices.
+///
+/// Read-only fields are deliberately part of the type. `trade`, `countryCode`
+/// and `currencyCode` decide terminology, address shape and every money label in
+/// the app; changing them after documents exist would retro-relabel historical
+/// records, so they are shown and not edited here.
+nonisolated struct CompanyProfileSettings: Hashable, Sendable {
+    var name: String
+    var phone: String
+    var addressLine: String
+    var city: String
+    var state: String
+    var postalCode: String
+    /// Percentage as typed by a person — 7.5 means 7.5%. Stored as the decimal
+    /// fraction the database holds, converted at the boundary so nobody has to
+    /// think in hundredths.
+    var defaultTaxRatePercent: Decimal
+    var timeZoneIdentifier: String
+
+    // Displayed, never edited.
+    let trade: Trade
+    let countryCode: String
+    let currencyCode: String
+    let canManage: Bool
+
+    /// What the database stores: 0.075 for 7.5%.
+    var defaultTaxRateFraction: Decimal { defaultTaxRatePercent / 100 }
+
+    /// Everything a document needs to identify who issued it. Empty lines are
+    /// dropped rather than printed as blanks.
+    var addressSummary: String {
+        [addressLine, [city, state].filter { !$0.isEmpty }.joined(separator: ", "), postalCode]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    /// Why a save would be refused, in the user's words. Nil means valid.
+    var validationError: String? {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Your company needs a name — it appears on every quote and invoice you send."
+        }
+        if defaultTaxRatePercent < 0 || defaultTaxRatePercent > 100 {
+            return "A tax rate has to be between 0% and 100%."
+        }
+        return nil
+    }
+}
+
 // MARK: - Gateway defaults
 
 extension DataGateway {
@@ -520,5 +570,13 @@ extension DataGateway {
 
     func updatePaymentTerms(session: TenantSession, option: PaymentTermOption, customDays: Int) async throws {
         throw DataError.rejected("Payment terms are only configurable on a live company account.")
+    }
+
+    func companyProfile(session: TenantSession) async throws -> CompanyProfileSettings {
+        throw DataError.rejected("Company details are only available on a live company account.")
+    }
+
+    func updateCompanyProfile(session: TenantSession, profile: CompanyProfileSettings) async throws {
+        throw DataError.rejected("Company details are only editable on a live company account.")
     }
 }

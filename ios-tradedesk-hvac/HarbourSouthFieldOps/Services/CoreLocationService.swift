@@ -3,26 +3,29 @@ import Foundation
 
 /// PRODUCTION IMPLEMENTATION — real positions from Core Location.
 ///
-/// **This adapter never starts continuous updates.** Every reading comes from
-/// `requestLocation()`, which Core Location answers with a single fix and then
-/// stops. There is no `startUpdatingLocation`, no significant-change monitoring,
-/// no region monitoring, no heading stream and no timer anywhere in this file.
-/// Background location is not requested and the app declares no location
-/// background mode, so iOS itself would refuse to deliver updates while
-/// suspended even if this class asked for them.
+/// **Two modes, and only two.**
 ///
-/// It also knows nothing about the database. It produces a `LocationFix` and
-/// hands it back; `FieldTransitionCoordinator` decides whether to ask for one
-/// and the `DataGateway` decides how to store it under the tenant's RLS rules.
-/// That separation is what keeps this testable and the security model in one
-/// place.
+/// 1. *One-shot capture.* `requestLocation()` answers with a single fix and
+///    stops. This is what a workflow transition uses.
+/// 2. *Travel tracking.* `startUpdatingLocation()` runs for exactly one leg —
+///    started when an engineer taps Start Travel, stopped when they arrive,
+///    when the job ends, or automatically after `maximumLegDuration`. There is
+///    no other caller and no timer that starts it.
+///
+/// Background delivery is enabled only for the duration of that leg, and only
+/// when the worker has granted *always* authorisation. `allowsBackgroundLocation
+/// Updates` is switched back off the moment the leg ends, so a suspended app
+/// holds no location assertion.
+///
+/// It knows nothing about the database. It produces `LocationFix` values and
+/// hands them back; `FieldTransitionCoordinator` decides when to ask, and the
+/// `DataGateway` decides how to store them under the tenant's RLS rules.
 @MainActor
 final class CoreLocationService: NSObject, LocationService {
     let mode: ServiceMode = .production
 
-    /// Core Location is perfectly capable of following someone around. This
-    /// adapter deliberately does not, and says so.
-    let performsBackgroundTracking: Bool = false
+    /// This adapter can follow a worker, but only across an active travel leg.
+    let performsBackgroundTracking: Bool = true
 
     private let manager: CLLocationManager
 
@@ -45,6 +48,23 @@ final class CoreLocationService: NSObject, LocationService {
     private var requestGeneration: Int = 0
     private var lastLocation: CLLocation?
 
+    // MARK: Travel leg state
+
+    /// The job currently being travelled to. Non-nil exactly while updating.
+    private var trackedJobID: String?
+    private var trackingHandler: (@Sendable (LocationFix) -> Void)?
+    private var lastTrackedWrite: Date?
+    /// Cancels the automatic stop when a leg ends normally.
+    private var legExpiryTask: Task<Void, Never>?
+
+    /// True only when the bundle actually declares the location background
+    /// mode. Setting `allowsBackgroundLocationUpdates` without it is a hard
+    /// crash, so this is checked rather than assumed.
+    private static let bundleAllowsBackgroundLocation: Bool = {
+        let modes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String]
+        return modes?.contains("location") ?? false
+    }()
+
     /// Set when the system reports a refusal while the app itself is
     /// authorised, which is how "location services are off device-wide" arrives.
     /// Checking `locationServicesEnabled()` directly would block the main actor.
@@ -58,9 +78,10 @@ final class CoreLocationService: NSObject, LocationService {
         // not a navigation trace, and asking for best-possible accuracy would
         // cost battery for precision nobody uses.
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
-        // No distanceFilter, no allowsBackgroundLocationUpdates and no
-        // pausesLocationUpdatesAutomatically: all three only matter for
-        // continuous updates, which this adapter never starts.
+        // Deliberately left at their defaults here. `distanceFilter`,
+        // `allowsBackgroundLocationUpdates` and `activityType` are configured
+        // when a travel leg starts and unwound when it ends, so an idle app
+        // holds no continuous-update configuration at all.
     }
 
     // MARK: - Authorisation
@@ -84,6 +105,44 @@ final class CoreLocationService: NSObject, LocationService {
         @unknown default:
             return .denied
         }
+    }
+
+    var backgroundAuthorizationState: LocationBackgroundState {
+        get async {
+            switch manager.authorizationStatus {
+            case .authorizedAlways:
+                // Always is only useful if the app may actually run in the
+                // background. Without the background mode it is foreground-only
+                // in practice, and saying otherwise would overpromise.
+                return Self.bundleAllowsBackgroundLocation ? .granted : .foregroundOnly
+            case .authorizedWhenInUse:
+                return .foregroundOnly
+            default:
+                return .noLocationPermission
+            }
+        }
+    }
+
+    /// Asks to upgrade while-in-use to always.
+    ///
+    /// iOS shows this prompt at most once per install and only after
+    /// while-in-use exists, so this is a request rather than a guarantee. The
+    /// answer is read back afterwards rather than assumed.
+    func requestBackgroundAuthorization() async -> LocationBackgroundState {
+        guard manager.authorizationStatus == .authorizedWhenInUse else {
+            return await backgroundAuthorizationState
+        }
+
+        return await withCheckedContinuation { continuation in
+            authorizationWaiters.append(continuation)
+            if authorizationWaiters.count == 1 {
+                manager.requestAlwaysAuthorization()
+                Task { [weak self] in
+                    try? await Task.sleep(for: Self.promptTimeout)
+                    self?.deliverAuthorization()
+                }
+            }
+        }.asBackgroundState(bundleAllowsBackground: Self.bundleAllowsBackgroundLocation, status: manager.authorizationStatus)
     }
 
     func requestAuthorization() async -> LocationAuthorizationState {
@@ -138,6 +197,100 @@ final class CoreLocationService: NSObject, LocationService {
         }
         guard let location = await requestOneShotFix() else { return nil }
         return Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+    }
+
+    // MARK: - Travel leg
+
+    /// Starts following one leg.
+    ///
+    /// Background delivery is switched on only when *always* has been granted
+    /// **and** the bundle declares the location background mode. With only
+    /// while-in-use the leg still runs, but iOS suspends it when the app leaves
+    /// the screen — which is reported back as `background: false` rather than
+    /// being papered over.
+    func startTravelTracking(
+        jobID: String,
+        onFix: @escaping @Sendable (LocationFix) -> Void
+    ) async -> TravelTrackingState {
+        var state = currentState
+        if state == .notDetermined { state = await requestAuthorization() }
+        guard state.canCapture else {
+            await stopTravelTracking()
+            return .unavailable(state)
+        }
+
+        // Replacing a leg rather than stacking one on top of another.
+        legExpiryTask?.cancel()
+
+        trackedJobID = jobID
+        trackingHandler = onFix
+        lastTrackedWrite = nil
+
+        let background = await backgroundAuthorizationState == .granted
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = TravelTrackingPolicy.distanceFilterMeters
+        manager.activityType = .automotiveNavigation
+        // iOS may pause updates when the device stops moving for a long time.
+        // That is exactly the behaviour we want for a van parked on site.
+        manager.pausesLocationUpdatesAutomatically = true
+        if Self.bundleAllowsBackgroundLocation {
+            manager.allowsBackgroundLocationUpdates = background
+            // The blue bar is not optional here: a worker must be able to see
+            // that the app is reading their position.
+            manager.showsBackgroundLocationIndicator = background
+        }
+        manager.startUpdatingLocation()
+
+        // A leg nobody closed must not follow someone home. This is the
+        // backstop for a forgotten "Start travel".
+        legExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(TravelTrackingPolicy.maximumLegDuration))
+            guard !Task.isCancelled else { return }
+            await self?.stopTravelTracking()
+        }
+
+        return .tracking(jobID: jobID, background: background)
+    }
+
+    func stopTravelTracking() async {
+        legExpiryTask?.cancel()
+        legExpiryTask = nil
+        guard trackedJobID != nil else { return }
+
+        trackedJobID = nil
+        trackingHandler = nil
+        lastTrackedWrite = nil
+
+        manager.stopUpdatingLocation()
+        if Self.bundleAllowsBackgroundLocation {
+            // Released immediately. A suspended app must not hold a location
+            // assertion just because a leg happened earlier in the day.
+            manager.allowsBackgroundLocationUpdates = false
+            manager.showsBackgroundLocationIndicator = false
+        }
+        manager.distanceFilter = kCLDistanceFilterNone
+    }
+
+    /// Applies the write policy to a tracked reading.
+    ///
+    /// Core Location's `distanceFilter` already limits movement; this adds the
+    /// time floor, so a vehicle crawling through traffic cannot produce a ping
+    /// every few seconds.
+    private func forwardTrackedFix(_ location: CLLocation) {
+        guard trackedJobID != nil, let handler = trackingHandler else { return }
+
+        // A stale cached reading delivered on start-up is not evidence of
+        // movement now.
+        guard abs(location.timestamp.timeIntervalSinceNow) < 120 else { return }
+        // Core Location reports −1 for an invalid fix.
+        guard location.horizontalAccuracy >= 0 else { return }
+
+        if let last = lastTrackedWrite,
+           Date().timeIntervalSince(last) < TravelTrackingPolicy.minimumWriteInterval {
+            return
+        }
+        lastTrackedWrite = Date()
+        handler(Self.fix(from: location))
     }
 
     /// One reading, then silence. Concurrent callers share a single request
@@ -203,8 +356,12 @@ extension CoreLocationService: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         let newest = locations.last
         Task { @MainActor [weak self] in
-            self?.servicesReportedOff = false
-            self?.deliverFix(newest)
+            guard let self else { return }
+            self.servicesReportedOff = false
+            // A tracked leg and a one-shot request can be in flight at the same
+            // time — the same reading legitimately serves both.
+            if let newest { self.forwardTrackedFix(newest) }
+            self.deliverFix(newest)
         }
     }
 
@@ -224,7 +381,25 @@ extension CoreLocationService: CLLocationManagerDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             if self.manager.authorizationStatus != .denied { self.servicesReportedOff = false }
+            // Permission revoked mid-leg: stop rather than keep a dead
+            // subscription open and a background assertion held.
+            if !self.currentState.canCapture, self.trackedJobID != nil {
+                await self.stopTravelTracking()
+            }
             self.deliverAuthorization()
+        }
+    }
+}
+
+private extension LocationAuthorizationState {
+    /// Re-reads the background answer after an authorisation prompt settles.
+    /// The prompt result arrives as a `LocationAuthorizationState`, but the
+    /// caller asked a narrower question.
+    func asBackgroundState(bundleAllowsBackground: Bool, status: CLAuthorizationStatus) -> LocationBackgroundState {
+        switch status {
+        case .authorizedAlways: return bundleAllowsBackground ? .granted : .foregroundOnly
+        case .authorizedWhenInUse: return .foregroundOnly
+        default: return .noLocationPermission
         }
     }
 }

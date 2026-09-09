@@ -29,7 +29,8 @@ final class FieldWorkerJobViewModel {
         session: TenantSession,
         jobID: String,
         to status: JobStatus,
-        destination: Coordinate?
+        destination: Coordinate?,
+        tracker: TravelTracker? = nil
     ) async {
         await perform(gateway: gateway, session: session, jobID: jobID) {
             self.lastCaptureOutcome = try await FieldTransitionCoordinator.advance(
@@ -38,7 +39,8 @@ final class FieldWorkerJobViewModel {
                 session: session,
                 jobID: jobID,
                 to: status,
-                destination: destination
+                destination: destination,
+                tracker: tracker
             )
         }
     }

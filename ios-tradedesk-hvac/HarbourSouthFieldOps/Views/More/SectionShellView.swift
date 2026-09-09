@@ -80,6 +80,7 @@ struct SectionShellView: View {
         case .subscription: return "The company's Harbour South plan, its active seats and how the monthly price is calculated."
         case .smsCredits: return "Message credit balance, bundles and the full consumption ledger."
         case .paymentTerms: return "The company's default payment terms, which any single invoice can still override."
+        case .companyProfile: return "The company's name, contact details, address and default tax rate, as they appear on quotes and invoices."
         case .notifications: return "Job alerts for this device, and the alerts already sent to you."
         case .settings: return "Company profile, users, roles, trade configuration and subscription management."
         case .paymentLink: return "The company's own online payment destination, shown to customers on their invoice."

@@ -5,9 +5,13 @@ import Observation
 final class TravelViewModel {
     private(set) var state: LoadState<TravelSnapshot> = .idle
     private(set) var isWorking: Bool = false
-    /// Simulated in this phase. The flag rides on the estimate itself, so the
-    /// view labels it honestly without knowing which adapter produced it.
+    /// The flag rides on the estimate itself, so the view labels it honestly
+    /// without knowing which adapter produced it — a routed Apple Maps ETA and
+    /// a straight-line fallback look different on screen for that reason.
     private(set) var estimate: RouteEstimate?
+    /// Where the worker was when the estimate was worked out. Drives the map's
+    /// route line; nil means no position, and the map shows only the site.
+    private(set) var origin: Coordinate?
     var actionError: String?
 
     /// What became of the position capture on the last step. Held so the screen
@@ -36,12 +40,14 @@ final class TravelViewModel {
     /// Re-runs the estimate on demand. There is no polling: the worker asks, or
     /// the screen loads.
     func refreshEstimate(location: LocationService, routes: RouteService, snapshot: TravelSnapshot) async {
-        guard let origin = await location.currentLocation() else {
+        guard let current = await location.currentLocation() else {
             estimate = nil
+            origin = nil
             return
         }
+        origin = current
         estimate = await routes.estimate(
-            from: origin,
+            from: current,
             to: Coordinate(latitude: snapshot.latitude, longitude: snapshot.longitude)
         )
     }
@@ -55,7 +61,8 @@ final class TravelViewModel {
         session: TenantSession,
         jobID: String,
         to status: JobStatus,
-        destination: Coordinate?
+        destination: Coordinate?,
+        tracker: TravelTracker? = nil
     ) async {
         isWorking = true
         actionError = nil
@@ -66,7 +73,8 @@ final class TravelViewModel {
                 session: session,
                 jobID: jobID,
                 to: status,
-                destination: destination
+                destination: destination,
+                tracker: tracker
             )
             await load(gateway: gateway, location: location, routes: routes, session: session, jobID: jobID, showLoading: false)
         } catch {

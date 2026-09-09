@@ -849,6 +849,79 @@ extension SupabaseDataGateway {
         record("company.paymentTerms", session, allowed: true, "Company default updated; individual invoices may still override it")
     }
 
+    // MARK: - Company profile
+
+    func companyProfile(session: TenantSession) async throws -> CompanyProfileSettings {
+        try require(.companyProfileRead, session, query: "company.profile")
+
+        let rows = try await fetch(
+            CompanyProfileRecord.self,
+            client.from("companies")
+                .select(CompanyProfileRecord.columns)
+                .eq("id", value: session.companyID)
+                .limit(1)
+        )
+
+        guard let row = rows.first else {
+            // RLS returning nothing for the caller's own company means the
+            // session no longer resolves to a company row. Saying "not found"
+            // is more useful than an empty form that saves into nowhere.
+            throw DataError.notFound
+        }
+
+        return CompanyProfileSettings(
+            name: row.name,
+            phone: row.phone ?? "",
+            addressLine: row.addressLine ?? "",
+            city: row.city ?? "",
+            state: row.state ?? "",
+            postalCode: row.postalCode ?? "",
+            // Stored as a fraction, shown as a percentage.
+            defaultTaxRatePercent: (row.defaultTaxRate.flatMap { Decimal(string: $0) } ?? 0) * 100,
+            timeZoneIdentifier: row.timeZoneIdentifier ?? TimeZone.current.identifier,
+            trade: row.trade,
+            countryCode: row.countryCode,
+            currencyCode: row.currencyCode,
+            canManage: session.can(.companyProfileManage)
+        )
+    }
+
+    func updateCompanyProfile(session: TenantSession, profile: CompanyProfileSettings) async throws {
+        try require(.companyProfileManage, session, query: "company.profile.save")
+
+        // Checked here as well as in the form. A screen is a convenience; this
+        // is the boundary, and the database's own constraints are behind it.
+        if let problem = profile.validationError {
+            throw DataError.rejected(problem)
+        }
+
+        let payload = CompanyProfilePayload(
+            name: profile.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            phone: profile.phone.trimmingCharacters(in: .whitespacesAndNewlines),
+            address_line: profile.addressLine.trimmingCharacters(in: .whitespacesAndNewlines),
+            city: profile.city.trimmingCharacters(in: .whitespacesAndNewlines),
+            state: profile.state.trimmingCharacters(in: .whitespacesAndNewlines),
+            postal_code: profile.postalCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            // Back to the fraction the column holds. Sent as text so the
+            // numeric column is not routed through a binary float.
+            default_tax_rate: "\(profile.defaultTaxRateFraction)",
+            time_zone_identifier: profile.timeZoneIdentifier,
+            updated_at: SupabaseCoding.timestamp(Date())
+        )
+
+        // No trade, country or currency in the payload, and no company id in
+        // the filter beyond the caller's own: RLS decides whether this row is
+        // theirs, exactly as it does everywhere else.
+        try await performWrite(
+            client.from("companies").update(payload).eq("id", value: session.companyID)
+        )
+
+        // The cached row drives currency and terminology all over the app, so
+        // it has to go or the next screen shows the old name.
+        invalidateCompanyCache(session.companyID)
+        record("company.profile.save", session, allowed: true, "Company details updated; trade, country and currency left unchanged")
+    }
+
     // MARK: - Helpers
 
     /// Turns an Edge Function transport failure into something a person can act
@@ -891,4 +964,46 @@ private nonisolated struct PaymentTermsRecord: Decodable, Sendable {
         case label = "default_payment_terms_label"
         case days = "default_payment_terms_days"
     }
+}
+
+/// The company row as the profile screen needs it.
+///
+/// `default_tax_rate` is read as text on purpose — a tax rate that has been
+/// through a binary float is not the rate anybody typed.
+private nonisolated struct CompanyProfileRecord: Decodable, Sendable {
+    let name: String
+    let trade: Trade
+    let countryCode: String
+    let currencyCode: String
+    let phone: String?
+    let addressLine: String?
+    let city: String?
+    let state: String?
+    let postalCode: String?
+    let defaultTaxRate: String?
+    let timeZoneIdentifier: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, trade, phone, city, state
+        case countryCode = "country_code"
+        case currencyCode = "currency_code"
+        case addressLine = "address_line"
+        case postalCode = "postal_code"
+        case defaultTaxRate = "default_tax_rate"
+        case timeZoneIdentifier = "time_zone_identifier"
+    }
+
+    static let columns = "name,trade,country_code,currency_code,phone,address_line,city,state,postal_code,default_tax_rate::text,time_zone_identifier"
+}
+
+private nonisolated struct CompanyProfilePayload: Encodable, Sendable {
+    let name: String
+    let phone: String
+    let address_line: String
+    let city: String
+    let state: String
+    let postal_code: String
+    let default_tax_rate: String
+    let time_zone_identifier: String
+    let updated_at: String
 }

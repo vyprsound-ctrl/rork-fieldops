@@ -61,7 +61,8 @@ final class FieldWorkerDayViewModel {
         session: TenantSession,
         jobID: String,
         to status: JobStatus,
-        destination: Coordinate?
+        destination: Coordinate?,
+        tracker: TravelTracker? = nil
     ) async {
         isUpdating = true
         actionError = nil
@@ -73,7 +74,8 @@ final class FieldWorkerDayViewModel {
                 session: session,
                 jobID: jobID,
                 to: status,
-                destination: destination
+                destination: destination,
+                tracker: tracker
             )
             await load(gateway: gateway, session: session, showLoading: false)
         } catch {

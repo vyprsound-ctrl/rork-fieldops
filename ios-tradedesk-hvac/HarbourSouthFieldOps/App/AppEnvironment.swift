@@ -52,8 +52,19 @@ final class AppEnvironment {
     let sms: SmsService
     let email: EmailService
     let storeBilling: StoreBillingService
-    let routes: RouteService
-    let maps: MapService
+
+    /// Routing and maps — straight-line fixtures for the development stack,
+    /// Apple Maps for the production one. Split by the same condition as the
+    /// gateway so a screen can never show a routed ETA against seeded data.
+    private let developmentRoutes: RouteService
+    private let productionRoutes: RouteService?
+    private let developmentMaps: MapService
+    private let productionMaps: MapService?
+
+    /// The one travel leg an engineer can be on. Owned here rather than by a
+    /// screen so it survives navigation, and stopped on sign-out so a signed-out
+    /// handset never keeps reporting.
+    let travelTracker = TravelTracker()
 
     /// Positioning — fixtures for the development stack, Core Location for the
     /// production one. Paired with the gateway below so a real position is only
@@ -127,8 +138,8 @@ final class AppEnvironment {
         self.developmentPush = MockPushService()
         self.storeBilling = MockStoreBillingService()
         self.developmentLocation = MockLocationService()
-        self.routes = MockRouteService()
-        self.maps = MockMapService()
+        self.developmentRoutes = MockRouteService()
+        self.developmentMaps = MockMapService()
 
         // Authentication and data are wired together on purpose: a production
         // session can only exist when there is a production gateway to serve it.
@@ -141,11 +152,17 @@ final class AppEnvironment {
             // Likewise: constructing this registers nothing and prompts for
             // nothing. Nothing happens until an authenticated user asks for it.
             self.productionPush = ApplePushService.shared
+            // MapKit needs no credentials and no account, so these are real
+            // from the first launch of a configured build.
+            self.productionRoutes = MapKitRouteService()
+            self.productionMaps = MapKitMapService()
         } else {
             self.productionAuth = nil
             self.productionGateway = nil
             self.productionLocation = nil
             self.productionPush = nil
+            self.productionRoutes = nil
+            self.productionMaps = nil
         }
     }
 
@@ -169,6 +186,18 @@ final class AppEnvironment {
     var location: LocationService {
         guard productionSession != nil else { return developmentLocation }
         return productionLocation ?? developmentLocation
+    }
+
+    /// Travel time and distance, matched to the signed-in stack.
+    var routes: RouteService {
+        guard productionSession != nil else { return developmentRoutes }
+        return productionRoutes ?? developmentRoutes
+    }
+
+    /// Map presentation and navigation hand-off, matched to the signed-in stack.
+    var maps: MapService {
+        guard productionSession != nil else { return developmentMaps }
+        return productionMaps ?? developmentMaps
     }
 
     /// True while any user-facing capability is still simulated.
@@ -211,6 +240,9 @@ final class AppEnvironment {
     func signOut() {
         session = nil
         signInError = nil
+        // A development session cannot have started a real leg, but stopping is
+        // cheap and leaves no path where sign-out keeps a tracker alive.
+        Task { await travelTracker.stop() }
     }
 
     // MARK: - Production authentication
@@ -322,6 +354,11 @@ final class AppEnvironment {
         // person to hold this handset would receive the previous user's job
         // alerts. That is the whole reason this happens before the sign-out.
         await tearDownPushRegistration()
+
+        // The radio goes down before the session does. Signing out with a leg
+        // still running would leave Core Location delivering fixes that no
+        // longer have a session to be written against.
+        await travelTracker.stop()
 
         // Clear locally first so the UI can never keep showing tenant context
         // while a network call is still in flight.

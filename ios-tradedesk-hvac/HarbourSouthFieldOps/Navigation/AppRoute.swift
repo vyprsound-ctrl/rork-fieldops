@@ -15,6 +15,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     case subscription
     case smsCredits
     case paymentTerms
+    case companyProfile
     case settings
     case paymentLink
     case dataAccess
@@ -37,6 +38,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .subscription: return "Subscription & seats"
         case .smsCredits: return "SMS credits"
         case .paymentTerms: return "Payment terms"
+        case .companyProfile: return "Company profile"
         case .notifications: return "Job alerts"
         case .settings: return "Settings"
         case .paymentLink: return "Online payment link"
@@ -67,6 +69,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .subscription: return "creditcard.fill"
         case .smsCredits: return "message.fill"
         case .paymentTerms: return "calendar.badge.clock"
+        case .companyProfile: return "building.2.fill"
         case .notifications: return "bell.fill"
         case .settings: return "gearshape.fill"
         case .paymentLink: return "link"
@@ -97,6 +100,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         // the gate; the screen gates each block individually beneath it.
         case .smsCredits: return .smsLedgerRead
         case .paymentTerms: return .companyProfileRead
+        // Readable by every office role; the save button is gated separately on
+        // `companyProfileManage` inside the screen.
+        case .companyProfile: return .companyProfileRead
         // Anyone with a session may manage their own device's alerts.
         case .notifications: return nil
         case .settings: return .companyProfileRead
@@ -111,7 +117,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         switch self {
         case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports,
              .recurring, .subscription, .smsCredits, .paymentTerms, .notifications, .dataAccess,
-             .integrations, .settings, .paymentLink, .developmentTests: return true
+             .integrations, .settings, .paymentLink, .companyProfile, .developmentTests: return true
         }
     }
 }

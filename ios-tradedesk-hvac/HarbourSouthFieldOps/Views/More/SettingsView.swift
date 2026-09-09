@@ -2,13 +2,11 @@ import SwiftUI
 
 /// Settings shell.
 ///
-/// Every row that belongs to the commercial layer now goes to a real screen.
-/// The two that remain placeholders — company profile and tax defaults' wider
-/// settings — are genuinely outside this phase, and they say so plainly rather
-/// than pretending to work.
+/// Every row here goes to a real screen. There are no placeholder rows left:
+/// company profile and the tax default now have their own screens, so nothing
+/// in Settings opens a sheet explaining that it does not work yet.
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var pendingSection: String?
 
     private var session: TenantSession? { env.activeSession }
 
@@ -18,7 +16,12 @@ struct SettingsView: View {
                 group(
                     title: "Company",
                     rows: [
-                        SettingsRow(title: "Company profile", symbol: "building.2.fill", permission: .companyProfileManage),
+                        SettingsRow(
+                            title: "Company profile",
+                            symbol: "building.2.fill",
+                            permission: .companyProfileRead,
+                            route: .companyProfile
+                        ),
                         SettingsRow(
                             title: "Users and roles",
                             symbol: "person.2.badge.gearshape.fill",
@@ -79,9 +82,6 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
-        .sheet(item: $pendingSection) { title in
-            PhaseTwoSheet(title: title)
-        }
     }
 
     private struct SettingsRow: Identifiable {
@@ -120,17 +120,13 @@ struct SettingsView: View {
         }
     }
 
+    /// Every row has a destination. The optional `route` is kept so the type
+    /// still describes a row that has not been built — but there are none, and
+    /// a row without one is simply not rendered rather than opening a dead end.
     @ViewBuilder
     private func rowView(_ row: SettingsRow) -> some View {
         if let route = row.route {
             NavigationLink(value: AppRoute.more(route)) {
-                rowLabel(row)
-            }
-            .buttonStyle(.plain)
-        } else {
-            Button {
-                pendingSection = row.title
-            } label: {
                 rowLabel(row)
             }
             .buttonStyle(.plain)

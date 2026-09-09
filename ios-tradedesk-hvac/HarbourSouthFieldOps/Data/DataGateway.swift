@@ -265,6 +265,17 @@ protocol DataGateway: Sendable {
     func paymentTermsSettings(session: TenantSession) async throws -> PaymentTermsSettings
     func updatePaymentTerms(session: TenantSession, option: PaymentTermOption, customDays: Int) async throws
 
+    // Company profile
+
+    /// The company's own details. Readable by anyone with `companyProfileRead`,
+    /// which every office role has — an engineer does not.
+    func companyProfile(session: TenantSession) async throws -> CompanyProfileSettings
+
+    /// Writes the editable subset. Trade, country and currency are not part of
+    /// the write: changing them would retro-relabel documents that already
+    /// exist, so they are displayed and left alone.
+    func updateCompanyProfile(session: TenantSession, profile: CompanyProfileSettings) async throws
+
     // MARK: Push notifications
 
     /// Registers this device against the signed-in user.

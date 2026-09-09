@@ -2747,22 +2747,30 @@ enum DevelopmentTestSuite {
             // The development adapter needs no permission and never prompts.
             let noPromptInDevelopment = await environment.location.authorizationState == .authorized
 
-            // The real adapter exists, reports production, and declares that it
-            // does not follow anyone around.
+            // The real adapter exists, reports production, and can follow a
+            // travel leg. The development adapter cannot, and does not pretend
+            // to — asking it to track returns `.off` rather than a fake badge.
             let real = CoreLocationService()
             let productionMode = real.mode == .production
-            let noBackgroundTracking = !real.performsBackgroundTracking
+            let productionCanTrackALeg = real.performsBackgroundTracking
+            let developmentNeverTracks = !MockLocationService().performsBackgroundTracking
+            let developmentRefusesToTrack = await MockLocationService()
+                .startTravelTracking(jobID: "job_1043") { _ in } == .off
+            // A freshly built adapter is idle. Tracking only ever begins from a
+            // status transition that already has a job id in hand.
+            let idleTrackerIsOff = !environment.travelTracker.state.isTracking
 
             let passed = developmentIsSimulated && fixtureIsMarked && noPromptInDevelopment
-                && productionMode && noBackgroundTracking
+                && productionMode && productionCanTrackALeg && developmentNeverTracks
+                && developmentRefusesToTrack && idleTrackerIsOff
             results.append(
                 TestScenarioResult(
                     id: "71",
                     number: 71,
                     title: "Development stays simulated while production reads the device",
-                    expectation: "The mock adapter still serves the development stack; Core Location is wired for production and declares no background tracking",
+                    expectation: "The mock adapter still serves the development stack and cannot track; Core Location is wired for production and can follow one travel leg",
                     passed: passed,
-                    evidence: "Development adapter mode=\(environment.location.mode.rawValue), fix simulated=\(developmentFix?.simulated.description ?? "none"), no permission needed · CoreLocationService mode=\(real.mode.rawValue), performsBackgroundTracking=\(real.performsBackgroundTracking)"
+                    evidence: "Development adapter mode=\(environment.location.mode.rawValue), fix simulated=\(developmentFix?.simulated.description ?? "none"), no permission needed, startTravelTracking returns .off · CoreLocationService mode=\(real.mode.rawValue), performsBackgroundTracking=\(real.performsBackgroundTracking) · tracker idle at launch=\(!environment.travelTracker.state.isTracking)"
                 )
             )
         }
@@ -2884,25 +2892,39 @@ enum DevelopmentTestSuite {
             let stable = first == second && second == third && first != nil
 
             // The policy surface itself is exactly three events, all tied to a
-            // workflow transition — there is no "start tracking" case to call.
+            // workflow transition. Continuous tracking has no separate trigger:
+            // it is opened and closed by the same transitions.
             let onlyThreeEvents = LocationCaptureEvent.allCases.count == 3
             let allTiedToTransitions = LocationCaptureEvent.allCases.allSatisfy { event in
                 JobStatus.allCases.contains { LocationCaptureEvent.forTransition(to: $0) == event }
             }
-            // Neither adapter follows anyone.
-            let noTracking = !productionGPS.performsBackgroundTracking
-                && !MockLocationService().performsBackgroundTracking
-                && !CoreLocationService().performsBackgroundTracking
 
-            let passed = stable && onlyThreeEvents && allTiedToTransitions && noTracking
+            // The tracker's rule, exercised directly: travelling opens a leg,
+            // every other status closes it. This is what bounds tracking to the
+            // drive rather than to the working day.
+            let tracker = TravelTracker()
+            var closedByEveryOtherStatus = true
+            for status in JobStatus.allCases where status != .travelling {
+                await tracker.sync(
+                    jobID: "job_1043", status: status,
+                    location: productionGPS, gateway: gateway, session: marcus
+                )
+                if tracker.state.isTracking { closedByEveryOtherStatus = false }
+            }
+            // The stub reports production but declines to track, so the tracker
+            // reflects `.off` rather than inventing a live badge.
+            let honestWhenAdapterCannotTrack = !tracker.state.isTracking
+
+            let passed = stable && onlyThreeEvents && allTiedToTransitions
+                && closedByEveryOtherStatus && honestWhenAdapterCannotTrack
             results.append(
                 TestScenarioResult(
                     id: "74",
                     number: 74,
-                    title: "No continuous or timer-based location path exists",
-                    expectation: "Positions appear only when a job step is taken; repeated reads add nothing and no adapter tracks in the background",
+                    title: "Continuous tracking is bounded to an active travel leg",
+                    expectation: "Repeated reads add nothing; only `travelling` opens a leg and every other status closes it",
                     passed: passed,
-                    evidence: "Three reads with no job activity returned the same single fix · \(LocationCaptureEvent.allCases.count) capture events, every one bound to a workflow transition · background tracking false on the mock, the stub and CoreLocationService"
+                    evidence: "Three reads with no job activity returned the same single fix · \(LocationCaptureEvent.allCases.count) capture events, every one bound to a workflow transition · \(JobStatus.allCases.count - 1) non-travelling statuses each left the tracker off · \(TravelTrackingPolicy.summary)"
                 )
             )
         } catch {

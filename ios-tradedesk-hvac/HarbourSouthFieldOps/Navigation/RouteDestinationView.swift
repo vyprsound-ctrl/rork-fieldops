@@ -39,6 +39,8 @@ struct RouteDestinationView: View {
                 SmsCreditsView()
             case .paymentTerms:
                 PaymentTermsView()
+            case .companyProfile:
+                CompanyProfileView()
             case .notifications:
                 NotificationsView()
             case .dataAccess:

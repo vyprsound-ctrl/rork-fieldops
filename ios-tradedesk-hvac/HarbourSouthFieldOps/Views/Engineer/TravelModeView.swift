@@ -6,8 +6,11 @@ import SwiftUI
 /// there, roughly how long it'll take, and the one button that moves the job
 /// forward when they arrive.
 ///
-/// The ETA is a simulation and says so. This app does not navigate — it hands
-/// the destination to the device's maps app and stops there.
+/// The map and the ETA come from Apple Maps on the production stack. This app
+/// still does not give turn-by-turn guidance — it shows the route, then hands
+/// the destination to Apple Maps when the worker wants directions. Where a
+/// route could not be fetched the estimate falls back to straight-line distance
+/// and says so on screen rather than passing a guess off as a routed arrival.
 struct TravelModeView: View {
     let jobID: String
 
@@ -50,7 +53,38 @@ struct TravelModeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 statusHeader(trip)
+
+                if env.travelTracker.state.isTracking || env.travelTracker.state.jobID == jobID {
+                    TravelTrackingBadge(
+                        state: env.travelTracker.state,
+                        pings: env.travelTracker.pingsThisLeg
+                    )
+
+                    // Offered only when it would actually change something:
+                    // a leg already running foreground-only.
+                    if env.travelTracker.state.isTracking,
+                       !env.travelTracker.state.continuesInBackground,
+                       env.travelTracker.backgroundState == .foregroundOnly {
+                        backgroundUpgradeButton
+                    }
+
+                    if let error = env.travelTracker.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(Theme.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 etaCard(trip)
+
+                JobRouteMap(
+                    destination: Coordinate(latitude: trip.latitude, longitude: trip.longitude),
+                    destinationLabel: trip.customerName,
+                    origin: viewModel.origin,
+                    showsUserLocation: env.isProductionSession
+                )
+
                 destinationCard(trip)
 
                 if let error = viewModel.actionError {
@@ -114,7 +148,13 @@ struct TravelModeView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Travel").sectionLabelStyle()
-                SimulatedBadge(text: "Simulated ETA")
+                if viewModel.estimate?.simulated == true {
+                    SimulatedBadge(text: "Estimated")
+                } else if viewModel.estimate?.usesLiveTraffic == true {
+                    Text("Apple Maps · with traffic")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.green)
+                }
             }
 
             if let estimate = viewModel.estimate {
@@ -149,11 +189,46 @@ struct TravelModeView: View {
                     .cardSurface()
             }
 
-            Text("Worked out from straight-line distance at an assumed speed. It knows nothing about roads or traffic and is not a real arrival time.")
+            Text(etaCaption)
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// States which of the two things actually produced the number on screen.
+    private var etaCaption: String {
+        guard let estimate = viewModel.estimate else {
+            return "An estimate needs your current position. Allow location to see one."
+        }
+        return estimate.simulated
+            ? "A route wasn't available, so this is straight-line distance at an assumed speed. It knows nothing about roads or traffic."
+            : "Driving time from Apple Maps, following roads and current traffic. It updates when you ask it to, not continuously."
+    }
+
+    private var backgroundUpgradeButton: some View {
+        Button {
+            Task { await env.travelTracker.requestBackgroundPermission(location: env.location) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.iphone")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Keep sharing when my phone is locked")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Otherwise the office stops seeing you move once you put the phone away.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(Theme.primary)
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: Theme.minTap, alignment: .leading)
+            .background(Theme.primaryTint)
+            .clipShape(.rect(cornerRadius: Theme.buttonRadius))
+        }
+        .buttonStyle(PressableTileStyle())
     }
 
     private func etaColumn(_ caption: String, _ value: String, emphasis: Bool = false) -> some View {
@@ -256,7 +331,7 @@ struct TravelModeView: View {
             Image(systemName: "info.circle.fill")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
-            Text("Your position is recorded when you start travel, arrive and finish — not in between, and never in the background.")
+            Text("Your position is shared while you are on your way, and recorded when you start travel, arrive and finish. Sharing stops the moment you mark yourself arrived.")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)
@@ -318,7 +393,8 @@ struct TravelModeView: View {
             session: session,
             jobID: jobID,
             to: status,
-            destination: Coordinate(latitude: trip.latitude, longitude: trip.longitude)
+            destination: Coordinate(latitude: trip.latitude, longitude: trip.longitude),
+            tracker: env.travelTracker
         )
     }
 

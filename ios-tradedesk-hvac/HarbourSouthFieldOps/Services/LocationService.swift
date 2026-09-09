@@ -21,14 +21,12 @@ nonisolated struct LocationFix: Hashable, Sendable {
 
 /// The workflow moments at which a position is worth recording.
 ///
-/// **Location policy.** This platform does not follow field workers around. A
-/// fix is taken at these events and at no other time: there is no timer, no
-/// background tracking and no continuous stream. Each case exists because the
-/// business genuinely needs the answer — when did they set off, when did they
-/// get there, where were they when they said the work was done.
-///
-/// Production background tracking, if it is ever enabled, will be an explicit
-/// opt-in tied to a production provider, not a side effect of this enum.
+/// **Location policy.** A fix is always taken at these three events. Between
+/// *travel started* and *arrived* — and only between those two — the production
+/// adapter additionally follows the vehicle so the office can watch an engineer
+/// approach. Outside that leg there is no timer, no stream and no background
+/// updates of any kind: the tracking is bounded by the job's own status, not by
+/// the working day.
 nonisolated enum LocationCaptureEvent: String, CaseIterable, Sendable, Identifiable {
     case travelStarted
     case arrived
@@ -53,6 +51,101 @@ nonisolated enum LocationCaptureEvent: String, CaseIterable, Sendable, Identifia
         case .completed: return .completed
         default: return nil
         }
+    }
+}
+
+/// Whether an active travel leg is being followed, and why not when it isn't.
+///
+/// This is deliberately a *state*, not a boolean: "not tracking" and "tracking
+/// is impossible because the worker only granted while-in-use" are different
+/// answers, and the office is shown which one applies rather than an empty map.
+nonisolated enum TravelTrackingState: Hashable, Sendable {
+    /// No travel leg is in progress. The radio is idle.
+    case off
+    /// Following the vehicle for exactly this job.
+    case tracking(jobID: String, background: Bool)
+    /// A leg is in progress but the device will not report — permission,
+    /// hardware or policy. The job still advances; the map simply says so.
+    case unavailable(LocationAuthorizationState)
+
+    var isTracking: Bool {
+        if case .tracking = self { return true }
+        return false
+    }
+
+    var jobID: String? {
+        if case .tracking(let jobID, _) = self { return jobID }
+        return nil
+    }
+
+    /// True when updates will keep arriving with the phone locked or the app
+    /// in the background. False means foreground-only, which is honest to say.
+    var continuesInBackground: Bool {
+        if case .tracking(_, let background) = self { return background }
+        return false
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "Not travelling"
+        case .tracking(_, let background): return background ? "Sharing location" : "Sharing while app is open"
+        case .unavailable: return "Location unavailable"
+        }
+    }
+}
+
+/// Whether the worker has granted the *always* authorisation that lets updates
+/// continue with the phone locked.
+///
+/// Separate from `LocationAuthorizationState` because the answers are different
+/// questions: one asks whether a position can be read at all, this one asks
+/// whether it can be read while the app is not on screen.
+nonisolated enum LocationBackgroundState: String, Sendable, Hashable {
+    /// While-in-use only. Travel updates stop when the app leaves the screen.
+    case foregroundOnly
+    /// Always. Updates continue with the phone locked, while a leg is active.
+    case granted
+    /// No location permission at all, so the question does not arise.
+    case noLocationPermission
+
+    var title: String {
+        switch self {
+        case .foregroundOnly: return "While using the app"
+        case .granted: return "Always, while travelling"
+        case .noLocationPermission: return "Not allowed"
+        }
+    }
+
+    /// What the worker needs to know, in their terms.
+    var explanation: String {
+        switch self {
+        case .granted:
+            return "Your position is shared while you are travelling to a job, including when your phone is locked. It stops the moment you mark yourself arrived."
+        case .foregroundOnly:
+            return "Your position is shared while you are travelling and this screen is open. Lock your phone and the office stops seeing you move until you open the app again. Allow \"Always\" in Settings to keep it running with the phone locked."
+        case .noLocationPermission:
+            return "Location is off for this app, so the office cannot see your progress. Your job steps are still recorded."
+        }
+    }
+}
+
+/// How much movement, and how much time, is worth another stored ping.
+///
+/// Tuned for battery rather than for a perfect trace: an engineer driving
+/// across a city produces a readable line, and one stuck at a light produces
+/// nothing at all.
+nonisolated enum TravelTrackingPolicy {
+    /// Core Location will not report movement smaller than this, in metres.
+    static let distanceFilterMeters: Double = 120
+    /// Nor will a ping be written more often than this, in seconds, however
+    /// far the vehicle has moved.
+    static let minimumWriteInterval: TimeInterval = 60
+    /// A leg longer than this stops tracking on its own. A forgotten "start
+    /// travel" must not follow somebody home.
+    static let maximumLegDuration: TimeInterval = 4 * 60 * 60
+
+    static var summary: String {
+        "Between start travel and arrival only · at most one point per \(Int(minimumWriteInterval))s · \(Int(distanceFilterMeters))m of movement required · stops automatically after \(Int(maximumLegDuration / 3600))h"
     }
 }
 
@@ -151,29 +244,53 @@ nonisolated enum LocationCaptureOutcome: Hashable, Sendable {
 
 /// Field worker positioning.
 ///
-/// The protocol deliberately exposes *event-driven* capture only — there is no
-/// `startTracking()`, no delegate stream and no timer — so background tracking
-/// cannot be switched on without a deliberate change to this contract.
+/// Two distinct capabilities, kept apart on purpose:
 ///
-/// An adapter produces a `LocationFix` and nothing else. Persistence, tenancy
-/// and retention belong to the gateway, which is why no implementation of this
-/// protocol knows the database exists.
+/// 1. **Event capture** — one fix, taken because a person tapped a button that
+///    moved a job forward. Always available.
+/// 2. **Travel tracking** — a bounded stream, running only between *start
+///    travel* and *arrived*. Opt-in per adapter, and impossible to start
+///    without a job id, which is what keeps it tied to a real leg of work.
+///
+/// An adapter produces `LocationFix` values and nothing else. Persistence,
+/// tenancy and retention belong to the gateway, which is why no implementation
+/// of this protocol knows the database exists.
 protocol LocationService: Sendable {
     var mode: ServiceMode { get }
-    /// Whether this adapter follows the worker continuously. Always false;
-    /// surfaced so the UI can state the policy honestly.
+    /// Whether this adapter can follow a worker during an active travel leg.
+    /// False means event capture only — surfaced so the UI can say which.
     var performsBackgroundTracking: Bool { get }
 
     /// Current permission, without prompting.
     var authorizationState: LocationAuthorizationState { get async }
 
+    /// Whether updates would survive the app leaving the screen.
+    var backgroundAuthorizationState: LocationBackgroundState { get async }
+
     /// Shows the system prompt if it has never been shown, and reports where
     /// things stand afterwards. Safe to call repeatedly.
     func requestAuthorization() async -> LocationAuthorizationState
 
+    /// Asks to upgrade while-in-use to always. iOS shows this at most once, and
+    /// only after while-in-use has already been granted.
+    func requestBackgroundAuthorization() async -> LocationBackgroundState
+
     /// A one-shot fix taken because a workflow event just happened.
     func captureFix(for event: LocationCaptureEvent, near destination: Coordinate?) async -> LocationFix?
     func currentLocation() async -> Coordinate?
+
+    /// Begins following one travel leg. The handler receives every fix that
+    /// clears `TravelTrackingPolicy`; the caller decides what to store.
+    ///
+    /// Starting a second leg replaces the first — there is no way to track two
+    /// jobs, or two workers, at once.
+    func startTravelTracking(
+        jobID: String,
+        onFix: @escaping @Sendable (LocationFix) -> Void
+    ) async -> TravelTrackingState
+
+    /// Ends the leg and powers the radio down. Safe to call when not tracking.
+    func stopTravelTracking() async
 }
 
 extension LocationService {
@@ -182,6 +299,26 @@ extension LocationService {
     var authorizationState: LocationAuthorizationState { get async { .authorized } }
 
     func requestAuthorization() async -> LocationAuthorizationState { .authorized }
+
+    /// An adapter that does not track cannot be running in the background, and
+    /// says so rather than implying a permission it never asked for.
+    var backgroundAuthorizationState: LocationBackgroundState { get async { .foregroundOnly } }
+
+    func requestBackgroundAuthorization() async -> LocationBackgroundState {
+        await backgroundAuthorizationState
+    }
+
+    /// Default: this adapter does not follow anyone. Reporting `.off` rather
+    /// than a fake `.tracking` is what stops a non-tracking stack from drawing
+    /// a live badge it cannot back up.
+    func startTravelTracking(
+        jobID: String,
+        onFix: @escaping @Sendable (LocationFix) -> Void
+    ) async -> TravelTrackingState {
+        .off
+    }
+
+    func stopTravelTracking() async {}
 }
 
 /// DEVELOPMENT IMPLEMENTATION — deterministic fixtures, no Core Location, no

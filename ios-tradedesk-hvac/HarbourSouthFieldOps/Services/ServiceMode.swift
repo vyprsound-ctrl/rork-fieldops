@@ -33,7 +33,15 @@ nonisolated enum IntegrationRegistry {
                 ? "Production sign-in verifies credentials against Supabase Auth and resolves company and role from the database. The development account picker is still present and still verifies nothing."
                 : "Local role switching only. No credentials are verified."
         ),
-        IntegrationStatus(id: "database", name: "Database", mode: .simulated, plannedProvider: "Supabase + RLS", detail: "In-memory store. Company isolation enforced in the gateway."),
+        IntegrationStatus(
+            id: "database",
+            name: "Database",
+            mode: SupabaseClientProvider.isConfigured ? .production : .simulated,
+            plannedProvider: "Supabase + RLS",
+            detail: SupabaseClientProvider.isConfigured
+                ? "Production reads and writes the live Postgres database. Company isolation is enforced by row-level security in the database itself, not by this app — the client never sends a company id. The development account picker still runs on the in-memory store."
+                : "In-memory store. Company isolation enforced in the gateway."
+        ),
         IntegrationStatus(
             id: "customerPayments",
             name: "Customer payments",
@@ -61,11 +69,27 @@ nonisolated enum IntegrationRegistry {
             mode: SupabaseClientProvider.isConfigured ? .production : .simulated,
             plannedProvider: "Core Location",
             detail: SupabaseClientProvider.isConfigured
-                ? "Production captures real positions from Core Location at job workflow events only — start travel, arrive, complete. One reading each time, never a stream: no background updates, no significant-change monitoring and no timer. The development stack still uses fixtures."
+                ? "Production captures real positions from Core Location. One reading at each job workflow event — start travel, arrive, complete — plus continuous updates for the drive itself, between Start Travel and Arrived and at no other time. \(TravelTrackingPolicy.summary). The development stack still uses fixtures and never tracks."
                 : "Fixed fixtures captured at job workflow events only. No live tracking and no background updates."
         ),
-        IntegrationStatus(id: "routing", name: "ETA and travel time", mode: .simulated, plannedProvider: "MapKit Directions", detail: "Straight-line distance at an assumed speed. Knows nothing about roads or traffic."),
-        IntegrationStatus(id: "maps", name: "Maps and navigation", mode: .simulated, plannedProvider: "MapKit", detail: "Prepares a destination hand-off to your maps app. No in-app routing or turn-by-turn."),
+        IntegrationStatus(
+            id: "routing",
+            name: "ETA and travel time",
+            mode: SupabaseClientProvider.isConfigured ? .production : .simulated,
+            plannedProvider: "Apple Maps",
+            detail: SupabaseClientProvider.isConfigured
+                ? "Production asks Apple Maps for a driving ETA that follows roads and current traffic. It needs no account and no API key. When a route cannot be fetched the estimate falls back to straight-line distance and is labelled as an estimate rather than presented as a routed arrival time."
+                : "Straight-line distance at an assumed speed. Knows nothing about roads or traffic."
+        ),
+        IntegrationStatus(
+            id: "maps",
+            name: "Maps and navigation",
+            mode: SupabaseClientProvider.isConfigured ? .production : .simulated,
+            plannedProvider: "Apple Maps",
+            detail: SupabaseClientProvider.isConfigured
+                ? "Production draws a real Apple Maps route inside the app and hands the destination to Apple Maps for turn-by-turn. Harbour South does not give guidance itself, and does not use any third-party mapping service."
+                : "Prepares a destination hand-off to your maps app. No in-app routing or turn-by-turn."
+        ),
         IntegrationStatus(
             id: "push",
             name: "Push notifications",
@@ -75,7 +99,13 @@ nonisolated enum IntegrationRegistry {
                 ? "Production registers this device with Apple once you sign in and turn alerts on, and the database raises a notification from the job event itself — an assignment written, a slot moved, a job cancelled. Delivery runs server-side; with no APNs key configured an alert stays queued and is never recorded as delivered. The development stack registers nothing and never prompts."
                 : "No device token is registered and no permission is requested."
         ),
-        IntegrationStatus(id: "storeBilling", name: "Subscription billing", mode: .simulated, plannedProvider: "Apple IAP and Google Play Billing", detail: "No purchase is made. Store references are placeholders.")
+        IntegrationStatus(
+            id: "storeBilling",
+            name: "Subscription billing",
+            mode: .simulated,
+            plannedProvider: "Apple In-App Purchase",
+            detail: "Needs App Store Connect configuration. Seat counting and pricing are live and read from the database; the purchase itself is not, and no purchase is ever recorded as made. This is an iOS product — there is no Google Play billing path."
+        )
     ]
 
     static var simulatedCount: Int { all.filter { $0.mode.isSimulated }.count }

@@ -8,9 +8,25 @@
 	  mechanism cannot represent, so this partial file is merged with the
 	  generated Info.plist (GENERATE_INFOPLIST_FILE stays YES).
 
-	  This registers the scheme Supabase auth emails redirect back to. It does
-	  not change the bundle identifier or any signing setting.
+	  This registers the scheme Supabase auth emails redirect back to, and the
+	  location background mode. It does not change the bundle identifier or any
+	  signing setting.
 	-->
+	<!--
+	  Location background mode.
+
+	  Required so an engineer's position keeps reaching the office while they are
+	  driving with the phone locked. It is used for exactly one thing: the leg
+	  between "Start travel" and "Arrived". CoreLocationService sets
+	  allowsBackgroundLocationUpdates only for the duration of that leg and clears
+	  it the moment the leg ends, so a suspended app holds no location assertion.
+	  showsBackgroundLocationIndicator stays on throughout, so the worker can
+	  always see the app is reading their position.
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

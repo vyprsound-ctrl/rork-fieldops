@@ -8,8 +8,11 @@ import Foundation
 /// stores it alongside the status change. A transition the policy does not cover
 /// captures nothing — there is no code path that takes a position "just in case".
 ///
-/// Nothing here runs on a timer or in the background. A fix happens because a
-/// person tapped a button that moved a job forward.
+/// The one-shot capture happens because a person tapped a button that moved a
+/// job forward. The *travel leg* is opened and closed here too, by the same
+/// transitions — `travelling` starts it, every other status stops it — so there
+/// is exactly one place in the app where continuous tracking can begin, and it
+/// is a place that already has a job id in its hand.
 nonisolated enum FieldTransitionCoordinator {
     /// Advances a job, capturing a position first when the workflow event calls
     /// for one.
@@ -22,6 +25,9 @@ nonisolated enum FieldTransitionCoordinator {
     /// - Parameter destination: the site being travelled to, used by the
     ///   simulated adapter to produce a plausible fixture. A production adapter
     ///   ignores it and reads the device.
+    /// - Parameter tracker: the travel leg owner. Omitted where a caller has no
+    ///   engineer context — an office user moving a job does not start tracking
+    ///   their own phone.
     /// - Returns: what became of the capture, so the caller can say so plainly
     ///   instead of quietly recording nothing.
     @discardableResult
@@ -31,7 +37,8 @@ nonisolated enum FieldTransitionCoordinator {
         session: TenantSession,
         jobID: String,
         to status: JobStatus,
-        destination: Coordinate?
+        destination: Coordinate?,
+        tracker: TravelTracker? = nil
     ) async throws -> LocationCaptureOutcome {
         var fix: LocationFix?
         var outcome: LocationCaptureOutcome = .notRequired
@@ -59,6 +66,21 @@ nonisolated enum FieldTransitionCoordinator {
             to: status,
             locationFix: fix
         )
+
+        // Only after the status is actually persisted. Starting to follow
+        // someone because of a transition the database rejected would be
+        // tracking a journey that, as far as the office is concerned, never
+        // began.
+        if let tracker {
+            await tracker.sync(
+                jobID: jobID,
+                status: status,
+                location: location,
+                gateway: gateway,
+                session: session
+            )
+        }
+
         return outcome
     }
 }

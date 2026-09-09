@@ -5,9 +5,10 @@ import SwiftUI
 /// Two things this screen is careful about. First, it distinguishes a *recent*
 /// fix from a *last known* one — a position from four minutes ago is worth
 /// acting on, one from yesterday is a historical record, and presenting the
-/// second as the first would be a lie. Second, it states the capture policy
-/// plainly: positions are taken at job workflow events, never on a timer, and
-/// in this build they are fixtures rather than real readings.
+/// second as the first would be a lie; the map carries that same distinction in
+/// its pin colour. Second, it states the capture policy plainly: positions are
+/// taken at job workflow events and, while somebody is actually driving to a
+/// job, across that leg — never all day, and never on a timer.
 struct WorkerLocationView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = WorkerLocationViewModel()
@@ -53,6 +54,7 @@ struct WorkerLocationView: View {
                     )
                     .cardSurface()
                 } else {
+                    FieldTeamMap(locations: board.locations)
                     locationList(board)
                 }
 
@@ -217,8 +219,9 @@ struct WorkerLocationView: View {
             Text("How location works here").sectionLabelStyle()
 
             VStack(alignment: .leading, spacing: 8) {
-                policyLine("checkmark.circle.fill", "Captured at job events only — start travel, arrive, complete.", Theme.green)
-                policyLine("xmark.circle.fill", "No continuous or background tracking. There is no timer.", Theme.red)
+                policyLine("checkmark.circle.fill", "Captured at job events — start travel, arrive, complete.", Theme.green)
+                policyLine("car.fill", "Followed while actually driving to a job, between start travel and arrival.", Theme.primary)
+                policyLine("xmark.circle.fill", "Never outside that leg. No all-day tracking and no timer.", Theme.red)
                 policyLine("clock.arrow.circlepath", "History is capped at \(LocationRetentionPolicy.days) days and \(LocationRetentionPolicy.maximumPingsPerWorker) points per \(terms.worker).", Theme.secondary)
                 policyLine("building.2.fill", "Positions never leave the company they were recorded in.", Theme.secondary)
             }
