@@ -104,7 +104,7 @@ nonisolated struct CompanyRecord: Decodable, Sendable {
     let currencyCode: String
     let defaultTaxRate: String?
     /// The company's own online payment destination. A URL and nothing else —
-    /// TradeDesk holds no processor account, credential or integration.
+    /// Harbour South holds no processor account, credential or integration.
     let onlinePaymentLinkURL: String?
 
     enum CodingKeys: String, CodingKey {

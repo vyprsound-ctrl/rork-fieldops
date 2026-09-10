@@ -50,17 +50,13 @@ struct SignInView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "wrench.and.screwdriver.fill")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(Theme.primary)
-                .frame(width: 56, height: 56)
-                .background(Theme.primaryTint)
-                .clipShape(.rect(cornerRadius: Theme.cardRadius))
+            BrandMark(size: 64)
                 .padding(.bottom, 6)
 
-            Text("TradeDesk")
+            Text(Brand.name)
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(subtitle)
                 .font(.subheadline)

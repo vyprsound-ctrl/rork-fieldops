@@ -51,6 +51,25 @@ private nonisolated struct InvitationResult: Decodable, Sendable {
     }
 }
 
+/// What the invitation dispatcher is asked to send.
+///
+/// Note what is absent: no company id, no role, no recipient address. The
+/// dispatcher re-reads all three from the invitation row using the caller's own
+/// token, so this payload cannot redirect an invitation anywhere.
+private nonisolated struct InviteDispatchRequest: Encodable, Sendable {
+    let invitationId: String
+    let token: String
+    let name: String
+}
+
+private nonisolated struct InviteDispatchResponse: Decodable, Sendable {
+    let delivered: Bool?
+    let configured: Bool?
+    let recipient: String?
+    let detail: String?
+    let error: String?
+}
+
 private nonisolated struct UserStatusPayload: Encodable, Sendable {
     let status: String
     let updated_at: String
@@ -193,21 +212,99 @@ extension SupabaseDataGateway {
         }
 
         let expiry = Calendar.current.date(byAdding: .day, value: draft.expiresInDays, to: Date()) ?? Date()
+
+        // The invitation now exists and is valid. Delivery is attempted next
+        // and reported honestly — a failure here never invalidates the
+        // invitation, and never presents itself as a success.
+        let delivery = await dispatchInvitationEmail(
+            invitationID: result.invitationID.uuidString,
+            token: result.invitationToken,
+            name: draft.name.tidied,
+            fallbackRecipient: address
+        )
+
         record(
             "team.invite",
             session,
             allowed: true,
-            "\(draft.role.title(session.terms)) invitation issued; the company came from the caller's own session"
+            delivery.didSend
+                ? "\(draft.role.title(session.terms)) invitation issued and emailed; company came from the caller's own session"
+                : "\(draft.role.title(session.terms)) invitation issued; email not delivered — code must be passed on by hand"
         )
 
         return TeamInvite(
             id: result.invitationID.uuidString,
+            name: draft.name.tidied,
             email: address,
             role: draft.role,
             roleTitle: draft.role.title(session.terms),
             token: result.invitationToken,
-            expiresLabel: "Expires \(Formatters.shortDate(expiry))"
+            expiresLabel: "Expires \(Formatters.shortDate(expiry))",
+            delivery: delivery
         )
+    }
+
+    /// Hands the invitation to the server-side dispatcher, which is the only
+    /// place in the stack that holds an email credential.
+    ///
+    /// The caller's own access token travels with the request and is what the
+    /// dispatcher authenticates and authorises against — it re-reads the
+    /// invitation through Row Level Security rather than trusting this call.
+    ///
+    /// Deliberately cannot throw. The invitation is already created; turning a
+    /// delivery problem into a thrown error would tell the office the whole
+    /// operation failed when it did not, and would hide the code they need.
+    private func dispatchInvitationEmail(
+        invitationID: String,
+        token: String,
+        name: String,
+        fallbackRecipient: String
+    ) async -> InviteDeliveryStatus {
+        guard let base = BackendConfiguration.invoicePageBase,
+              let endpoint = URL(string: "\(base)/invite") else {
+            return .notConfigured
+        }
+
+        let accessToken: String
+        do {
+            accessToken = try await client.auth.session.accessToken
+        } catch {
+            print("[team] no access token available to dispatch the invitation")
+            return .failed(detail: "Your session needs refreshing before an invitation can be emailed.")
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(
+                InviteDispatchRequest(invitationId: invitationID, token: token, name: name)
+            )
+        } catch {
+            return .failed(detail: "The invitation couldn't be prepared for sending.")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let decoded = try? JSONDecoder().decode(InviteDispatchResponse.self, from: data)
+
+            guard status == 200 else {
+                print("[team] invitation dispatch refused: \(status) \(decoded?.error ?? "-")")
+                return .failed(detail: "The invitation was created but couldn't be emailed.")
+            }
+            if decoded?.configured == false { return .notConfigured }
+            if decoded?.delivered == true {
+                return .sent(recipient: decoded?.recipient ?? fallbackRecipient)
+            }
+            return .failed(detail: decoded?.detail ?? "The invitation was created but couldn't be emailed.")
+        } catch {
+            print("[team] invitation dispatch failed: \(error.localizedDescription)")
+            return .failed(detail: "Couldn't reach the mail service. The invitation is still valid.")
+        }
     }
 
     func revokeInvitation(session: TenantSession, invitationID: String) async throws {

@@ -102,7 +102,7 @@ extension SupabaseDataGateway {
             PushNotificationRecord(
                 id: row.id.uuidString,
                 event: row.template,
-                title: row.title ?? PushEvent(rawValue: row.template)?.title ?? "TradeDesk",
+                title: row.title ?? PushEvent(rawValue: row.template)?.title ?? Brand.name,
                 body: row.body ?? "",
                 status: row.status,
                 jobID: row.jobID?.uuidString,

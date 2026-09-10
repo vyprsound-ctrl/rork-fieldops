@@ -10,7 +10,7 @@ nonisolated struct StoreSubscriptionResult: Hashable, Sendable {
 /// Production will be Apple In-App Purchase and Google Play Billing.
 ///
 /// This is the *only* money seam in the app. The money a trade business
-/// collects from its own customers is never processed here: TradeDesk records
+/// collects from its own customers is never processed here: Harbour South records
 /// payments the contractor tells it about and, when they have configured one,
 /// points their customer at the contractor's own payment link. There is no
 /// customer-payment service protocol on purpose.

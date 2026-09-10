@@ -76,7 +76,7 @@ nonisolated enum IntegrationRegistry {
             name: "Customer payments",
             mode: .production,
             plannedProvider: "The company's own payment provider",
-            detail: "Not an integration and never will be. Payments received are recorded by hand, and a customer paying online is sent to the company's own payment link. TradeDesk never processes, routes, holds or reconciles a card payment."
+            detail: "Not an integration and never will be. Payments received are recorded by hand, and a customer paying online is sent to the company's own payment link. Harbour South never processes, routes, holds or reconciles a card payment."
         ),
         IntegrationStatus(
             id: "sms",

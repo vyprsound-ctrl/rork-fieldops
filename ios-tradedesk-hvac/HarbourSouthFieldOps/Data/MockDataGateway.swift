@@ -3634,7 +3634,7 @@ actor MockDataGateway: DataGateway {
         PushNotificationRecord(
             id: notification.id,
             event: notification.template,
-            title: notification.title ?? PushEvent(rawValue: notification.template)?.title ?? "TradeDesk",
+            title: notification.title ?? PushEvent(rawValue: notification.template)?.title ?? Brand.name,
             body: notification.body ?? "",
             status: notification.status,
             jobID: notification.jobID,

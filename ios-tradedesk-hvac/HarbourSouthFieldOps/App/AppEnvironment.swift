@@ -108,6 +108,14 @@ final class AppEnvironment {
     /// Set when sign-up succeeded but the address still needs confirming. The
     /// company is founded automatically on the first sign-in after that.
     private(set) var signUpNotice: String?
+    /// An invitation handed over by a tapped email link, waiting for the
+    /// sign-in screen to pick it up.
+    ///
+    /// This is a PREFILL and nothing more. The code still has to match a live
+    /// invitation inside the database, which is where the company and the role
+    /// are decided — arriving by link grants nothing that typing the same code
+    /// by hand would not.
+    private(set) var pendingInvitationLink: InvitationLink.Payload?
 
     // MARK: Push notification state
 
@@ -402,6 +410,42 @@ final class AppEnvironment {
     /// Only production authentication is involved. The development picker has
     /// its own session and is deliberately left untouched — a real identity is
     /// never handed to the mock stack.
+    /// Everything the app is reopened by: Supabase email links, and the
+    /// invitation hand-off from the join page.
+    ///
+    /// The invitation is checked first because it shares the registered scheme.
+    /// It carries no Supabase code to exchange, so treating it as an auth
+    /// callback would fail it with an "unusable link" message.
+    func handleIncomingURL(_ url: URL) async {
+        if let invitation = InvitationLink.payload(from: url) {
+            acceptInvitationLink(invitation)
+            return
+        }
+        await handleAuthCallback(url)
+    }
+
+    /// Parks an invitation from a tapped link for the sign-in screen.
+    ///
+    /// A signed-in session is deliberately left alone: somebody already working
+    /// who taps an old invitation email must not be signed out of the company
+    /// they are in. They are told what to do instead.
+    private func acceptInvitationLink(_ payload: InvitationLink.Payload) {
+        guard productionSession == nil else {
+            signUpNotice = "You're already signed in. Sign out first if you're joining a different company with that invitation."
+            return
+        }
+        pendingInvitationLink = payload
+        passwordResetNotice = nil
+        signUpNotice = "Invitation opened. Enter your email address and choose a password to finish setting up your account."
+        if case .failed = authPhase { authPhase = .signedOut }
+    }
+
+    /// Called by the sign-in screen once it has copied the code into its form,
+    /// so a later redraw doesn't overwrite what the person has since typed.
+    func consumePendingInvitationLink() {
+        pendingInvitationLink = nil
+    }
+
     func handleAuthCallback(_ url: URL) async {
         guard AuthCallback.matches(url) else { return }
 

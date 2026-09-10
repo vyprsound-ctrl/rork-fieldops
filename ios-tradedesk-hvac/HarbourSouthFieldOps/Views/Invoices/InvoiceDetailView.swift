@@ -301,7 +301,7 @@ struct InvoiceDetailView: View {
     @ViewBuilder
     private func paymentLinkNote(_ sharing: InvoiceSharing) -> some View {
         if sharing.paymentLink.isConfigured {
-            Text("Your customer sees a Pay online button through to \(sharing.paymentLink.displayHost ?? "your payment page"). They pay you directly — TradeDesk isn't part of that transaction and won't know it happened, so record the payment here when the money reaches you.")
+            Text("Your customer sees a Pay online button through to \(sharing.paymentLink.displayHost ?? "your payment page"). They pay you directly — Harbour South isn't part of that transaction and won't know it happened, so record the payment here when the money reaches you.")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)
@@ -645,7 +645,7 @@ struct InvoiceDetailView: View {
                 .cardSurface()
             }
 
-            Text("Payments are recorded by hand — this is the contractor's own record that money arrived. TradeDesk never takes the payment itself. Development build: every payment here is recorded as simulated.")
+            Text("Payments are recorded by hand — this is the contractor's own record that money arrived. Harbour South never takes the payment itself. Development build: every payment here is recorded as simulated.")
                 .font(.caption)
                 .foregroundStyle(Theme.amber)
                 .fixedSize(horizontal: false, vertical: true)

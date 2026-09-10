@@ -59,12 +59,18 @@ nonisolated struct TeamRoster: Hashable, Sendable {
 /// What the office fills in to add somebody. No company id: the invitation is
 /// stamped with the inviter's own company inside the database.
 nonisolated struct TeamInviteDraft: Hashable, Sendable {
+    /// Addresses the invitation email and prefills the joiner's own name on the
+    /// sign-up form. It is NOT written to the roster from here: the person
+    /// confirms or corrects their name when they set up their account, and that
+    /// is what the database stores.
+    var name: String = ""
     var email: String = ""
     var role: Role = .fieldWorker
     var expiresInDays: Int = 14
 
     var validationMessage: String? {
         let address = email.tidied
+        if name.tidied.isEmpty { return "Enter the person's name." }
         if address.isEmpty { return "Enter the email address to invite." }
         if !address.contains("@") || address.contains(" ") { return "That email address doesn't look right." }
         if role == .owner { return "A company has one owner. Invite an admin instead." }
@@ -72,18 +78,38 @@ nonisolated struct TeamInviteDraft: Hashable, Sendable {
     }
 }
 
-/// The code the invited person types into the app to join.
+/// What genuinely happened to the invitation email.
 ///
-/// The token is shown once, to the person who created it, so they can pass it
-/// on however they normally reach their team. Nothing is emailed from the
-/// device.
+/// Three states rather than a boolean, deliberately. "Nothing was sent because
+/// no provider is configured" and "the provider refused it" need different
+/// action from the office, and neither may ever be shown as a success.
+nonisolated enum InviteDeliveryStatus: Hashable, Sendable {
+    case sent(recipient: String)
+    case notConfigured
+    case failed(detail: String)
+
+    var didSend: Bool {
+        if case .sent = self { return true }
+        return false
+    }
+}
+
+/// An invitation that has just been issued.
+///
+/// The email is dispatched server-side — no email credential exists on the
+/// device — and `delivery` reports what actually happened to it. The join code
+/// is still returned and shown once, because an email that could not be
+/// delivered must still leave the office with a way to get their engineer
+/// working.
 nonisolated struct TeamInvite: Hashable, Sendable, Identifiable {
     let id: String
+    let name: String
     let email: String
     let role: Role
     let roleTitle: String
     let token: String
     let expiresLabel: String
+    let delivery: InviteDeliveryStatus
 }
 
 // MARK: - Gateway surface

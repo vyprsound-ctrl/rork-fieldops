@@ -699,7 +699,7 @@ nonisolated struct InvoiceDetailProjection: Identifiable, Hashable, Sendable {
 
 /// The company's own online payment destination, as the settings screen sees it.
 ///
-/// TradeDesk holds a URL and nothing else — no processor account, no
+/// Harbour South holds a URL and nothing else — no processor account, no
 /// credentials, no integration. The money never passes through this product.
 nonisolated struct PaymentLinkSettings: Hashable, Sendable {
     let url: String?

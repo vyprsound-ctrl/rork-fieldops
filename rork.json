@@ -2,7 +2,7 @@
   "$schema": "https://rork.com/schema/rork.json",
   "apps": [
     {
-      "name": "TradeDesk HVAC",
+      "name": "Harbour South FieldOps",
       "path": "ios-tradedesk-hvac",
       "framework": "swift",
       "settings": {

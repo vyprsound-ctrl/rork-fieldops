@@ -131,7 +131,7 @@ struct SendInvoiceSheet: View {
         } header: {
             Text("Paying")
         } footer: {
-            Text("Payment goes straight from your customer to your own provider. TradeDesk isn't part of the transaction and won't know it happened — record the payment here once the money reaches you.")
+            Text("Payment goes straight from your customer to your own provider. Harbour South isn't part of the transaction and won't know it happened — record the payment here once the money reaches you.")
         }
     }
 

@@ -200,7 +200,7 @@ protocol DataGateway: Sendable {
     /// again by the database.
     ///
     /// This stores a URL. It connects nothing, authorises nothing and moves no
-    /// money — TradeDesk is never a party to the customer's payment.
+    /// money — Harbour South is never a party to the customer's payment.
     func updateCompanyPaymentLink(session: TenantSession, url: String?) async throws
 
     /// Everything needed to share one invoice with its customer: the live link,

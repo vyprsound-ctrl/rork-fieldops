@@ -36,7 +36,7 @@ nonisolated struct Company: Identifiable, Codable, Hashable, Sendable {
     /// Stripe payment link, a Square link, a PayPal.me page, their own portal:
     /// whatever they already use.
     ///
-    /// TradeDesk stores a URL and nothing else. There is no processor account,
+    /// Harbour South stores a URL and nothing else. There is no processor account,
     /// no API credential and no integration behind it, and the money never
     /// passes through this product. `nil` simply means no payment button is
     /// offered to the customer.

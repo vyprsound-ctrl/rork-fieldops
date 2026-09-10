@@ -1,4 +1,5 @@
-/// TradeDesk — the customer-facing invoice page.
+/// Harbour South FieldOps — the customer-facing invoice page and the
+/// team-invitation dispatcher.
 ///
 /// This Worker exists for one reason: it is the only place in the stack that
 /// can serve real HTML. Supabase's edge gateway rewrites every function
@@ -41,6 +42,10 @@ interface Env {
   /// Supabase gateway accepts the browser's call to `invoice-payment`; that
   /// function's real authorisation is the invoice share token.
   EXPO_PUBLIC_SUPABASE_ANON_KEY?: string;
+  /// Email transport for team invitations. Server-side only — no email
+  /// credential is ever present in the iOS app.
+  RESEND_API_KEY?: string;
+  RESEND_FROM_EMAIL?: string;
 }
 
 interface InvoicePayload {
@@ -581,9 +586,313 @@ function stripeLandingPage(kind: "return" | "refresh"): Response {
   return new Response(html, { status: 200, headers: pageHeaders });
 }
 
+// =============================================================================
+// Team invitations
+//
+// An owner or admin invites somebody by email. The invitation ROW is created by
+// the database (`create_invitation`), which takes the company from the caller's
+// own session and stamps the role — this Worker cannot create, alter or
+// re-target an invitation, and holds no database credential that would let it.
+//
+// What this Worker adds is the part that was missing entirely: actually
+// delivering the invitation. Before this, the code was displayed to the owner
+// and had to be relayed by hand, so an invited engineer never received anything.
+//
+// AUTHORISATION is the caller's own JWT, twice over:
+//   1. The token is verified against Supabase Auth before anything is read.
+//   2. The invitation row is then read WITH THAT SAME TOKEN, so Row Level
+//      Security is what proves the invitation belongs to the caller's company
+//      and that their role may see it at all. A caller who points this at
+//      another company's invitation gets nothing back and a 404.
+//
+// The recipient address is taken from the row the database returned, never from
+// the request body, so this cannot be used to mail an invitation somewhere it
+// was not addressed.
+// =============================================================================
+
+/// Matches the invitation codes `create_invitation` issues, and nothing that
+/// could be smuggled into a URL or an email header.
+const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{6,128}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const jsonHeaders: Record<string, string> = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+interface InvitationRow {
+  id: string;
+  email: string;
+  role: string;
+  company_id: string;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+const ROLE_TITLES: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  dispatcher: "Dispatcher",
+  fieldWorker: "Engineer",
+  accounts: "Accounts",
+};
+
+function roleTitle(role: string): string {
+  return ROLE_TITLES[role] ?? role;
+}
+
+function inviteEmailHtml(
+  companyName: string,
+  personName: string,
+  role: string,
+  joinUrl: string,
+  token: string,
+  expiresLabel: string,
+): string {
+  const greeting = personName ? `Hi ${escapeHtml(personName)},` : "Hello,";
+  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#15161a;line-height:1.6;max-width:520px">` +
+    `<p style="font-size:16px;margin:0 0 14px">${greeting}</p>` +
+    `<p style="margin:0 0 16px"><strong>${escapeHtml(companyName)}</strong> has invited you to join them on ` +
+    `<strong>Harbour South FieldOps</strong> as <strong>${escapeHtml(roleTitle(role))}</strong>.</p>` +
+    `<p style="margin:0 0 24px"><a href="${escapeHtml(joinUrl)}" style="background:#0f5c4a;color:#fff;` +
+    `text-decoration:none;padding:13px 22px;border-radius:11px;font-weight:600;display:inline-block">Set up your account</a></p>` +
+    `<p style="margin:0 0 6px;color:#606374;font-size:14px">If the button doesn't work, open Harbour South FieldOps, ` +
+    `choose <strong>Join</strong> on the sign-in screen and enter this code:</p>` +
+    `<p style="margin:0 0 18px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;` +
+    `background:#f3f4f7;border-radius:9px;padding:12px 14px;word-break:break-all">${escapeHtml(token)}</p>` +
+    `<p style="margin:0;color:#8a8d9b;font-size:13px">${escapeHtml(expiresLabel)} ` +
+    `You choose your own password when you set up your account — nobody at ${escapeHtml(companyName)} can see it.</p>` +
+    `</div>`;
+}
+
+async function dispatchInvitation(request: Request, env: Env, origin: string): Promise<Response> {
+  const base = (env.EXPO_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  const anonKey = (env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
+  if (!base || !anonKey) {
+    console.error("[invite] Supabase coordinates are not configured for the Worker");
+    return Response.json({ error: "unavailable" }, { status: 503, headers: jsonHeaders });
+  }
+
+  const authorization = request.headers.get("Authorization") ?? "";
+  if (!/^Bearer\s+\S+$/i.test(authorization)) {
+    return Response.json({ error: "unauthorized" }, { status: 401, headers: jsonHeaders });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    invitationId?: string;
+    token?: string;
+    name?: string;
+  };
+
+  const invitationId = (body.invitationId ?? "").trim();
+  const token = (body.token ?? "").trim();
+  const personName = (body.name ?? "").trim().slice(0, 80);
+
+  if (!UUID_PATTERN.test(invitationId) || !INVITE_TOKEN_PATTERN.test(token)) {
+    return Response.json({ error: "invalidRequest" }, { status: 400, headers: jsonHeaders });
+  }
+
+  const callerHeaders = { apikey: anonKey, Authorization: authorization, Accept: "application/json" };
+
+  // 1. Is this a real, live identity? A dropped or forged token stops here.
+  const identity = await fetch(`${base}/auth/v1/user`, { headers: callerHeaders });
+  if (!identity.ok) {
+    return Response.json({ error: "unauthorized" }, { status: 401, headers: jsonHeaders });
+  }
+
+  // 2. Read the invitation AS THE CALLER. RLS on `invitations` is the whole
+  //    boundary: it returns the row only for a caller in the same company whose
+  //    role may manage users. Nothing here re-implements that rule.
+  const lookup = await fetch(
+    `${base}/rest/v1/invitations?id=eq.${encodeURIComponent(invitationId)}` +
+      `&select=id,email,role,company_id,expires_at,accepted_at,revoked_at&limit=1`,
+    { headers: callerHeaders },
+  );
+
+  if (!lookup.ok) {
+    console.error("[invite] invitation lookup failed", lookup.status);
+    return Response.json({ error: "notFound" }, { status: 404, headers: jsonHeaders });
+  }
+
+  const rows = (await lookup.json().catch(() => [])) as InvitationRow[];
+  const invitation = Array.isArray(rows) ? rows[0] : undefined;
+  if (!invitation) {
+    return Response.json({ error: "notFound" }, { status: 404, headers: jsonHeaders });
+  }
+  if (invitation.accepted_at || invitation.revoked_at) {
+    return Response.json({ error: "notUsable" }, { status: 409, headers: jsonHeaders });
+  }
+
+  // The company name, again through the caller's own token.
+  let companyName = "Your company";
+  try {
+    const companyLookup = await fetch(
+      `${base}/rest/v1/companies?id=eq.${encodeURIComponent(invitation.company_id)}&select=name&limit=1`,
+      { headers: callerHeaders },
+    );
+    if (companyLookup.ok) {
+      const companies = (await companyLookup.json()) as Array<{ name?: string }>;
+      companyName = companies?.[0]?.name?.trim() || companyName;
+    }
+  } catch (err) {
+    console.error("[invite] company lookup failed", err instanceof Error ? err.message : err);
+  }
+
+  const apiKey = (env.RESEND_API_KEY ?? "").trim();
+  const from = (env.RESEND_FROM_EMAIL ?? "").trim();
+
+  const joinUrl = `${origin}/join?t=${encodeURIComponent(token)}` +
+    (personName ? `&n=${encodeURIComponent(personName)}` : "");
+
+  if (!apiKey || !from) {
+    // NOT a success. The invitation exists and the code is valid, but nothing
+    // was delivered, and the app is told exactly that so it can fall back to
+    // handing the code over in person.
+    console.warn("[invite] email provider not configured — nothing was delivered");
+    return Response.json(
+      {
+        delivered: false,
+        configured: false,
+        recipient: invitation.email,
+        joinUrl,
+        detail: "Email provider not configured, so nothing was sent.",
+      },
+      { status: 200, headers: jsonHeaders },
+    );
+  }
+
+  const expiresLabel = (() => {
+    try {
+      const when = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" })
+        .format(new Date(invitation.expires_at));
+      return `This invitation expires on ${when}.`;
+    } catch {
+      return "This invitation expires.";
+    }
+  })();
+
+  const subject = `${companyName} invited you to Harbour South FieldOps`;
+  const text = `${personName ? `Hi ${personName},\n\n` : ""}${companyName} has invited you to join them on ` +
+    `Harbour South FieldOps as ${roleTitle(invitation.role)}.\n\n` +
+    `Set up your account:\n${joinUrl}\n\n` +
+    `Or open the app, choose "Join" on the sign-in screen and enter this code:\n${token}\n\n` +
+    `${expiresLabel} You choose your own password.\n`;
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from,
+        to: [invitation.email],
+        subject,
+        html: inviteEmailHtml(companyName, personName, invitation.role, joinUrl, token, expiresLabel),
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.error("[invite] email provider refused the message", response.status, detail.slice(0, 300));
+      return Response.json(
+        {
+          delivered: false,
+          configured: true,
+          recipient: invitation.email,
+          joinUrl,
+          detail: `The email provider refused the message (${response.status}).`,
+        },
+        { status: 200, headers: jsonHeaders },
+      );
+    }
+
+    return Response.json(
+      { delivered: true, configured: true, recipient: invitation.email, joinUrl, detail: "Invitation sent." },
+      { status: 200, headers: jsonHeaders },
+    );
+  } catch (err) {
+    console.error("[invite] email transport failed", err instanceof Error ? err.message : err);
+    return Response.json(
+      {
+        delivered: false,
+        configured: true,
+        recipient: invitation.email,
+        joinUrl,
+        detail: "Couldn't reach the email provider.",
+      },
+      { status: 200, headers: jsonHeaders },
+    );
+  }
+}
+
+/// The page an invited person lands on from their email.
+///
+/// It carries no credential of its own and reveals nothing about the company —
+/// only the code that was already in the email that brought them here. Its job
+/// is to hand the code to the app on a phone, and to still be useful on a
+/// laptop where the app cannot be opened at all.
+function joinLandingPage(token: string, name: string): Response {
+  const deepLink = `com.harboursouth.fieldservice://join?token=${encodeURIComponent(token)}` +
+    (name ? `&name=${encodeURIComponent(name)}` : "");
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Join Harbour South FieldOps</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:#f3f4f7; padding:24px;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#15161a; }
+  .card { background:#fff; border-radius:20px; padding:32px 26px; max-width:460px; width:100%;
+          box-shadow:0 1px 3px rgba(16,18,27,.08),0 12px 32px rgba(16,18,27,.06); }
+  h1 { font-size:21px; margin:0 0 10px; letter-spacing:-.015em; }
+  p { margin:0 0 16px; font-size:15px; line-height:1.6; color:#606374; }
+  .cta { display:block; text-align:center; background:#0f5c4a; color:#fff; text-decoration:none;
+         padding:15px 22px; border-radius:12px; font-weight:600; font-size:16px; margin:0 0 20px; }
+  .code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; background:#f3f4f7;
+          border-radius:10px; padding:13px 15px; word-break:break-all; color:#15161a; user-select:all; }
+  .label { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#8a8d9b;
+           font-weight:700; margin:0 0 7px; }
+</style></head>
+<body><div class="card">
+  <h1>Set up your account</h1>
+  <p>You've been invited to Harbour South FieldOps. Open the app on your phone to choose a password and get going.</p>
+  <a class="cta" href="${escapeHtml(deepLink)}">Open Harbour South FieldOps</a>
+  <p class="label">Or enter this join code</p>
+  <div class="code">${escapeHtml(token)}</div>
+  <p style="margin:16px 0 0;font-size:13px;color:#8a8d9b">On your phone, open Harbour South FieldOps, tap
+  <strong>Join</strong> on the sign-in screen, then enter your email, a password of your own choosing, your name
+  and this code.</p>
+</div></body></html>`;
+
+  return new Response(html, { status: 200, headers: pageHeaders });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/invite") {
+      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: jsonHeaders });
+      if (request.method !== "POST") {
+        return Response.json({ error: "methodNotAllowed" }, { status: 405, headers: jsonHeaders });
+      }
+      return dispatchInvitation(request, env, url.origin);
+    }
+
+    if (url.pathname === "/join") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method not allowed", { status: 405, headers: pageHeaders });
+      }
+      const token = (url.searchParams.get("t") ?? "").trim();
+      if (!INVITE_TOKEN_PATTERN.test(token)) return notFoundPage();
+      return joinLandingPage(token, (url.searchParams.get("n") ?? "").trim().slice(0, 80));
+    }
 
     if (url.pathname === "/stripe/return" || url.pathname === "/stripe/refresh") {
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -636,6 +945,6 @@ export default {
       }
     }
 
-    return Response.json({ ok: true, service: "tradedesk" });
+    return Response.json({ ok: true, service: "harbour-south-fieldops" });
   },
 };

@@ -298,7 +298,25 @@ private nonisolated struct SmsPurchaseResponse: Decodable, Sendable {
     let error: String?
 }
 
+/// The columns a recurring agreement is written from.
+///
+/// `company_id` is REQUIRED on insert. `service_agreements.company_id` is
+/// `not null` with no column default, so an insert that omits it is refused by
+/// PostgreSQL before RLS is ever consulted — which is precisely why creating a
+/// recurring visit failed. It is still not a trust decision: the value comes
+/// from the session the database itself issued, and the `with check` on the
+/// table re-tests it against `current_company_id()`, so a tampered value is
+/// rejected rather than honoured.
+///
+/// The encoding is written by hand for one reason: Swift's synthesised encoder
+/// uses `encodeIfPresent` for optionals, which would silently DROP a cleared
+/// field instead of nulling it. Switching an agreement from a custom interval
+/// back to monthly, or removing its equipment, has to send `null` — otherwise
+/// the old value survives the edit.
 private nonisolated struct RecurringPayload: Encodable, Sendable {
+    /// Omitted on update, where the row's company is already settled and the
+    /// policy forbids moving it.
+    let company_id: String?
     let customer_id: String
     let address_id: String
     let equipment_id: String?
@@ -311,6 +329,30 @@ private nonisolated struct RecurringPayload: Encodable, Sendable {
     let template_job_kind: String
     let notes: String?
     let updated_at: String
+
+    enum CodingKeys: String, CodingKey {
+        case company_id, customer_id, address_id, equipment_id, frequency
+        case interval_days, next_due_date, is_active, template_title
+        case template_description, template_job_kind, notes, updated_at
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(company_id, forKey: .company_id)
+        try container.encode(customer_id, forKey: .customer_id)
+        try container.encode(address_id, forKey: .address_id)
+        // Explicit nulls: these are cleared, not left alone.
+        try container.encode(equipment_id, forKey: .equipment_id)
+        try container.encode(frequency, forKey: .frequency)
+        try container.encode(interval_days, forKey: .interval_days)
+        try container.encode(next_due_date, forKey: .next_due_date)
+        try container.encode(is_active, forKey: .is_active)
+        try container.encode(template_title, forKey: .template_title)
+        try container.encode(template_description, forKey: .template_description)
+        try container.encode(template_job_kind, forKey: .template_job_kind)
+        try container.encode(notes, forKey: .notes)
+        try container.encode(updated_at, forKey: .updated_at)
+    }
 }
 
 private nonisolated struct PaymentTermsPayload: Encodable, Sendable {
@@ -780,26 +822,29 @@ extension SupabaseDataGateway {
 
         if let message = draft.validationMessage { throw DataError.rejected(message) }
 
-        let payload = RecurringPayload(
-            customer_id: draft.customerID,
-            address_id: draft.addressID,
-            equipment_id: draft.equipmentID,
-            frequency: draft.frequency.rawValue,
-            interval_days: draft.frequency == .custom ? draft.intervalDays : nil,
-            next_due_date: SupabaseCoding.day(draft.nextDueDate),
-            is_active: draft.isActive,
-            template_title: draft.title.tidied,
-            template_description: draft.description.tidied,
-            template_job_kind: draft.kind.rawValue,
-            notes: draft.notes.nilIfBlank,
-            updated_at: SupabaseCoding.timestamp(Date())
-        )
+        func payload(companyID: String?) -> RecurringPayload {
+            RecurringPayload(
+                company_id: companyID,
+                customer_id: draft.customerID,
+                address_id: draft.addressID,
+                equipment_id: draft.equipmentID?.nilIfBlank,
+                frequency: draft.frequency.rawValue,
+                interval_days: draft.frequency == .custom ? draft.intervalDays : nil,
+                next_due_date: SupabaseCoding.day(draft.nextDueDate),
+                is_active: draft.isActive,
+                template_title: draft.title.tidied,
+                template_description: draft.description.tidied,
+                template_job_kind: draft.kind.rawValue,
+                notes: draft.notes.nilIfBlank,
+                updated_at: SupabaseCoding.timestamp(Date())
+            )
+        }
 
-        // No company_id is sent. The column is defaulted from
-        // current_company_id() and the RLS `with check` is what enforces it.
+        // An update never restates the company: the row already has one, and
+        // the policy refuses to move a row between tenants anyway.
         if let id = draft.id {
             try await performWrite(
-                client.from("service_agreements").update(payload).eq("id", value: id)
+                client.from("service_agreements").update(payload(companyID: nil)).eq("id", value: id)
             )
             record("recurring.save", session, allowed: true, "Updated; company scope enforced by RLS")
             return id
@@ -807,7 +852,7 @@ extension SupabaseDataGateway {
 
         let created = try await fetch(
             IdentifierRecord.self,
-            client.from("service_agreements").insert(payload).select("id")
+            client.from("service_agreements").insert(payload(companyID: session.companyID)).select("id")
         )
 
         guard let id = created.first?.id.uuidString else {

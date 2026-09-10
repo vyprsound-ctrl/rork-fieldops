@@ -55,7 +55,7 @@ nonisolated enum BillingStore: String, Codable, Sendable {
 
 /// The company's own SaaS subscription to this platform.
 /// Deliberately isolated from the trade business's revenue from *their*
-/// customers, which TradeDesk records but never processes.
+/// customers, which Harbour South records but never processes.
 nonisolated struct CompanySubscription: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let companyID: String

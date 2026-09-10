@@ -30,11 +30,17 @@ nonisolated enum AuthCallback {
 
     /// Whether an incoming URL is ours to handle.
     ///
-    /// Matching on the scheme alone is deliberate: Supabase appends its
-    /// parameters in different shapes depending on the link type, and a URL that
-    /// carries our scheme is never intended for anything else.
+    /// Matching on the scheme is deliberately broad: Supabase appends its
+    /// parameters in different shapes depending on the link type, so anything
+    /// stricter would drop valid callbacks.
+    ///
+    /// The one exception is the invitation hand-off, which shares this scheme
+    /// under its own host. It carries no Supabase code to exchange, so letting
+    /// it through here would turn a working invitation into an "unusable link"
+    /// error. `InvitationLink` owns that host; this refuses it.
     static func matches(_ url: URL) -> Bool {
-        url.scheme?.caseInsensitiveCompare(scheme) == .orderedSame
+        guard url.scheme?.caseInsensitiveCompare(scheme) == .orderedSame else { return false }
+        return !InvitationLink.matches(url)
     }
 
     /// A failure Supabase reported inside the callback itself.

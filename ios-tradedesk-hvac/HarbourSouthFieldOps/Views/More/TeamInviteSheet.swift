@@ -18,6 +18,8 @@ struct TeamInviteSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    TextField("Full name", text: $draft.name)
+                        .textContentType(.name)
                     TextField("Email address", text: $draft.email)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
@@ -26,7 +28,7 @@ struct TeamInviteSheet: View {
                 } header: {
                     Text("Who")
                 } footer: {
-                    Text("They'll use this address to create their sign-in.")
+                    Text("We'll email them a secure link to set up their own account. They choose their own password — you never see it.")
                 }
 
                 Section {
@@ -43,14 +45,14 @@ struct TeamInviteSheet: View {
                 }
 
                 Section {
-                    Picker("Code expires", selection: $draft.expiresInDays) {
+                    Picker("Invitation expires", selection: $draft.expiresInDays) {
                         Text("2 days").tag(2)
                         Text("7 days").tag(7)
                         Text("14 days").tag(14)
                         Text("30 days").tag(30)
                     }
                 } footer: {
-                    Text("You'll get a join code to pass on. It stops working when it expires, or when you revoke it.")
+                    Text("The link stops working when it expires, or when you revoke the invitation.")
                 }
             }
             .navigationTitle("Invite")
@@ -71,6 +73,64 @@ struct TeamInviteSheet: View {
     }
 }
 
+/// How the invitation email actually went, said plainly.
+///
+/// A failure is never dressed up: if nothing was delivered, this says so and
+/// the join code below becomes the way to get the person working.
+private struct InviteDeliveryBanner: View {
+    let delivery: InviteDeliveryStatus
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbolName)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.10))
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+    }
+
+    private var symbolName: String {
+        delivery.didSend ? "envelope.badge.fill" : "exclamationmark.triangle.fill"
+    }
+
+    private var tint: Color {
+        delivery.didSend ? Theme.green : Theme.amber
+    }
+
+    private var title: String {
+        switch delivery {
+        case .sent: return "Invitation emailed"
+        case .notConfigured: return "Email not sent"
+        case .failed: return "Email not delivered"
+        }
+    }
+
+    private var detail: String {
+        switch delivery {
+        case .sent(let recipient):
+            return "Sent to \(recipient) with a link to set up their account. Ask them to check spam if it hasn't arrived."
+        case .notConfigured:
+            return "This company's mail service isn't set up yet, so nothing was sent. The invitation is still valid — pass the join code below on yourself."
+        case .failed(let reason):
+            return "\(reason) The invitation is still valid — pass the join code below on yourself."
+        }
+    }
+}
+
 /// Shows the join code once, right after it is issued.
 struct TeamInviteCodeSheet: View {
     let invite: TeamInvite
@@ -82,13 +142,15 @@ struct TeamInviteCodeSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(invite.roleTitle) invited")
+                        Text("\(invite.name.isEmpty ? invite.roleTitle : invite.name) invited as \(invite.roleTitle)")
                             .font(.title3.weight(.bold))
                             .foregroundStyle(Theme.ink)
                         Text("\(invite.email) · \(invite.expiresLabel)")
                             .font(.subheadline)
                             .foregroundStyle(Theme.secondary)
                     }
+
+                    InviteDeliveryBanner(delivery: invite.delivery)
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Join code").sectionLabelStyle()
@@ -124,7 +186,7 @@ struct TeamInviteCodeSheet: View {
                         }
                     }
 
-                    Text("This is the only time the code is shown. Send it to \(invite.email), and they enter it under “Join a company” on the sign-in screen. If it goes astray, revoke the invitation and send a new one.")
+                    Text("This is the only time the code is shown. If it goes astray, revoke the invitation and send a new one.")
                         .font(.footnote)
                         .foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -148,7 +210,7 @@ struct TeamInviteCodeSheet: View {
 
         Join code: \(invite.token)
 
-        Open the app, choose “Join a company” on the sign-in screen, and enter this code with your email address. \(invite.expiresLabel).
+        Open the app, choose “Join” on the sign-in screen, and enter this code with your email address. You choose your own password. \(invite.expiresLabel).
         """
     }
 }

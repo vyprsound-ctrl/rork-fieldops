@@ -111,6 +111,25 @@ struct ProductionSignInView: View {
                 notConfigured
             }
         }
+        // An invitation tapped in an email lands here. The code is copied into
+        // the form once and then released, so a later redraw never overwrites
+        // something the person has since typed.
+        .onChange(of: env.pendingInvitationLink) { _, payload in
+            adopt(payload)
+        }
+        .onAppear {
+            adopt(env.pendingInvitationLink)
+        }
+    }
+
+    private func adopt(_ payload: InvitationLink.Payload?) {
+        guard let payload else { return }
+        flow = .join
+        joinCode = payload.token
+        if !payload.name.isEmpty, joinName.trimmingCharacters(in: .whitespaces).isEmpty {
+            joinName = payload.name
+        }
+        env.consumePendingInvitationLink()
     }
 
     private var credentialFields: some View {
@@ -206,7 +225,7 @@ struct ProductionSignInView: View {
             }
             .cardSurface()
 
-            Text("Your office sends you this code. It decides which company you join and what you can do — this app cannot choose either.")
+            Text("Your invitation email carries this code — tapping the link in it fills this in for you. It decides which company you join and what you can do; this app cannot choose either. The password you enter above is your own, and nobody at your company can see it.")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)

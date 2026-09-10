@@ -3,7 +3,7 @@ import SwiftUI
 /// The company's own online payment destination.
 ///
 /// This screen sets one thing: a URL. There is no processor to connect, no
-/// account to authorise and no credential to store, because TradeDesk is never
+/// account to authorise and no credential to store, because Harbour South is never
 /// a party to the customer's payment — the money goes straight from their
 /// customer to them, through whatever provider they already use.
 struct PaymentLinkView: View {
@@ -193,7 +193,7 @@ struct PaymentLinkView: View {
 
     private var boundary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("What TradeDesk does with it").sectionLabelStyle()
+            Text("What Harbour South does with it").sectionLabelStyle()
 
             VStack(alignment: .leading, spacing: 9) {
                 boundaryRow("checkmark.circle.fill", Theme.green, "Shows it as a button on the invoice your customer opens.")

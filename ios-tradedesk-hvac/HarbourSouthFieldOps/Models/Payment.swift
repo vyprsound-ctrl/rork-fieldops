@@ -81,7 +81,7 @@ nonisolated enum PaymentStatus: String, Codable, CaseIterable, Sendable, Identif
 
 /// Money the trade business collects from *its* customers, recorded by hand.
 ///
-/// TradeDesk is not a payment processor and holds no processor identifiers. A
+/// Harbour South is not a payment processor and holds no processor identifiers. A
 /// payment row is the contractor's own record that money arrived — by card
 /// terminal, bank transfer, cash or check — and `reference` is whatever they
 /// write down for it. It is never mixed with the platform's own subscription

@@ -188,6 +188,18 @@ actor SupabaseDataGateway: DataGateway {
             return .notPermitted(.jobsManage)
         case "23505":
             return .rejected("That record already exists.")
+        case "23502", "23503", "23514", "22P02", "42703":
+            // A payload the database could not accept: a missing required
+            // column, a reference to a row that isn't there, a failed check, a
+            // malformed value, or a column this build thinks exists and the
+            // schema does not.
+            //
+            // These used to fall through to the transport branch and surface as
+            // "Couldn't reach the server", which sent people into a retry loop
+            // over a request that could never succeed. The detail is logged for
+            // diagnosis; the sentence shown says what actually happened.
+            print("[data] write rejected by the schema: \(postgrest.code ?? "-") \(postgrest.message) \(postgrest.detail ?? "")")
+            return .rejected("The server wouldn't accept this record. Check the details and try again — if it keeps happening, this needs looking at.")
         default:
             print("[data] write refused: \(postgrest.code ?? "-") \(postgrest.message)")
             return translate(error)

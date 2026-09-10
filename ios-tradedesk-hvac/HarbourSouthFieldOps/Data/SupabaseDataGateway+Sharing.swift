@@ -136,7 +136,7 @@ extension SupabaseDataGateway {
             allowed: true,
             normalised == nil
                 ? "Payment link cleared — no payment button is shown to customers"
-                : "Payment link stored (\(OnlinePaymentLink.displayHost(normalised) ?? "—")) — TradeDesk connects nothing and moves no money"
+                : "Payment link stored (\(OnlinePaymentLink.displayHost(normalised) ?? "—")) — Harbour South connects nothing and moves no money"
         )
     }
 

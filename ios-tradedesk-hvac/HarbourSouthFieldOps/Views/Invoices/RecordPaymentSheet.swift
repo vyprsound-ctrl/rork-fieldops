@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Records money the contractor has already received against an invoice.
 ///
-/// TradeDesk takes no payment here: this is a manual record, and `reference` is
+/// Harbour South takes no payment here: this is a manual record, and `reference` is
 /// whatever the person recording it writes down. The record the gateway writes
 /// is flagged as simulated on the row itself in development builds — a
 /// simulated payment is never presented as a real one.
@@ -83,7 +83,7 @@ struct RecordPaymentSheet: View {
                 Section {
                     HStack(spacing: 8) {
                         SimulatedBadge()
-                        Text("Recorded by hand. TradeDesk doesn't take the payment — it records that you received it, so the balance and status follow your own books.")
+                        Text("Recorded by hand. Harbour South doesn't take the payment — it records that you received it, so the balance and status follow your own books.")
                             .font(.caption)
                             .foregroundStyle(Theme.secondary)
                     }

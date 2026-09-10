@@ -112,7 +112,7 @@ async function deliver(
 
   const payload = {
     aps: {
-      alert: { title: row.title ?? "TradeDesk", body: row.body ?? "" },
+      alert: { title: row.title ?? "Harbour South FieldOps", body: row.body ?? "" },
       sound: "default",
       "interruption-level": row.event === "job.cancelled" ? "time-sensitive" : "active",
     },
