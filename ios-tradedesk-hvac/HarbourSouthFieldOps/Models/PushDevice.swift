@@ -40,6 +40,10 @@ nonisolated enum PushEvent: String, CaseIterable, Sendable {
     /// Field progress travelling the other way: the office hears that an
     /// engineer has moved a job on.
     case jobFieldUpdate = "job.fieldUpdate"
+    /// A message in an engineer ↔ office conversation. Travels in both
+    /// directions: the office is alerted when an engineer writes, and the
+    /// engineer is alerted when the office replies.
+    case officeMessage = "office.message"
 
     var title: String {
         switch self {
@@ -51,6 +55,7 @@ nonisolated enum PushEvent: String, CaseIterable, Sendable {
         case .jobUpdated: return "Job details updated"
         case .jobNote: return "New note on your job"
         case .jobFieldUpdate: return "Job progress"
+        case .officeMessage: return "New message"
         }
     }
 
@@ -63,11 +68,16 @@ nonisolated enum PushEvent: String, CaseIterable, Sendable {
         case .jobUpdated: return "pencil"
         case .jobNote: return "text.bubble"
         case .jobFieldUpdate: return "figure.walk"
+        case .officeMessage: return "bubble.left.and.bubble.right.fill"
         }
     }
 
     /// Which permission an office recipient must hold to be told. Engineer
     /// events are addressed by assignment instead, which is stricter.
+    ///
+    /// A message needs no entry here: `send_office_message()` resolves its
+    /// recipients individually from the company's own role grants, so the
+    /// addressing is done before a notification row is ever written.
     var officePermission: Permission? {
         self == .jobFieldUpdate ? .assignmentsManage : nil
     }

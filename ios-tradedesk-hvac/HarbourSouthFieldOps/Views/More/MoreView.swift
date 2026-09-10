@@ -113,15 +113,11 @@ struct MoreView: View {
                 }
 
                 Button {
-                    // Each stack owns its own sign-out. The production path also
+                    // One entry point for both stacks. The production path also
                     // removes this device's push registration before the session
                     // that owns it is discarded, which the development path has
                     // nothing to do.
-                    if env.isProductionSession {
-                        Task { await env.signOutOfProduction() }
-                    } else {
-                        env.signOut()
-                    }
+                    Task { await env.signOutOfCurrentSession() }
                 } label: {
                     Text("Sign out")
                         .font(.headline)

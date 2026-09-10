@@ -96,6 +96,8 @@ export type Database = {
           avatar_url: string | null
           company_id: string
           created_at: string
+          duty_state: Database["public"]["Enums"]["worker_duty_state"]
+          duty_state_changed_at: string | null
           email: string
           id: string
           invited_by_user_id: string | null
@@ -110,6 +112,8 @@ export type Database = {
           avatar_url?: string | null
           company_id: string
           created_at?: string
+          duty_state?: Database["public"]["Enums"]["worker_duty_state"]
+          duty_state_changed_at?: string | null
           email: string
           id: string
           invited_by_user_id?: string | null
@@ -124,6 +128,8 @@ export type Database = {
           avatar_url?: string | null
           company_id?: string
           created_at?: string
+          duty_state?: Database["public"]["Enums"]["worker_duty_state"]
+          duty_state_changed_at?: string | null
           email?: string
           id?: string
           invited_by_user_id?: string | null
@@ -1671,6 +1677,193 @@ export type Database = {
           },
         ]
       }
+      office_messages: {
+        Row: {
+          body: string
+          company_id: string
+          created_at: string
+          id: string
+          job_photo_ids: string[]
+          sender_user_id: string
+          thread_id: string
+        }
+        Insert: {
+          body: string
+          company_id: string
+          created_at?: string
+          id?: string
+          job_photo_ids?: string[]
+          sender_user_id: string
+          thread_id: string
+        }
+        Update: {
+          body?: string
+          company_id?: string
+          created_at?: string
+          id?: string
+          job_photo_ids?: string[]
+          sender_user_id?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "office_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_messages_sender_user_id_fkey"
+            columns: ["sender_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "office_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      office_thread_reads: {
+        Row: {
+          company_id: string
+          last_read_at: string
+          thread_id: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          last_read_at?: string
+          thread_id: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          last_read_at?: string
+          thread_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "office_thread_reads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_thread_reads_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "office_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_thread_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      office_threads: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by_user_id: string
+          customer_id: string | null
+          engineer_user_id: string
+          id: string
+          job_id: string | null
+          last_message_at: string
+          last_message_preview: string
+          last_sender_user_id: string | null
+          subject: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by_user_id: string
+          customer_id?: string | null
+          engineer_user_id: string
+          id?: string
+          job_id?: string | null
+          last_message_at?: string
+          last_message_preview?: string
+          last_sender_user_id?: string | null
+          subject?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by_user_id?: string
+          customer_id?: string | null
+          engineer_user_id?: string
+          id?: string
+          job_id?: string | null
+          last_message_at?: string
+          last_message_preview?: string
+          last_sender_user_id?: string | null
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "office_threads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_engineer_user_id_fkey"
+            columns: ["engineer_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "office_threads_last_sender_user_id_fkey"
+            columns: ["last_sender_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_intents: {
         Row: {
           amount_cents: number
@@ -2932,6 +3125,7 @@ export type Database = {
       }
       is_assigned_to_job: { Args: { p_job: string }; Returns: boolean }
       is_company_field_worker: { Args: { p_user: string }; Returns: boolean }
+      is_office_user: { Args: never; Returns: boolean }
       issue_invoice_share_token: {
         Args: { p_invoice: string; p_rotate?: boolean }
         Returns: string
@@ -2949,6 +3143,10 @@ export type Database = {
           p_title: string
         }
         Returns: string
+      }
+      mark_office_thread_read: {
+        Args: { p_thread: string }
+        Returns: undefined
       }
       next_document_number: {
         Args: { p_kind: Database["public"]["Enums"]["document_kind"] }
@@ -3098,6 +3296,21 @@ export type Database = {
           p_tax_rate: number
           p_unit_price: number
         }
+        Returns: undefined
+      }
+      send_office_message: {
+        Args: {
+          p_body?: string
+          p_engineer?: string
+          p_job?: string
+          p_photo_ids?: string[]
+          p_subject?: string
+          p_thread?: string
+        }
+        Returns: string
+      }
+      set_my_duty_state: {
+        Args: { p_state: Database["public"]["Enums"]["worker_duty_state"] }
         Returns: undefined
       }
       settle_notification: {
@@ -3314,6 +3527,7 @@ export type Database = {
         | "pastDue"
         | "cancelled"
         | "expired"
+      worker_duty_state: "available" | "onBreak" | "offDuty"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -3583,6 +3797,7 @@ export const Constants = {
         "cancelled",
         "expired",
       ],
+      worker_duty_state: ["available", "onBreak", "offDuty"],
     },
   },
 } as const

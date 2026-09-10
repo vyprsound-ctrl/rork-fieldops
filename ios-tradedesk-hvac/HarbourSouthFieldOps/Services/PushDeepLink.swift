@@ -22,6 +22,7 @@ nonisolated enum PushDeepLink {
         case .quote(let id): return "\(scheme)://quote/\(id)"
         case .invoice(let id): return "\(scheme)://invoice/\(id)"
         case .customer(let id): return "\(scheme)://customer/\(id)"
+        case .message(let id): return "\(scheme)://message/\(id)"
         case .more: return nil
         }
     }
@@ -55,6 +56,12 @@ nonisolated enum PushDeepLink {
         case "customer":
             guard let identifier, !identifier.isEmpty else { return nil }
             return .customer(identifier)
+        case "message":
+            // Written by `send_office_message()` in the database. Without an id
+            // there is no one conversation to open, so the tap simply opens the
+            // app rather than guessing at one.
+            guard let identifier, !identifier.isEmpty else { return nil }
+            return .message(identifier)
         case "jobs":
             return .more(.dispatch)
         default:

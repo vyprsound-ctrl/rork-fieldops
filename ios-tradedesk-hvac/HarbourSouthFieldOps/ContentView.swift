@@ -34,7 +34,7 @@ struct ContentView: View {
                 ChooseNewPasswordView()
             } else if let session = env.activeSession {
                 if session.role.usesFieldShell {
-                    FieldWorkerDayView()
+                    EngineerShellView()
                 } else {
                     OwnerShellView()
                 }
@@ -48,6 +48,20 @@ struct ContentView: View {
         .sheet(item: $deepLinkRoute) { route in
             NavigationStack {
                 RouteDestinationView(route: route)
+                    // A destination opened from a notification can push
+                    // further — a conversation about a job offers to open that
+                    // job. Without these the link renders as a dead row inside
+                    // the sheet, because the presented stack knows none of the
+                    // route types the tab stacks register.
+                    .navigationDestination(for: FieldJobRoute.self) { field in
+                        FieldWorkerJobView(jobID: field.jobID)
+                    }
+                    .navigationDestination(for: OfficeThreadRoute.self) { thread in
+                        OfficeConversationView(threadID: thread.threadID)
+                    }
+                    .navigationDestination(for: AppRoute.self) { next in
+                        RouteDestinationView(route: next)
+                    }
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Done") { deepLinkRoute = nil }

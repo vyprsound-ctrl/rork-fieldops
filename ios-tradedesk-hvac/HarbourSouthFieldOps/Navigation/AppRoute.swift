@@ -127,6 +127,8 @@ nonisolated enum AppRoute: Hashable, Sendable {
     case quote(String)
     case invoice(String)
     case customer(String)
+    /// One engineer ↔ office conversation, by thread id.
+    case message(String)
     case more(MoreSection)
 }
 
@@ -140,6 +142,7 @@ extension AppRoute: Identifiable {
         case .quote(let value): return "quote-\(value)"
         case .invoice(let value): return "invoice-\(value)"
         case .customer(let value): return "customer-\(value)"
+        case .message(let value): return "message-\(value)"
         case .more(let section): return "more-\(section.rawValue)"
         }
     }

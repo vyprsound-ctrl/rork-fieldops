@@ -491,7 +491,8 @@ actor SupabaseDataGateway: DataGateway {
             workerInitials: worker.map { Self.initials(of: $0.name) },
             isUrgent: job.priority == .urgent,
             isUnassigned: workerID == nil,
-            value: reference.valueLabels[job.id]
+            value: reference.valueLabels[job.id],
+            status: job.status
         )
     }
 

@@ -145,6 +145,53 @@ protocol DataGateway: Sendable {
     func fieldWorkerDay(session: TenantSession) async throws -> FieldWorkerDaySnapshot
     func fieldWorkerJobDetail(session: TenantSession, jobID: String) async throws -> FieldWorkerJobDetail
 
+    // MARK: Engineer workspace
+    //
+    // Requirements with defaults in `EngineerWorkflow.swift`, for exactly the
+    // reason given above the CRM block: the app holds a `DataGateway`
+    // existential, so only a requirement dispatches to the Supabase
+    // implementation. The defaults are built from other requirements on this
+    // protocol, so every gateway answers something truthful without a second
+    // hand-written implementation of the same rules.
+    //
+    // None of these types carries a monetary field. An engineer's payload is
+    // money-free by construction, not by hiding.
+
+    /// The engineer's own forward schedule. Read-only: there is deliberately no
+    /// reschedule or reassign counterpart anywhere on this protocol for a field
+    /// role.
+    func engineerSchedule(session: TenantSession, dayCount: Int) async throws -> EngineerSchedule
+
+    /// Sites this engineer has legitimate work at — never the company's whole
+    /// customer directory.
+    func engineerSites(session: TenantSession, query: String) async throws -> [EngineerSiteRow]
+
+    /// One site: contacts, access, equipment, and the work done there.
+    func engineerSiteDetail(session: TenantSession, addressID: String) async throws -> EngineerSiteDetail
+
+    /// The engineer's own completed work. Field history, not a report.
+    func engineerWorkHistory(session: TenantSession, limit: Int) async throws -> [EngineerWorkRecord]
+
+    /// Profile, duty state and the counts behind them.
+    func engineerProfile(session: TenantSession) async throws -> EngineerProfile
+
+    /// Sets the caller's own availability. The database scopes this to
+    /// `auth.uid()`, so it cannot set anybody else's.
+    func updateDutyState(session: TenantSession, state: DutyState) async throws
+
+    // MARK: Engineer ↔ office messaging
+
+    func officeInbox(session: TenantSession) async throws -> OfficeInbox
+    func officeConversation(session: TenantSession, threadID: String) async throws -> OfficeConversation
+
+    /// Sends one message. Returns the conversation it landed in. Recipients are
+    /// resolved from the company's own permission grants inside the database —
+    /// this app names no individual.
+    @discardableResult
+    func sendOfficeMessage(session: TenantSession, draft: OfficeMessageDraft) async throws -> String
+
+    func markOfficeThreadRead(session: TenantSession, threadID: String) async throws
+
     // Quotes
     func quotes(session: TenantSession, filter: QuoteListFilter, query: String) async throws -> [QuoteRow]
     func quoteDetail(session: TenantSession, quoteID: String) async throws -> QuoteDetailProjection

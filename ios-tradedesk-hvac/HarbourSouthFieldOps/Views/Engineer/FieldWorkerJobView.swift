@@ -13,6 +13,8 @@ struct FieldWorkerJobView: View {
     @State private var completionSummary: String?
     @State private var navigationHandoff: NavigationHandoff?
     @State private var travelEstimate: RouteEstimate?
+    @State private var isMessagingOffice: Bool = false
+    @State private var messageSentConfirmation: String?
 
     private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
@@ -53,6 +55,14 @@ struct FieldWorkerJobView: View {
         }
         .sheet(item: $navigationHandoff) { handoff in
             NavigationHandoffSheet(handoff: handoff, estimate: travelEstimate)
+        }
+        .sheet(isPresented: $isMessagingOffice) {
+            OfficeComposeSheet(
+                jobID: jobID,
+                jobNumber: viewModel.state.value?.number
+            ) { _ in
+                messageSentConfirmation = "Sent. The office has been alerted — their reply arrives in your Office tab."
+            }
         }
     }
 
@@ -128,6 +138,22 @@ struct FieldWorkerJobView: View {
                     .clipShape(.rect(cornerRadius: Theme.cardRadius))
                 }
 
+                if let messageSentConfirmation {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "paperplane.fill")
+                            .foregroundStyle(Theme.primary)
+                        Text(messageSentConfirmation)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.primaryTint)
+                    .clipShape(.rect(cornerRadius: Theme.cardRadius))
+                }
+
                 // Only appears when a step genuinely could not record a
                 // position. Nothing is invented in its place.
                 if let refused = viewModel.lastCaptureOutcome?.refusedState {
@@ -136,6 +162,7 @@ struct FieldWorkerJobView: View {
 
                 siteCard(job)
                 descriptionCard(job)
+                officeCard(job)
                 if let equipment = job.equipment { equipmentCard(equipment) }
                 JobNotesSection(notes: job.notes, canAdd: true) { isAddingNote = true }
                 JobPhotosSection(photos: job.photos, canAdd: true) { isAddingPhoto = true }
@@ -214,6 +241,49 @@ struct FieldWorkerJobView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+    }
+
+    /// Reaching the office about this specific job.
+    ///
+    /// Kept distinct from "add a note" directly below it, and the subtitles say
+    /// why: a note lands on the record for whenever somebody next looks, a
+    /// message rings a phone in the office now. An engineer who needs a part
+    /// before they can carry on must not be quietly writing into a log.
+    private func officeCard(_ job: FieldWorkerJobDetail) -> some View {
+        Button {
+            isMessagingOffice = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.primary)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.primaryTint)
+                    .clipShape(.circle)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Message the office")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Theme.primary)
+                    Text("Need a part, a decision, or the customer called")
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.meta)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .frame(minHeight: Theme.minTap)
+            .cardSurface()
+        }
+        .buttonStyle(PressableTileStyle())
+        .accessibilityLabel("Message the office about job \(job.number)")
     }
 
     private func descriptionCard(_ job: FieldWorkerJobDetail) -> some View {

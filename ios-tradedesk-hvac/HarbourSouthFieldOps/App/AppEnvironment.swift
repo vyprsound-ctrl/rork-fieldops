@@ -117,6 +117,19 @@ final class AppEnvironment {
     /// by hand would not.
     private(set) var pendingInvitationLink: InvitationLink.Payload?
 
+    /// The address a confirmation email has just been sent to.
+    ///
+    /// Set when sign-up or a join succeeded but the address still needs
+    /// confirming, and cleared the moment a session exists. The sign-in screen
+    /// watches it to move itself to the Sign in form.
+    ///
+    /// This is why it exists: joining leaves the form sitting on Join, and Join
+    /// is precisely the one thing that will *not* work after confirming — the
+    /// invitation code is spent on the first authenticated session, so a second
+    /// attempt to redeem it fails. Somebody returning from their inbox has to
+    /// land on Sign in, or the app has quietly pointed them at a dead end.
+    private(set) var pendingEmailConfirmation: String?
+
     // MARK: Push notification state
 
     /// Current notification permission. Refreshed on demand — never by asking.
@@ -261,6 +274,8 @@ final class AppEnvironment {
     func signOut() {
         session = nil
         signInError = nil
+        pendingInvitationLink = nil
+        pendingEmailConfirmation = nil
         // A development session cannot have started a real leg, but stopping is
         // cheap and leaves no path where sign-out keeps a tracker alive.
         Task { await travelTracker.stop() }
@@ -300,6 +315,9 @@ final class AppEnvironment {
         do {
             productionSession = try await productionAuth.signIn(email: email, password: password)
             authPhase = .signedIn
+            // Whatever was still being waited on has now happened.
+            pendingEmailConfirmation = nil
+            pendingInvitationLink = nil
         } catch {
             productionSession = nil
             authPhase = .failed(Self.message(for: error))
@@ -319,12 +337,14 @@ final class AppEnvironment {
             case .signedIn(let session):
                 productionSession = session
                 authPhase = .signedIn
+                pendingEmailConfirmation = nil
 
             case .confirmationSent(let address):
                 // Not an error. The account exists and the company details are
                 // held against it; signing in after confirming finishes setup.
                 productionSession = nil
                 authPhase = .signedOut
+                pendingEmailConfirmation = address
                 signUpNotice = "Check your email. We've sent a confirmation link to \(address). "
                     + "Confirm it, then sign in here — your company is created automatically "
                     + "on your first sign-in."
@@ -353,12 +373,21 @@ final class AppEnvironment {
             case .joined(let session):
                 productionSession = session
                 authPhase = .signedIn
+                pendingEmailConfirmation = nil
+                pendingInvitationLink = nil
 
             case .confirmationSent(let address):
                 productionSession = nil
                 authPhase = .signedOut
+                // The code is now parked on the identity and will be redeemed
+                // by the first authenticated session. Holding on to it here as
+                // well would send the person back to Join on their return —
+                // where redeeming it a second time fails — so it is released.
+                pendingInvitationLink = nil
+                pendingEmailConfirmation = address
                 signUpNotice = "Check your email. We've sent a confirmation link to \(address). "
-                    + "Confirm it, then sign in here — you'll join the company automatically."
+                    + "Confirm it, then sign in here with the same email and password — "
+                    + "you'll join the company automatically."
             }
         } catch {
             productionSession = nil
@@ -387,6 +416,12 @@ final class AppEnvironment {
         authPhase = .signedOut
         passwordResetNotice = nil
         signUpNotice = nil
+        // Sign-out returns to a clean sign-in screen. A stale invitation or a
+        // half-finished confirmation left over from an earlier attempt would
+        // otherwise reopen the Join form for somebody who has just chosen to
+        // leave, and send the next person on this handset there too.
+        pendingInvitationLink = nil
+        pendingEmailConfirmation = nil
         try? await productionAuth.signOut()
     }
 
@@ -446,6 +481,13 @@ final class AppEnvironment {
         pendingInvitationLink = nil
     }
 
+    /// Called by the sign-in screen once it has moved itself to the Sign in
+    /// form, so the move happens exactly once and the person can still switch
+    /// tabs by hand afterwards.
+    func consumePendingEmailConfirmation() {
+        pendingEmailConfirmation = nil
+    }
+
     func handleAuthCallback(_ url: URL) async {
         guard AuthCallback.matches(url) else { return }
 
@@ -478,6 +520,9 @@ final class AppEnvironment {
             } else {
                 productionSession = session
                 authPhase = .signedIn
+                // Confirmed and in. Both waiting states are spent.
+                pendingEmailConfirmation = nil
+                pendingInvitationLink = nil
             }
         } catch {
             if let existingSession {
@@ -489,7 +534,28 @@ final class AppEnvironment {
             } else {
                 productionSession = nil
                 authPhase = .failed(Self.message(for: error))
+                // The link could not be exchanged — opened on another device,
+                // or already spent. Signing in by hand still works and still
+                // redeems what is parked on the identity, so the invitation is
+                // released here too: leaving it set would drag the form back to
+                // Join, which is the one flow that can no longer succeed.
+                pendingInvitationLink = nil
             }
+        }
+    }
+
+    /// Signs out of whichever stack is currently driving the app.
+    ///
+    /// Every sign-out control routes through here. The two stacks genuinely
+    /// differ — only the production path holds a device registration and a
+    /// server session to discard — and a screen that picked the wrong one
+    /// looked interactive while doing nothing at all, which is exactly the
+    /// fault this replaces.
+    func signOutOfCurrentSession() async {
+        if productionSession != nil {
+            await signOutOfProduction()
+        } else {
+            signOut()
         }
     }
 

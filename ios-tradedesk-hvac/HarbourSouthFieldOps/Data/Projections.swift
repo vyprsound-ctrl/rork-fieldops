@@ -36,6 +36,15 @@ nonisolated struct JobRow: Identifiable, Hashable, Sendable {
     let isUrgent: Bool
     let isUnassigned: Bool
     let value: String?
+
+    /// The job's lifecycle position.
+    ///
+    /// `badge` is how it is *shown* — already resolved into the company's own
+    /// vocabulary — which makes it useless for deciding anything. Screens that
+    /// need to reason about where a job is in the workflow read this instead of
+    /// matching on badge text. Defaulted so the existing call sites and
+    /// previews are unaffected.
+    var status: JobStatus = .scheduled
 }
 
 nonisolated struct EquipmentHistoryRow: Identifiable, Hashable, Sendable {

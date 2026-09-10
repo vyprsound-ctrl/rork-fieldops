@@ -257,7 +257,8 @@ actor MockDataGateway: DataGateway {
             workerInitials: worker?.initials,
             isUrgent: job.priority == .urgent,
             isUnassigned: worker == nil,
-            value: jobValueLabel(job, session)
+            value: jobValueLabel(job, session),
+            status: job.status
         )
     }
 

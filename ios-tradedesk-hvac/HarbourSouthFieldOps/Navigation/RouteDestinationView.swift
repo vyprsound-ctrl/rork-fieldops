@@ -15,6 +15,8 @@ struct RouteDestinationView: View {
             InvoiceDetailView(invoiceID: invoiceID)
         case .customer(let customerID):
             CustomerDetailView(customerID: customerID)
+        case .message(let threadID):
+            OfficeConversationView(threadID: threadID)
         case .more(let section):
             switch section {
             case .dispatch:

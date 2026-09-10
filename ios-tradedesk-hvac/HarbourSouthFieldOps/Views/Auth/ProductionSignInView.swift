@@ -117,8 +117,14 @@ struct ProductionSignInView: View {
         .onChange(of: env.pendingInvitationLink) { _, payload in
             adopt(payload)
         }
+        // A confirmation email has gone out. Whatever form they were on, the
+        // next thing they need on their return is Sign in — see below.
+        .onChange(of: env.pendingEmailConfirmation) { _, address in
+            awaitConfirmation(of: address)
+        }
         .onAppear {
             adopt(env.pendingInvitationLink)
+            awaitConfirmation(of: env.pendingEmailConfirmation)
         }
     }
 
@@ -130,6 +136,28 @@ struct ProductionSignInView: View {
             joinName = payload.name
         }
         env.consumePendingInvitationLink()
+    }
+
+    /// Moves the form to Sign in once a confirmation email has been sent.
+    ///
+    /// This is the fix for coming back from the inbox and finding Join still
+    /// on screen. Join is not merely the wrong tab at that point, it is a dead
+    /// end: the invitation code is parked on the identity and spent by the
+    /// first authenticated session, so redeeming it a second time fails. The
+    /// person's real next step is to sign in with the email and password they
+    /// just chose, and the join completes itself server-side.
+    ///
+    /// The email is carried across so they are typing one field, not three.
+    /// Everything invitation-specific is cleared, because none of it applies to
+    /// a sign-in.
+    private func awaitConfirmation(of address: String?) {
+        guard let address, !address.isEmpty else { return }
+        flow = .signIn
+        email = address
+        password = ""
+        joinCode = ""
+        joinName = ""
+        env.consumePendingEmailConfirmation()
     }
 
     private var credentialFields: some View {

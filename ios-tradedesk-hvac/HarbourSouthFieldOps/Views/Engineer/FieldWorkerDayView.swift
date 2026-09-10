@@ -11,6 +11,7 @@ struct FieldWorkerDayView: View {
     @State private var isReportingDelay: Bool = false
     @State private var navigationHandoff: NavigationHandoff?
     @State private var travelEstimate: RouteEstimate?
+    @State private var messagingJob: MessagingContext?
 
     private var session: TenantSession? { env.activeSession }
 
@@ -26,17 +27,8 @@ struct FieldWorkerDayView: View {
             .navigationDestination(for: FieldTravelRoute.self) { route in
                 TravelModeView(jobID: route.jobID)
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        env.signOut()
-                    } label: {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                    }
-                    .tint(Theme.secondary)
-                    .accessibilityLabel("Sign out")
-                }
-            }
+            .navigationTitle("My day")
+            .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isReportingDelay) {
                 AddNoteSheet(showsVisibilityPicker: false) { body, _ in
                     guard let session, let jobID = viewModel.state.value?.currentStopID else { return }
@@ -52,6 +44,9 @@ struct FieldWorkerDayView: View {
             }
             .sheet(item: $navigationHandoff) { handoff in
                 NavigationHandoffSheet(handoff: handoff, estimate: travelEstimate)
+            }
+            .sheet(item: $messagingJob) { context in
+                OfficeComposeSheet(jobID: context.jobID, jobNumber: context.number) { _ in }
             }
         }
         .task(id: session?.userID) { await reload() }
@@ -134,33 +129,27 @@ struct FieldWorkerDayView: View {
                     .clipShape(.rect(cornerRadius: Theme.cardRadius))
                 }
 
-                // Writes a note the office reads on the job itself. Only
-                // offered while there is a live stop to attach it to — a
-                // message with no job on it helps nobody.
-                if snapshot.currentStopID != nil {
-                    Button {
-                        isReportingDelay = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "clock")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.primary)
-                                .frame(width: 32, height: 32)
-                                .background(Theme.primaryTint)
-                                .clipShape(.circle)
-                            Text("Running late? Tell the office")
-                                .font(.body.weight(.medium))
-                                .foregroundStyle(Theme.primary)
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.meta)
-                        }
-                        .padding(.horizontal, 13)
-                        .frame(minHeight: Theme.minTap)
-                        .cardSurface()
+                // Two different things, kept apart on purpose. A note goes on
+                // the job record where the office reads it later; a message
+                // raises an alert on somebody's phone now. Collapsing them
+                // would mean an engineer who urgently needs a part writes a
+                // note nobody is told about.
+                if let stop = snapshot.stops.first(where: { $0.jobID == snapshot.currentStopID }) {
+                    actionRow(
+                        symbol: "bubble.left.and.bubble.right.fill",
+                        title: "Message the office",
+                        detail: "Part needed, running late, need a decision"
+                    ) {
+                        messagingJob = MessagingContext(jobID: stop.jobID, number: stop.number)
                     }
-                    .buttonStyle(PressableTileStyle())
+
+                    actionRow(
+                        symbol: "note.text",
+                        title: "Add a note to this job",
+                        detail: "Saved on the record — no alert sent"
+                    ) {
+                        isReportingDelay = true
+                    }
                 }
 
                 if env.isDevelopmentSession { SimulatedServicesBanner() }
@@ -296,6 +285,44 @@ struct FieldWorkerDayView: View {
         .cardSurface()
     }
 
+    private func actionRow(
+        symbol: String,
+        title: String,
+        detail: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.primary)
+                    .frame(width: 32, height: 32)
+                    .background(Theme.primaryTint)
+                    .clipShape(.circle)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Theme.primary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.meta)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .frame(minHeight: Theme.minTap)
+            .cardSurface()
+        }
+        .buttonStyle(PressableTileStyle())
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
+    }
+
     private func iconLine(symbol: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol)
@@ -391,6 +418,14 @@ nonisolated struct FieldJobRoute: Hashable, Sendable {
 /// explicit about which screen it is pushing.
 nonisolated struct FieldTravelRoute: Hashable, Sendable {
     let jobID: String
+}
+
+/// The job a message is being composed about, so the office sees the context.
+nonisolated struct MessagingContext: Identifiable, Hashable, Sendable {
+    let jobID: String
+    let number: String
+
+    var id: String { jobID }
 }
 
 #Preview {
