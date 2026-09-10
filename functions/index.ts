@@ -945,6 +945,15 @@ export default {
       }
     }
 
-    return Response.json({ ok: true, service: "harbour-south-fieldops" });
+    // Readiness only: booleans, never the values themselves. This is what makes
+    // it possible to confirm from outside that the email credential actually
+    // reached the deployment, instead of discovering it from a failed invite.
+    return Response.json({
+      ok: true,
+      service: "harbour-south-fieldops",
+      email: {
+        configured: Boolean((env.RESEND_API_KEY ?? "").trim() && (env.RESEND_FROM_EMAIL ?? "").trim()),
+      },
+    });
   },
 };
