@@ -299,6 +299,34 @@ protocol DataGateway: Sendable {
     /// A login link to the merchant's own Stripe dashboard.
     func connectDashboardLink(session: TenantSession) async throws -> URL
 
+    // MARK: The commercial model
+    //
+    // Trial window, Stripe readiness, Founding Member number, monthly benefit,
+    // tier price and applicable platform fee. Every one of those is decided by
+    // `company_commercial_state()` in the database; this call carries the
+    // answers and the app renders them. There is deliberately no member here
+    // that lets a client assert eligibility, a founding number, a fee or a
+    // trial state.
+
+    /// The company's whole commercial position, in one server-authoritative
+    /// read. Requires a SaaS billing grant, which only the owner holds.
+    func commercialState(session: TenantSession) async throws -> CommercialState
+
+    /// Records that the company keeps its own payment provider, or clears the
+    /// choice. Cannot be used to claim Harbour South Payments — that follows
+    /// from Stripe reporting the account can take charges, and is set
+    /// server-side.
+    func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws
+
+    // MARK: Business email identity
+
+    /// The business's own customer-facing email address, as used on the
+    /// invoices its customers receive.
+    func businessEmailSettings(session: TenantSession) async throws -> BusinessEmailSettings
+
+    /// Sets or clears that address. `nil` clears it.
+    func updateBusinessEmail(session: TenantSession, email: String?) async throws
+
     /// Balance, price list, ledger and recent messages.
     func smsCreditOverview(session: TenantSession) async throws -> SmsCreditOverview
 

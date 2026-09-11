@@ -1,11 +1,17 @@
 import SwiftUI
 
-/// The company's own online payment destination.
+/// MODEL B — the company's own payment provider.
+///
+/// Reached from Settings → Integrations → Payments, not from the top level:
+/// supplying a link is one of two payment models now, and no longer the
+/// headline way to take money. `PaymentsIntegrationView` is where the choice
+/// between this and Harbour South Payments is made.
 ///
 /// This screen sets one thing: a URL. There is no processor to connect, no
-/// account to authorise and no credential to store, because Harbour South is never
-/// a party to the customer's payment — the money goes straight from their
-/// customer to them, through whatever provider they already use.
+/// account to authorise and no credential to store, because with this model
+/// Harbour South is never a party to the customer's payment — the money goes
+/// straight from their customer to them, through whatever provider they
+/// already use, and Harbour South takes no transaction fee on it.
 struct PaymentLinkView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = PaymentLinkViewModel()
@@ -18,7 +24,7 @@ struct PaymentLinkView: View {
             Theme.canvas.ignoresSafeArea()
             content
         }
-        .navigationTitle("Online payment link")
+        .navigationTitle("My payment link")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .task(id: session?.userID) { await reload() }
@@ -81,7 +87,7 @@ struct PaymentLinkView: View {
                     .foregroundStyle(Theme.ink)
             }
 
-            Text("Paste the payment page link from whichever provider you already use — Stripe, Square, PayPal, your bank, your own portal. It's shown as a Pay online button on the invoice your customer opens.")
+            Text("Using your own payment provider? Paste its payment page link — Square, PayPal, your bank, your own portal. It's shown as a Pay online button on the invoice your customer opens, and Harbour South charges no transaction fee on it.")
                 .font(.footnote)
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -197,6 +203,7 @@ struct PaymentLinkView: View {
 
             VStack(alignment: .leading, spacing: 9) {
                 boundaryRow("checkmark.circle.fill", Theme.green, "Shows it as a button on the invoice your customer opens.")
+                boundaryRow("checkmark.circle.fill", Theme.green, "Charges no Harbour South transaction fee on these payments.")
                 boundaryRow("xmark.circle.fill", Theme.meta, "Doesn't take, hold, route or refund the payment.")
                 boundaryRow("xmark.circle.fill", Theme.meta, "Doesn't connect to your payment provider, and stores no keys or account details.")
                 boundaryRow("xmark.circle.fill", Theme.meta, "Doesn't know whether your customer paid. Record the payment here when the money reaches you.")
@@ -204,6 +211,13 @@ struct PaymentLinkView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .cardSurface()
+
+            // The alternative, stated once so this screen is not a dead end
+            // for somebody who would rather take cards through Harbour South.
+            Text("Prefer customers to pay by card and have it settle itself? Connect Stripe under Settings → Integrations → Payments.")
+                .font(.caption)
+                .foregroundStyle(Theme.meta)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -13,6 +13,11 @@ import SwiftUI
 /// every screen picks it up — no code change, no layout change. If that asset
 /// is ever missing, `BrandMark` falls back to a system symbol rather than
 /// rendering a blank space, so the app still looks deliberate.
+///
+/// The fallback symbol is a bridge arch, echoing the arch in the Harbour South
+/// mark. It used to be a wrench and screwdriver, which belonged to the previous
+/// product identity and would have reintroduced the old branding on any build
+/// where the logo asset failed to load.
 nonisolated enum Brand {
     /// The product name, exactly as it should appear to a user.
     static let name = "Harbour South FieldOps"
@@ -26,7 +31,7 @@ nonisolated enum Brand {
     static let logoAssetName = "BrandLogo"
 
     /// Used when the asset is absent, so the mark is never an empty box.
-    static let fallbackSymbolName = "wrench.and.screwdriver.fill"
+    static let fallbackSymbolName = "point.topleft.down.to.point.bottomright.curvepath.fill"
 
     /// Whether a real logo asset is present in this build.
     static var hasLogoAsset: Bool { UIImage(named: logoAssetName) != nil }

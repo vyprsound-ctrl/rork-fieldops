@@ -298,6 +298,14 @@ struct InvoiceDetailView: View {
         return parts.isEmpty ? "No contact details on file" : parts.joined(separator: " · ")
     }
 
+    /// How this customer will be able to pay, in the words of whichever model
+    /// the company is actually on.
+    ///
+    /// The old copy described a pasted payment link as the only way money could
+    /// arrive, and told the office to record the payment by hand. That is still
+    /// true for an external-provider company and no longer true for a Stripe
+    /// one: a card payment through Harbour South reconciles itself from the
+    /// webhook. Both are stated here, and neither is implied of the other.
     @ViewBuilder
     private func paymentLinkNote(_ sharing: InvoiceSharing) -> some View {
         if sharing.paymentLink.isConfigured {
@@ -306,15 +314,22 @@ struct InvoiceDetailView: View {
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)
         } else if sharing.paymentLink.canManage {
-            NavigationLink(value: AppRoute.more(.paymentLink)) {
-                Label("No online payment link set. Add one and customers can pay you from the invoice.", systemImage: "link")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("If you've connected Stripe, your customer can pay this invoice by card and it settles itself here. Otherwise, add your own payment link and they'll see a Pay online button.")
                     .font(.caption)
-                    .foregroundStyle(Theme.primary)
+                    .foregroundStyle(Theme.meta)
                     .fixedSize(horizontal: false, vertical: true)
+
+                NavigationLink(value: AppRoute.more(.payments_integration)) {
+                    Label("Set up how customers pay you", systemImage: "creditcard.and.123")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         } else {
-            Text("No online payment link is set for this company, so the invoice shows no payment button.")
+            Text("How customers pay this invoice is set by the account owner under Settings → Integrations → Payments.")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)

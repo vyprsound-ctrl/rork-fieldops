@@ -163,6 +163,30 @@ struct MoreView: View {
                     .clipShape(.rect(cornerRadius: 6))
             }
 
+            // The Founding Member mark belongs on the owner's own account
+            // card. Compact, one line, and only where it is commercially
+            // relevant — it is deliberately not repeated on every screen.
+            if let commercial = viewModel.commercial,
+               let number = commercial.foundingMemberNumber {
+                FoundingMemberBadge(
+                    number: number,
+                    isBenefitActive: commercial.foundingBenefitActive,
+                    size: .compact
+                )
+            }
+
+            if let commercial = viewModel.commercial, commercial.isTrialActive {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption)
+                        .foregroundStyle(commercial.trialDaysRemaining <= 3 ? Theme.amber : Theme.primary)
+                    Text(commercial.headline)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(commercial.trialDaysRemaining <= 3 ? Theme.amber : Theme.secondary)
+                    Spacer(minLength: 0)
+                }
+            }
+
             if let subscription = overview.subscriptionSummary {
                 Divider()
                 HStack(spacing: 8) {

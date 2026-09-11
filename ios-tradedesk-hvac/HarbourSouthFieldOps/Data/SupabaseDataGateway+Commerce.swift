@@ -361,6 +361,127 @@ private nonisolated struct PaymentTermsPayload: Encodable, Sendable {
     let updated_at: String
 }
 
+/// What `company_commercial_state()` returns.
+///
+/// Every field is an ANSWER, not an input. The function decides the trial
+/// window, Stripe readiness, the founding number, whether the benefit is live
+/// this month, the tier price and the applicable fee; this struct is the decode
+/// of that decision. There is no corresponding request type because the
+/// function takes no parameter from the app at all — it derives the company
+/// from the caller's own session inside the database.
+private nonisolated struct CommercialStateRecord: Decodable, Sendable {
+    let paymentModel: String?
+    let subscriptionStatus: String?
+    let trialEndsAt: Date?
+    let trialDaysRemaining: Int?
+    let isTrialActive: Bool?
+    let stripeConnected: Bool?
+    let chargesEnabled: Bool?
+    let payoutsEnabled: Bool?
+    let detailsSubmitted: Bool?
+    let requirementsDue: [String]?
+    let disabledReason: String?
+    let stripeAccountID: String?
+    let foundingMemberNumber: Int?
+    let foundingClaimedAt: Date?
+    let foundingPlacesClaimed: Int?
+    let foundingPlacesRemaining: Int?
+    let foundingOfferOpen: Bool?
+    let foundingBenefitActive: Bool?
+    let qualifyingPaymentsThisMonth: Int?
+    let lastQualifyingPaymentAt: Date?
+    let activityMonthStart: Date?
+    let tierID: String?
+    let tierName: String?
+    let subscriptionMonthlyCents: Int?
+    let effectiveMonthlyCents: Int?
+    let platformFeeBps: Int?
+    let externalPaymentURL: String?
+    let businessEmail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case paymentModel = "payment_model"
+        case subscriptionStatus = "subscription_status"
+        case trialEndsAt = "trial_ends_at"
+        case trialDaysRemaining = "trial_days_remaining"
+        case isTrialActive = "is_trial_active"
+        case stripeConnected = "stripe_connected"
+        case chargesEnabled = "charges_enabled"
+        case payoutsEnabled = "payouts_enabled"
+        case detailsSubmitted = "details_submitted"
+        case requirementsDue = "requirements_due"
+        case disabledReason = "disabled_reason"
+        case stripeAccountID = "stripe_account_id"
+        case foundingMemberNumber = "founding_member_number"
+        case foundingClaimedAt = "founding_claimed_at"
+        case foundingPlacesClaimed = "founding_places_claimed"
+        case foundingPlacesRemaining = "founding_places_remaining"
+        case foundingOfferOpen = "founding_offer_open"
+        case foundingBenefitActive = "founding_benefit_active"
+        case qualifyingPaymentsThisMonth = "qualifying_payments_this_month"
+        case lastQualifyingPaymentAt = "last_qualifying_payment_at"
+        case activityMonthStart = "activity_month_start"
+        case tierID = "tier_id"
+        case tierName = "tier_name"
+        case subscriptionMonthlyCents = "subscription_monthly_cents"
+        case effectiveMonthlyCents = "effective_monthly_cents"
+        case platformFeeBps = "platform_fee_bps"
+        case externalPaymentURL = "external_payment_url"
+        case businessEmail = "business_email"
+    }
+
+    func model(canManageBilling: Bool) -> CommercialState {
+        CommercialState(
+            paymentModel: PaymentModel(rawValue: paymentModel ?? "") ?? .undecided,
+            subscriptionStatus: SubscriptionStatus(rawValue: subscriptionStatus ?? "") ?? .trialing,
+            trialEndsAt: trialEndsAt,
+            trialDaysRemaining: max(trialDaysRemaining ?? 0, 0),
+            isTrialActive: isTrialActive ?? false,
+            stripeConnected: stripeConnected ?? false,
+            chargesEnabled: chargesEnabled ?? false,
+            payoutsEnabled: payoutsEnabled ?? false,
+            detailsSubmitted: detailsSubmitted ?? false,
+            requirementsDue: requirementsDue ?? [],
+            disabledReason: disabledReason,
+            stripeAccountID: stripeAccountID,
+            foundingMemberNumber: foundingMemberNumber,
+            foundingClaimedAt: foundingClaimedAt,
+            foundingPlacesClaimed: foundingPlacesClaimed ?? 0,
+            foundingPlacesRemaining: foundingPlacesRemaining ?? 0,
+            foundingOfferOpen: foundingOfferOpen ?? false,
+            foundingBenefitActive: foundingBenefitActive ?? false,
+            qualifyingPaymentsThisMonth: qualifyingPaymentsThisMonth ?? 0,
+            lastQualifyingPaymentAt: lastQualifyingPaymentAt,
+            activityMonthStart: activityMonthStart,
+            tierID: tierID ?? "",
+            tierName: tierName ?? "Current plan",
+            subscriptionMonthlyCents: subscriptionMonthlyCents ?? 0,
+            effectiveMonthlyCents: effectiveMonthlyCents ?? 0,
+            platformFeeBps: platformFeeBps ?? 0,
+            externalPaymentURL: externalPaymentURL,
+            businessEmail: businessEmail,
+            canManageBilling: canManageBilling
+        )
+    }
+}
+
+private nonisolated struct BusinessEmailPayload: Encodable, Sendable {
+    /// Explicitly encoded, never `encodeIfPresent`: clearing the address has to
+    /// send `null`, or the old one survives the edit.
+    let business_email: String?
+    let updated_at: String
+
+    enum CodingKeys: String, CodingKey {
+        case business_email, updated_at
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(business_email, forKey: .business_email)
+        try container.encode(updated_at, forKey: .updated_at)
+    }
+}
+
 // =============================================================================
 // The commercial layer against Supabase.
 //
@@ -565,6 +686,123 @@ extension SupabaseDataGateway {
             throw DataError.unexpected("Stripe did not return a dashboard link.")
         }
         return url
+    }
+
+    // MARK: - The commercial model
+
+    /// One authoritative read of where the company stands commercially.
+    ///
+    /// The permission check below is the usual legibility check, not the
+    /// boundary: `company_commercial_state()` performs its own check inside the
+    /// database and raises TD403 for a caller without a SaaS billing grant, so
+    /// a role that is not the owner cannot reach this data by any route,
+    /// including a hand-crafted request.
+    ///
+    /// Before reading, Stripe is refreshed when the company is already
+    /// connected. That matters for the Founding 100: `stripe-connect` claims a
+    /// place the moment Stripe reports `charges_enabled`, so an owner returning
+    /// from browser onboarding sees the right answer on first load rather than
+    /// after a manual retry. A failure to refresh is not fatal — the stored
+    /// state is still read and shown.
+    func commercialState(session: TenantSession) async throws -> CommercialState {
+        try require(.saasBillingRead, session, query: "commercial.state")
+
+        _ = try? await client.functions.invoke(
+            "stripe-connect",
+            options: .init(body: ConnectRequest(action: "status"))
+        ) as ConnectResponse
+
+        let rows: [CommercialStateRecord]
+        do {
+            let data = try await client.rpc("company_commercial_state").execute().data
+            rows = try SupabaseCoding.decoder.decode([CommercialStateRecord].self, from: data)
+        } catch let error as DecodingError {
+            print("[data] could not decode commercial state: \(error)")
+            throw DataError.unexpected("The server sent commercial details this version of the app can't read.")
+        } catch {
+            throw DataError.wrap(error)
+        }
+
+        guard let row = rows.first else { throw DataError.notFound }
+
+        record(
+            "commercial.state",
+            session,
+            allowed: true,
+            "Trial, Stripe readiness, Founding Member number, monthly benefit, price and fee all computed in the database; the app renders them and derives none of them"
+        )
+
+        return row.model(canManageBilling: session.can(.saasBillingManage))
+    }
+
+    /// Records that the company keeps its own payment provider.
+    ///
+    /// `harbourSouthPayments` is refused by the database, not here: that model
+    /// follows from Stripe reporting the connected account can take charges,
+    /// and is set server-side by the founding-claim path. Sending it returns
+    /// TD422, which surfaces as a plain sentence.
+    func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws {
+        try require(.saasBillingManage, session, query: "commercial.paymentModel")
+
+        try await perform("set_company_payment_model", ["p_model": .string(model.rawValue)])
+
+        record(
+            "commercial.paymentModel",
+            session,
+            allowed: true,
+            "Payment model set to \(model.rawValue); Harbour South Payments cannot be claimed this way — it follows from Stripe"
+        )
+    }
+
+    // MARK: - Business email identity
+
+    func businessEmailSettings(session: TenantSession) async throws -> BusinessEmailSettings {
+        try require(.companyProfileRead, session, query: "company.businessEmail")
+
+        let company = try await companyRecord(session)
+
+        record(
+            "company.businessEmail",
+            session,
+            allowed: true,
+            (company?.businessEmail ?? "").isEmpty
+                ? "No business email set — invoice replies have nowhere to go"
+                : "Business email set; used as the reply identity on customer invoice email"
+        )
+
+        return BusinessEmailSettings(
+            email: company?.businessEmail?.nilIfBlank,
+            companyName: company?.name ?? "",
+            canManage: session.can(.companyProfileManage)
+        )
+    }
+
+    func updateBusinessEmail(session: TenantSession, email: String?) async throws {
+        try require(.companyProfileManage, session, query: "company.businessEmail.update")
+
+        // Validated here for a readable sentence, and again by the
+        // `companies_business_email_valid` check constraint, which is the one
+        // that actually holds.
+        let normalised = try BusinessEmail.normalise(email ?? "")
+
+        try await performWrite(
+            client.from("companies")
+                .update(BusinessEmailPayload(
+                    business_email: normalised,
+                    updated_at: SupabaseCoding.timestamp(Date())
+                ))
+                .eq("id", value: session.companyID)
+        )
+        invalidateCompanyCache(session.companyID)
+
+        record(
+            "company.businessEmail.update",
+            session,
+            allowed: true,
+            normalised == nil
+                ? "Business email cleared"
+                : "Business email stored; it is a reply identity only — no DNS, SPF, DKIM or API key is involved"
+        )
     }
 
     // MARK: - SMS

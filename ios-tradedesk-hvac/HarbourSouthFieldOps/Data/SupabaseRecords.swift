@@ -106,6 +106,10 @@ nonisolated struct CompanyRecord: Decodable, Sendable {
     /// The company's own online payment destination. A URL and nothing else —
     /// Harbour South holds no processor account, credential or integration.
     let onlinePaymentLinkURL: String?
+    /// The business's own customer-facing email identity, used as the reply
+    /// address on the invoices its customers receive. Presentation only: no
+    /// DNS, SPF, DKIM or API key is involved.
+    let businessEmail: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, trade
@@ -113,9 +117,10 @@ nonisolated struct CompanyRecord: Decodable, Sendable {
         case currencyCode = "currency_code"
         case defaultTaxRate = "default_tax_rate"
         case onlinePaymentLinkURL = "online_payment_link_url"
+        case businessEmail = "business_email"
     }
 
-    static let columns = "id,name,trade,country_code,currency_code,default_tax_rate::text,online_payment_link_url"
+    static let columns = "id,name,trade,country_code,currency_code,default_tax_rate::text,online_payment_link_url,business_email"
 }
 
 nonisolated struct AppUserRecord: Decodable, Sendable {

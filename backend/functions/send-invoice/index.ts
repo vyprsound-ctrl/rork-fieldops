@@ -17,6 +17,29 @@ import { AuthError, corsHeaders, jsonResponse, requireAuth } from "../_shared/au
 /// debited separately, and two simultaneous sends cannot spend the same credit.
 /// A failed delivery returns the credit through `settle_notification`. Email
 /// never touches SMS credit.
+///
+/// WHOSE EMAIL IS THIS? THE TRADE BUSINESS'S.
+///
+/// A customer receiving an invoice must see their contractor, not Harbour
+/// South. So the message is branded as the trade business throughout: the
+/// visible sender name is the company's name, `Reply-To` is the company's own
+/// `business_email` when it has set one, and the body carries the company's
+/// name, logo mark, address, phone and invoice detail.
+///
+/// The TRANSPORT stays Harbour South's verified Resend domain, because that is
+/// the only domain whose SPF/DKIM this deployment controls. Putting the
+/// business's address in `from` without owning its domain would fail
+/// authentication and land the invoice in spam — worse for the business than a
+/// visible "via" line. No DNS, SPF, DKIM, SMTP or API-key configuration is
+/// asked of the business, and none is required to send.
+///
+/// EXTENSION POINT: when a business later authenticates its own sending domain,
+/// `resolveSender()` below is the single place that changes — it starts
+/// returning the business address as `from`. Invoice generation, the share
+/// token, the notifications ledger and the billing system are all untouched by
+/// that change. Harbour South's OWN system mail (invitations, account and
+/// security notices) is sent by the Cloudflare Worker and is deliberately not
+/// affected by any of this.
 
 interface SendRequest {
   invoiceId?: string;
@@ -84,15 +107,56 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/// The customer-facing identity of one invoice email.
+interface SenderIdentity {
+  /// RFC 5322 `from`, e.g. `AB Heating <invoices@harboursouth.us>`. The display
+  /// name is the trade business; the address is the verified transport domain.
+  from: string;
+  /// The business's own address, so a customer's reply reaches the business and
+  /// never Harbour South. Omitted when the business has not set one.
+  replyTo?: string;
+}
+
+/// Strips anything that could break out of a display name and inject a header.
+function sanitiseDisplayName(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/["<>;,]/g, "")
+    .trim()
+    .slice(0, 78);
+}
+
+/// Builds the trade business's sending identity over Harbour South's verified
+/// transport.
+///
+/// THE ONE PLACE TO CHANGE when authenticated customer-owned domains arrive:
+/// return `businessEmail` as `from` once its domain is verified. Nothing else
+/// in invoice generation or billing needs to know.
+function resolveSender(companyName: string, businessEmail: string | null): SenderIdentity | null {
+  const transport = Deno.env.get("RESEND_FROM_EMAIL");
+  if (!transport) return null;
+
+  const name = sanitiseDisplayName(companyName);
+  // The transport value may already be `Something <addr>`; take just the address
+  // so the business's name is the one the customer sees.
+  const address = (transport.match(/<([^>]+)>/)?.[1] ?? transport).trim();
+  const reply = (businessEmail ?? "").trim();
+
+  return {
+    from: name ? `${name} <${address}>` : address,
+    replyTo: reply && EMAIL_PATTERN.test(reply) ? reply : undefined,
+  };
+}
+
 async function sendEmail(
   to: string,
   subject: string,
   html: string,
   text: string,
+  sender: SenderIdentity | null,
 ): Promise<{ status: "sent" | "failed"; configured: boolean; detail: string; reference?: string }> {
   const apiKey = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("RESEND_FROM_EMAIL");
-  if (!apiKey || !from) {
+  if (!apiKey || !sender) {
     return { status: "failed", configured: false, detail: NOT_CONFIGURED_EMAIL };
   }
 
@@ -100,7 +164,15 @@ async function sendEmail(
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject, html, text }),
+      body: JSON.stringify({
+        from: sender.from,
+        to: [to],
+        subject,
+        html,
+        text,
+        // A customer replying to their invoice reaches their contractor.
+        ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
+      }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -214,7 +286,9 @@ Deno.serve(async (req) => {
     const [{ data: company }, { data: contact }] = await Promise.all([
       supabase
         .from("companies")
-        .select("name, phone, time_zone_identifier")
+        // `business_email` is the business's own customer-facing reply address.
+        // Read with the caller's JWT, so RLS proves it is their company's.
+        .select("name, phone, time_zone_identifier, address_line, city, state, postal_code, business_email")
         .eq("id", invoice.company_id)
         .maybeSingle(),
       invoice.billing_contact_id
@@ -261,25 +335,61 @@ Deno.serve(async (req) => {
       .replace(/\/+$/, "");
     const viewUrl = `${pageBase}/i?t=${token}`;
     const companyName = company?.name ?? "Your contractor";
+    const businessEmail = (company?.business_email ?? "").trim() || null;
+    const sender = resolveSender(companyName, businessEmail);
     const amount = money(invoice.balance, invoice.currency_code);
     const subject = `Invoice ${invoice.number} from ${companyName} — ${amount} due`;
 
-    const text =
-      `${companyName}\n\nInvoice ${invoice.number}${invoice.title ? ` — ${invoice.title}` : ""}\n` +
-      `Amount due: ${amount}\nDue date: ${invoice.due_date}\n\nView your invoice:\n${viewUrl}\n\n` +
-      `${company?.phone ? `Questions? Call ${company.phone}.\n` : ""}`;
+    // The business's own contact block, as a customer expects to see it on a
+    // bill. Empty parts are dropped rather than printed as blanks.
+    const companyAddress = [company?.address_line, company?.city, company?.state, company?.postal_code]
+      .filter((part) => part && String(part).trim().length > 0)
+      .join(", ");
 
+    const contactLines = [
+      company?.phone ? `Call ${company.phone}` : null,
+      businessEmail,
+    ].filter((line): line is string => Boolean(line));
+
+    const text =
+      `${companyName}\n${companyAddress ? `${companyAddress}\n` : ""}` +
+      `\nInvoice ${invoice.number}${invoice.title ? ` — ${invoice.title}` : ""}\n` +
+      `Amount due: ${amount}\nDue date: ${invoice.due_date}\n\nView and pay your invoice:\n${viewUrl}\n\n` +
+      `${contactLines.length > 0 ? `Questions? ${contactLines.join(" · ")}\n` : ""}` +
+      `\nThis invoice was sent by ${companyName} using Harbour South FieldOps.\n`;
+
+    // Branded as the TRADE BUSINESS. The business's mark is its own initial on
+    // its brand colours — an <img> is deliberately not used, because a hosted
+    // logo would be blocked by most mail clients by default and leave a broken
+    // image where the business's identity should be.
+    const initial = escapeHtml((companyName.trim()[0] ?? "·").toUpperCase());
     const html =
-      `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#15161a;line-height:1.6">` +
-      `<p style="font-size:16px;margin:0 0 14px"><strong>${escapeHtml(companyName)}</strong></p>` +
-      `<p style="margin:0 0 6px">Invoice <strong>${escapeHtml(invoice.number)}</strong>${
+      `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;` +
+      `color:#0F1B2A;line-height:1.6;max-width:560px">` +
+      `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr>` +
+      `<td style="width:44px;height:44px;background:#14367A;border-radius:11px;color:#fff;` +
+      `font-size:20px;font-weight:700;text-align:center;vertical-align:middle">${initial}</td>` +
+      `<td style="padding-left:12px">` +
+      `<div style="font-size:17px;font-weight:700;color:#0F1B2A">${escapeHtml(companyName)}</div>` +
+      `${companyAddress ? `<div style="font-size:13px;color:#5B6675">${escapeHtml(companyAddress)}</div>` : ""}` +
+      `</td></tr></table>` +
+      `<p style="margin:0 0 6px;color:#5B6675">Invoice <strong style="color:#0F1B2A">${escapeHtml(invoice.number)}</strong>${
         invoice.title ? ` — ${escapeHtml(invoice.title)}` : ""
       }</p>` +
-      `<p style="font-size:26px;font-weight:700;margin:14px 0 4px">${escapeHtml(amount)}</p>` +
-      `<p style="margin:0 0 20px;color:#6b6f7d">due ${escapeHtml(String(invoice.due_date))}</p>` +
-      `<p style="margin:0 0 24px"><a href="${escapeHtml(viewUrl)}" style="background:#0f5c4a;color:#fff;` +
-      `text-decoration:none;padding:13px 22px;border-radius:11px;font-weight:600;display:inline-block">View invoice</a></p>` +
-      `${company?.phone ? `<p style="color:#6b6f7d;margin:0">Questions? Call ${escapeHtml(company.phone)}.</p>` : ""}` +
+      `<p style="font-size:30px;font-weight:700;margin:12px 0 4px;color:#0F1B2A">${escapeHtml(amount)}</p>` +
+      `<p style="margin:0 0 22px;color:#5B6675">due ${escapeHtml(String(invoice.due_date))}</p>` +
+      `<p style="margin:0 0 22px"><a href="${escapeHtml(viewUrl)}" style="background:#E1691A;color:#fff;` +
+      `text-decoration:none;padding:14px 24px;border-radius:11px;font-weight:700;display:inline-block">` +
+      `View &amp; pay invoice</a></p>` +
+      `${
+        contactLines.length > 0
+          ? `<p style="color:#5B6675;margin:0 0 6px;font-size:14px">Questions? ${
+            escapeHtml(contactLines.join(" · "))
+          }</p>`
+          : ""
+      }` +
+      `<p style="color:#8A94A3;margin:18px 0 0;font-size:12px">Sent by ${escapeHtml(companyName)} ` +
+      `using Harbour South FieldOps.</p>` +
       `</div>`;
 
     const smsBody = `${companyName}: invoice ${invoice.number}, ${amount} due ${invoice.due_date}. View and pay: ${viewUrl}`;
@@ -330,7 +440,7 @@ Deno.serve(async (req) => {
       }
 
       const result = channel === "email"
-        ? await sendEmail(recipient, subject, html, text)
+        ? await sendEmail(recipient, subject, html, text, sender)
         : await sendSms(recipient, smsBody);
 
       // Record the real outcome. A failed SMS gets its credit back here.

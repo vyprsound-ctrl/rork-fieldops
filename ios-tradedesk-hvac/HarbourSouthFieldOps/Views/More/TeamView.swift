@@ -130,7 +130,9 @@ struct TeamView: View {
             tile(
                 value: roster.fieldWorkerCount,
                 caption: terms.WorkerPlural,
-                symbol: "wrench.and.screwdriver.fill",
+                // A person, not a tool: this tile counts people, and the old
+                // wrench-and-screwdriver was previous-identity branding.
+                symbol: "person.fill.checkmark",
                 tone: Theme.primary
             )
             tile(

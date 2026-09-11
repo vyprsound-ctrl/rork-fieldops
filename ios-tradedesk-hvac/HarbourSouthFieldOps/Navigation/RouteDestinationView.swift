@@ -53,8 +53,12 @@ struct RouteDestinationView: View {
                 WorkflowTestsView()
             case .settings:
                 SettingsView()
+            case .payments_integration:
+                PaymentsIntegrationView()
             case .paymentLink:
                 PaymentLinkView()
+            case .businessEmail:
+                BusinessEmailView()
             }
         }
     }

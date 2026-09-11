@@ -28,7 +28,9 @@ struct JobRouteMap: View {
 
     var body: some View {
         Map(position: $position, interactionModes: [.pan, .zoom]) {
-            Marker(destinationLabel, systemImage: "wrench.and.screwdriver.fill", coordinate: destination.clCoordinate)
+            // A site pin, not a tool. The wrench-and-screwdriver belonged to
+            // the previous product identity.
+            Marker(destinationLabel, systemImage: "mappin.and.ellipse", coordinate: destination.clCoordinate)
                 .tint(Theme.primary)
 
             if showsUserLocation {

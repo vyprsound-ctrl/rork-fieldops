@@ -160,6 +160,7 @@ export type Database = {
       companies: {
         Row: {
           address_line: string
+          business_email: string | null
           city: string
           country_code: string
           created_at: string
@@ -179,6 +180,7 @@ export type Database = {
         }
         Insert: {
           address_line?: string
+          business_email?: string | null
           city?: string
           country_code: string
           created_at?: string
@@ -198,6 +200,7 @@ export type Database = {
         }
         Update: {
           address_line?: string
+          business_email?: string | null
           city?: string
           country_code?: string
           created_at?: string
@@ -238,6 +241,7 @@ export type Database = {
           last_payment_failure: string | null
           monthly_price_cents: number
           past_due_since: string | null
+          payment_model: Database["public"]["Enums"]["company_payment_model"]
           plan: Database["public"]["Enums"]["subscription_plan"]
           renewal_date: string
           seat_count: number
@@ -271,6 +275,7 @@ export type Database = {
           last_payment_failure?: string | null
           monthly_price_cents?: number
           past_due_since?: string | null
+          payment_model?: Database["public"]["Enums"]["company_payment_model"]
           plan?: Database["public"]["Enums"]["subscription_plan"]
           renewal_date?: string
           seat_count?: number
@@ -304,6 +309,7 @@ export type Database = {
           last_payment_failure?: string | null
           monthly_price_cents?: number
           past_due_since?: string | null
+          payment_model?: Database["public"]["Enums"]["company_payment_model"]
           plan?: Database["public"]["Enums"]["subscription_plan"]
           renewal_date?: string
           seat_count?: number
@@ -738,6 +744,32 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      founding_member_slots: {
+        Row: {
+          claimed_at: string | null
+          company_id: string | null
+          number: number
+        }
+        Insert: {
+          claimed_at?: string | null
+          company_id?: string | null
+          number: number
+        }
+        Update: {
+          claimed_at?: string | null
+          company_id?: string | null
+          number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "founding_member_slots_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -2930,6 +2962,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      claim_founding_member_slot: {
+        Args: { p_company?: string }
+        Returns: number
+      }
       claim_push_batch: {
         Args: { p_limit?: number }
         Returns: {
@@ -2957,6 +2993,39 @@ export type Database = {
       company_can_accept_payments: {
         Args: { p_company?: string }
         Returns: boolean
+      }
+      company_commercial_state: {
+        Args: { p_company?: string }
+        Returns: {
+          activity_month_start: string
+          business_email: string
+          charges_enabled: boolean
+          details_submitted: boolean
+          disabled_reason: string
+          effective_monthly_cents: number
+          external_payment_url: string
+          founding_benefit_active: boolean
+          founding_claimed_at: string
+          founding_member_number: number
+          founding_offer_open: boolean
+          founding_places_claimed: number
+          founding_places_remaining: number
+          is_trial_active: boolean
+          last_qualifying_payment_at: string
+          payment_model: string
+          payouts_enabled: boolean
+          platform_fee_bps: number
+          qualifying_payments_this_month: number
+          requirements_due: string[]
+          stripe_account_id: string
+          stripe_connected: boolean
+          subscription_monthly_cents: number
+          subscription_status: string
+          tier_id: string
+          tier_name: string
+          trial_days_remaining: number
+          trial_ends_at: string
+        }[]
       }
       company_currency_code: { Args: never; Returns: string }
       consume_sms_credit: {
@@ -3109,6 +3178,14 @@ export type Database = {
           p_user: string
         }
         Returns: number
+      }
+      founding_activity: {
+        Args: { p_company?: string }
+        Returns: {
+          last_qualifying_payment_at: string
+          month_start: string
+          qualifying_payments: number
+        }[]
       }
       generate_due_recurring_jobs: {
         Args: { p_company?: string; p_horizon_days?: number }
@@ -3309,6 +3386,10 @@ export type Database = {
         }
         Returns: string
       }
+      set_company_payment_model: {
+        Args: { p_model: Database["public"]["Enums"]["company_payment_model"] }
+        Returns: undefined
+      }
       set_my_duty_state: {
         Args: { p_state: Database["public"]["Enums"]["worker_duty_state"] }
         Returns: undefined
@@ -3451,6 +3532,10 @@ export type Database = {
       app_user_status: "active" | "invited" | "suspended"
       billing_period: "monthly" | "annual"
       billing_store: "apple" | "google" | "none"
+      company_payment_model:
+        | "undecided"
+        | "harbourSouthPayments"
+        | "externalProvider"
       customer_status: "active" | "archived"
       customer_type:
         | "residential"
@@ -3711,6 +3796,11 @@ export const Constants = {
       app_user_status: ["active", "invited", "suspended"],
       billing_period: ["monthly", "annual"],
       billing_store: ["apple", "google", "none"],
+      company_payment_model: [
+        "undecided",
+        "harbourSouthPayments",
+        "externalProvider",
+      ],
       customer_status: ["active", "archived"],
       customer_type: [
         "residential",

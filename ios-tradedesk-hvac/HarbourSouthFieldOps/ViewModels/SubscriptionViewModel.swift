@@ -11,6 +11,14 @@ import Observation
 final class SubscriptionViewModel {
     private(set) var state: LoadState<SubscriptionOverview> = .idle
     private(set) var connectState: LoadState<ConnectAccountStatus> = .idle
+    /// The company's commercial position — trial window, Founding Member
+    /// number and monthly benefit, effective price. All decided server-side by
+    /// `company_commercial_state()`; this screen only renders it.
+    ///
+    /// Optional rather than a `LoadState`, because this screen is still useful
+    /// without it: an unreadable commercial state hides the badge and the
+    /// trial card and leaves the seat arithmetic intact.
+    private(set) var commercial: CommercialState?
     private(set) var isWorking: Bool = false
     var actionError: String?
     /// A Stripe onboarding or dashboard link ready to open in the browser.
@@ -28,6 +36,7 @@ final class SubscriptionViewModel {
             state = .failed(DataError.wrap(error))
         }
         await loadConnect(gateway: gateway, session: session)
+        commercial = try? await gateway.commercialState(session: session)
     }
 
     func loadConnect(gateway: DataGateway, session: TenantSession) async {

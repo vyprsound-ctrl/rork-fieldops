@@ -14,13 +14,22 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 group(
-                    title: "Company",
+                    title: "Business",
                     rows: [
                         SettingsRow(
                             title: "Company profile",
                             symbol: "building.2.fill",
                             permission: .companyProfileRead,
                             route: .companyProfile
+                        ),
+                        // The business's customer-facing email identity, so
+                        // invoices read as the trade business rather than as
+                        // the software it runs on.
+                        SettingsRow(
+                            title: "Email & Invoicing",
+                            symbol: "envelope.fill",
+                            permission: .companyProfileRead,
+                            route: .businessEmail
                         ),
                         SettingsRow(
                             title: "Users and roles",
@@ -33,30 +42,40 @@ struct SettingsView: View {
                             symbol: "calendar.badge.clock",
                             permission: .companyProfileRead,
                             route: .paymentTerms
-                        ),
-                        SettingsRow(
-                            title: "Online payment link",
-                            symbol: "link",
-                            permission: .companyProfileRead,
-                            route: .paymentLink
                         )
                     ]
                 )
 
+                // Integrations → Payments → Stripe. The payment link is no
+                // longer a top-level row: it is one of the two models offered
+                // inside the Payments screen, not the headline way to take
+                // money.
                 group(
-                    title: "Platform subscription",
+                    title: "Integrations",
                     rows: [
                         SettingsRow(
-                            title: "Plan and seats",
-                            symbol: "creditcard.fill",
+                            title: "Payments",
+                            symbol: "creditcard.and.123",
                             permission: .saasBillingRead,
-                            route: .subscription
+                            route: .payments_integration
                         ),
                         SettingsRow(
                             title: "SMS credits",
                             symbol: "message.fill",
                             permission: .smsLedgerRead,
                             route: .smsCredits
+                        )
+                    ]
+                )
+
+                group(
+                    title: "Subscription",
+                    rows: [
+                        SettingsRow(
+                            title: "Plan and seats",
+                            symbol: "creditcard.fill",
+                            permission: .saasBillingRead,
+                            route: .subscription
                         ),
                         SettingsRow(
                             title: "Recurring service",
@@ -71,7 +90,7 @@ struct SettingsView: View {
                     title: "Transparency",
                     rows: [
                         SettingsRow(title: "Role & data access", symbol: "lock.shield.fill", permission: nil, route: .dataAccess),
-                        SettingsRow(title: "Integrations", symbol: "app.connected.to.app.below.fill", permission: nil, route: .integrations)
+                        SettingsRow(title: "Integration status", symbol: "app.connected.to.app.below.fill", permission: nil, route: .integrations)
                     ]
                 )
             }

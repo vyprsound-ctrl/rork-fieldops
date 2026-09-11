@@ -17,7 +17,15 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     case paymentTerms
     case companyProfile
     case settings
+    /// Settings → Integrations → Payments. The central Stripe and
+    /// payment-model screen.
+    case payments_integration
+    /// The company's own external payment URL, reached from the Payments
+    /// screen. No longer a top-level settings row: a pasted link is one of two
+    /// models now, not the headline way to take money.
     case paymentLink
+    /// Settings → Business → Email & Invoicing.
+    case businessEmail
     case dataAccess
     case integrations
     case developmentTests
@@ -41,7 +49,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .companyProfile: return "Company profile"
         case .notifications: return "Job alerts"
         case .settings: return "Settings"
-        case .paymentLink: return "Online payment link"
+        case .payments_integration: return "Payments"
+        case .paymentLink: return "My payment link"
+        case .businessEmail: return "Email & Invoicing"
         case .dataAccess: return "Role & data access"
         case .integrations: return "Integrations"
         case .developmentTests: return "Development tests"
@@ -72,7 +82,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .companyProfile: return "building.2.fill"
         case .notifications: return "bell.fill"
         case .settings: return "gearshape.fill"
+        case .payments_integration: return "creditcard.and.123"
         case .paymentLink: return "link"
+        case .businessEmail: return "envelope.fill"
         case .dataAccess: return "lock.shield.fill"
         case .integrations: return "app.connected.to.app.below.fill"
         case .developmentTests: return "checklist"
@@ -106,7 +118,13 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         // Anyone with a session may manage their own device's alerts.
         case .notifications: return nil
         case .settings: return .companyProfileRead
+        // Stripe onboarding and the commercial model are billing acts. The
+        // screen is gated on the SaaS billing read, which in the shipped
+        // matrix only the owner holds — and the database refuses the
+        // underlying call to anyone else regardless of this.
+        case .payments_integration: return .saasBillingRead
         case .paymentLink: return .companyProfileRead
+        case .businessEmail: return .companyProfileRead
         case .dataAccess: return nil
         case .integrations: return nil
         case .developmentTests: return nil
@@ -117,7 +135,8 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         switch self {
         case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports,
              .recurring, .subscription, .smsCredits, .paymentTerms, .notifications, .dataAccess,
-             .integrations, .settings, .paymentLink, .companyProfile, .developmentTests: return true
+             .integrations, .settings, .paymentLink, .companyProfile, .developmentTests,
+             .payments_integration, .businessEmail: return true
         }
     }
 }

@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
         break;
 
       case "account.updated":
-        outcome = await handleAccountUpdated(admin, object);
+        outcome = await handleAccountUpdated(admin, object, companyId);
         break;
 
       // ---------- SMS credit purchase (platform-side) ---------------------
@@ -360,8 +360,22 @@ async function handlePaymentFailed(
   return `payment${status === "failed" ? "Failed" : "Cancelled"}`;
 }
 
+/// Stripe's own answer about whether this connected account can trade.
+///
+/// FOUNDING 100: this is the other door onto qualifying onboarding. An owner
+/// who completes Stripe in the browser and never reopens the app still becomes
+/// a Founding Member, because Stripe tells us here rather than the app asking.
+/// The claim itself is made by `claim_founding_member_slot()`, which re-checks
+/// `charges_enabled` from the row updated immediately above, allocates the next
+/// free number under `FOR UPDATE SKIP LOCKED`, and is idempotent — so a
+/// replayed `account.updated` cannot issue a second number, and two accounts
+/// going live in the same instant cannot receive the same one.
 // deno-lint-ignore no-explicit-any
-async function handleAccountUpdated(admin: any, account: Record<string, unknown>): Promise<string> {
+async function handleAccountUpdated(
+  admin: any,
+  account: Record<string, unknown>,
+  companyId: string | null,
+): Promise<string> {
   const requirements = (account.requirements ?? {}) as { currently_due?: string[]; disabled_reason?: string | null };
   const { error } = await admin.from("stripe_connect_accounts").update({
     charges_enabled: Boolean(account.charges_enabled),
@@ -375,7 +389,24 @@ async function handleAccountUpdated(admin: any, account: Record<string, unknown>
   }).eq("stripe_account_id", String(account.id));
 
   if (error) throw new Error(error.message);
-  return "accountUpdated";
+
+  if (!account.charges_enabled || !companyId) return "accountUpdated";
+
+  const { data: claimed, error: claimError } = await admin.rpc(
+    "claim_founding_member_slot",
+    { p_company: companyId },
+  );
+
+  // A failed allocation must never fail the event: the account genuinely can
+  // take payments now, and that fact is already recorded above.
+  if (claimError) {
+    console.error("[stripe-webhook] founding slot claim failed", claimError.message);
+    return "accountUpdated";
+  }
+
+  return typeof claimed === "number"
+    ? `accountUpdated:founding#${claimed}`
+    : "accountUpdated:noFoundingPlace";
 }
 
 /// Re-derives an invoice's paid amount, balance and status from its payment

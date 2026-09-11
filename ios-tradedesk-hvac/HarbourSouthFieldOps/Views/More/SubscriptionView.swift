@@ -65,6 +65,26 @@ struct SubscriptionView: View {
                 alertCard(alert)
             }
 
+            // The commercial position comes first when there is one to state:
+            // an owner mid-trial, or a Founding Member, wants to know where
+            // they stand before they read the seat arithmetic.
+            if let commercial = viewModel.commercial {
+                if commercial.isTrialActive {
+                    TrialStatusCard(
+                        daysRemaining: commercial.trialDaysRemaining,
+                        endsAt: commercial.trialEndsAt,
+                        outcome: commercial.trialOutcomeMessage
+                    )
+                }
+
+                if let number = commercial.foundingMemberNumber {
+                    FoundingMemberBadge(
+                        number: number,
+                        isBenefitActive: commercial.foundingBenefitActive
+                    )
+                }
+            }
+
             priceCard(overview)
             breakdownCard(overview)
             seatCard(overview)
@@ -103,7 +123,11 @@ struct SubscriptionView: View {
     private func priceCard(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(overview.quote.monthlyLabel)
+                // The headline is what the company ACTUALLY pays. For a
+                // Founding Member whose benefit is live that is $0, and
+                // showing the tier price instead would be wrong. The tier
+                // price is still stated underneath, so nothing is hidden.
+                Text(viewModel.commercial?.effectivePriceLabel ?? overview.quote.monthlyLabel)
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.ink)
                     .monospacedDigit()
@@ -122,6 +146,13 @@ struct SubscriptionView: View {
             Text("\(overview.quote.tierName) · \(overview.quote.activePaidUsers) active \(overview.quote.activePaidUsers == 1 ? "person" : "people")")
                 .font(.subheadline)
                 .foregroundStyle(Theme.secondary)
+
+            if let commercial = viewModel.commercial, commercial.foundingBenefitActive {
+                Text("Founding Member — your \(commercial.tierName) subscription of \(commercial.subscriptionPriceLabel)/month is $0 while you process customer payments through Harbour South.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.green)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let subscription = overview.subscription {
                 Divider()
@@ -370,6 +401,11 @@ struct SubscriptionView: View {
     }
 
     /// FLOW B, kept visually and verbally distinct from everything above.
+    ///
+    /// Deliberately a SUMMARY with a way through to the real screen. Stripe is
+    /// managed in Settings → Integrations → Payments, and duplicating those
+    /// controls here would give an owner two places to do the same thing and
+    /// two chances to see them disagree.
     @ViewBuilder
     private func connectCard() -> some View {
         if case .loaded(let connect) = viewModel.connectState {
@@ -425,33 +461,35 @@ struct SubscriptionView: View {
                         .padding(.top, 2)
                     }
 
-                    if connect.canManage, connect.readiness != .notConfigured {
-                        Button {
-                            Task {
-                                guard let session else { return }
-                                if connect.readiness == .ready {
-                                    await viewModel.openStripeDashboard(gateway: env.gateway, session: session)
-                                } else {
-                                    await viewModel.startOnboarding(gateway: env.gateway, session: session)
-                                }
-                            }
-                        } label: {
+                    if let commercial = viewModel.commercial, commercial.stripeConnected {
+                        Divider()
+                        HStack {
+                            Text("Harbour South payment fee")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.secondary)
+                            Spacer(minLength: 8)
+                            Text(commercial.platformFeeLabel)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.ink)
+                        }
+                    }
+
+                    // One destination for every Stripe action, so this card
+                    // and the Payments screen can never disagree about state.
+                    if connect.canManage {
+                        NavigationLink(value: AppRoute.more(.payments_integration)) {
                             HStack {
-                                Text(connect.readiness == .ready ? "Open Stripe dashboard" : "Continue setup")
+                                Text("Manage payments")
                                     .font(.subheadline.weight(.semibold))
                                 Spacer()
-                                if viewModel.isWorking {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "arrow.up.right.square")
-                                        .font(.footnote)
-                                }
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
                             }
                             .foregroundStyle(Theme.primary)
                             .frame(minHeight: 44)
+                            .contentShape(.rect)
                         }
                         .buttonStyle(.plain)
-                        .disabled(viewModel.isWorking)
                     }
                 }
                 .padding(14)

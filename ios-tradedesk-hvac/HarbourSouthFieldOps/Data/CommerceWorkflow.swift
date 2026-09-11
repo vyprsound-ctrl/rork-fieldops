@@ -585,6 +585,30 @@ extension DataGateway {
         throw DataError.rejected("Card payments are only available on a live company account.")
     }
 
+    // MARK: The commercial model
+    //
+    // The development stack answers honestly that it has no commercial
+    // position. There is no Stripe account behind it, no trial clock and no
+    // Founding Member allocation — and inventing a plausible-looking one here
+    // would be the single most misleading thing this file could do, because
+    // Founding Member status is a real commercial commitment.
+
+    func commercialState(session: TenantSession) async throws -> CommercialState {
+        throw DataError.rejected("Your commercial plan is only available on a live company account.")
+    }
+
+    func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws {
+        throw DataError.rejected("The payment model is only configurable on a live company account.")
+    }
+
+    func businessEmailSettings(session: TenantSession) async throws -> BusinessEmailSettings {
+        throw DataError.rejected("Your business email is only configurable on a live company account.")
+    }
+
+    func updateBusinessEmail(session: TenantSession, email: String?) async throws {
+        throw DataError.rejected("Your business email is only configurable on a live company account.")
+    }
+
     func smsCreditOverview(session: TenantSession) async throws -> SmsCreditOverview {
         throw DataError.rejected("SMS credits are only available on a live company account.")
     }

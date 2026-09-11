@@ -230,8 +230,11 @@ function renderInvoice(data: InvoicePayload, pay: PayContext): Response {
 <meta name="robots" content="noindex, nofollow">
 <title>Invoice ${escapeHtml(invoice.number)} · ${escapeHtml(company.name)}</title>
 <style>
-  :root { color-scheme: light; --ink:#15161a; --muted:#6b6f7d; --line:#e7e8ee; --bg:#f3f4f7;
-          --accent:#0f5c4a; --danger:#b3261e; --ok:#1c7a4a; }
+  /* Harbour South palette, sampled from the mark: royal blue for brand and
+     structure, orange for the one action on the page. Semantic colours are
+     unchanged — green still means paid, red still means a problem. */
+  :root { color-scheme: light; --ink:#0F1B2A; --muted:#5B6675; --line:#E1E6EF; --bg:#F6F8FB;
+          --brand:#1B3FA8; --accent:#E1691A; --danger:#C7311F; --ok:#0F8F49; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); padding:20px 16px 56px;
          font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
@@ -244,7 +247,7 @@ function renderInvoice(data: InvoicePayload, pay: PayContext): Response {
   .company small { display:block; font-weight:400; font-size:13px; color:var(--muted); margin-top:4px; line-height:1.5; }
   .pill { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em;
           padding:6px 11px; border-radius:999px; white-space:nowrap; }
-  .pill.open { background:#eef2ff; color:#31408f; }
+  .pill.open { background:#EAF0FC; color:var(--brand); }
   .pill.overdue { background:#fdecea; color:var(--danger); }
   .pill.paid { background:#e7f5ec; color:var(--ok); }
   .pill.void { background:#eeeff3; color:var(--muted); }
@@ -436,7 +439,7 @@ const CARD_CLIENT = `
     var stripe = Stripe(data.publishableKey, { stripeAccount: data.stripeAccount });
     var elements = stripe.elements({
       clientSecret: data.clientSecret,
-      appearance: { theme: 'stripe', variables: { colorPrimary: '#0f5c4a', borderRadius: '10px' } }
+      appearance: { theme: 'stripe', variables: { colorPrimary: '#1B3FA8', borderRadius: '10px' } }
     });
 
     var holder = node('div', 'payel');
@@ -658,7 +661,7 @@ function inviteEmailHtml(
     `<p style="font-size:16px;margin:0 0 14px">${greeting}</p>` +
     `<p style="margin:0 0 16px"><strong>${escapeHtml(companyName)}</strong> has invited you to join them on ` +
     `<strong>Harbour South FieldOps</strong> as <strong>${escapeHtml(roleTitle(role))}</strong>.</p>` +
-    `<p style="margin:0 0 24px"><a href="${escapeHtml(joinUrl)}" style="background:#0f5c4a;color:#fff;` +
+    `<p style="margin:0 0 24px"><a href="${escapeHtml(joinUrl)}" style="background:#E1691A;color:#fff;` +
     `text-decoration:none;padding:13px 22px;border-radius:11px;font-weight:600;display:inline-block">Set up your account</a></p>` +
     `<p style="margin:0 0 6px;color:#606374;font-size:14px">If the button doesn't work, open Harbour South FieldOps, ` +
     `choose <strong>Join</strong> on the sign-in screen and enter this code:</p>` +
@@ -852,7 +855,7 @@ function joinLandingPage(token: string, name: string): Response {
           box-shadow:0 1px 3px rgba(16,18,27,.08),0 12px 32px rgba(16,18,27,.06); }
   h1 { font-size:21px; margin:0 0 10px; letter-spacing:-.015em; }
   p { margin:0 0 16px; font-size:15px; line-height:1.6; color:#606374; }
-  .cta { display:block; text-align:center; background:#0f5c4a; color:#fff; text-decoration:none;
+  .cta { display:block; text-align:center; background:#E1691A; color:#fff; text-decoration:none;
          padding:15px 22px; border-radius:12px; font-weight:600; font-size:16px; margin:0 0 20px; }
   .code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; background:#f3f4f7;
           border-radius:10px; padding:13px 15px; word-break:break-all; color:#15161a; user-select:all; }

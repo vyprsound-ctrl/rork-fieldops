@@ -34,7 +34,10 @@ struct SimulatedBadge: View {
 struct SimulatedServicesBanner: View {
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "wrench.and.screwdriver.fill")
+            // A neutral development marker. The old wrench-and-screwdriver was
+            // left over from the previous product identity and read as
+            // branding rather than as a warning.
+            Image(systemName: "hammer.circle.fill")
                 .font(.caption)
             Text("Development build · seeded data, nothing here is live")
                 .font(.caption.weight(.medium))
