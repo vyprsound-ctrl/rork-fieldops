@@ -42,10 +42,13 @@ struct EmptyStateView: View {
                 .foregroundStyle(Theme.secondary)
                 .multilineTextAlignment(.center)
 
+            // An empty state's one action is the thing the person came here to
+            // do, so it carries the accent rather than blending into the blue
+            // chrome around it.
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
-                    .tint(Theme.primary)
+                    .tint(Theme.accent)
                     .padding(.top, 4)
             }
         }

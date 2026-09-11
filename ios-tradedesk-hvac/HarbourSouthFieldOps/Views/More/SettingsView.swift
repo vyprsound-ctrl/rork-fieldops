@@ -72,7 +72,7 @@ struct SettingsView: View {
                     title: "Subscription",
                     rows: [
                         SettingsRow(
-                            title: "Plan and seats",
+                            title: "Plan and users",
                             symbol: "creditcard.fill",
                             permission: .saasBillingRead,
                             route: .subscription

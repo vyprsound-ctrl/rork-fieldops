@@ -725,7 +725,7 @@ actor MockDataGateway: DataGateway {
         var subscriptionSummary: String?
         if session.can(.saasBillingRead),
            let sub = store.subscriptions.first(where: { $0.companyID == session.companyID }) {
-            subscriptionSummary = "\(sub.plan.title) · \(sub.status.title) · \(sub.seatCount) seats"
+            subscriptionSummary = "\(sub.plan.title) · \(sub.status.title) · \(sub.seatCount) \(sub.seatCount == 1 ? "user" : "users")"
         }
 
         return MoreOverview(

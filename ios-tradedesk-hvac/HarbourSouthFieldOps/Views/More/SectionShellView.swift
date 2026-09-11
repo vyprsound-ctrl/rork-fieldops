@@ -77,7 +77,7 @@ struct SectionShellView: View {
         // exhaustive, and they describe the real screen rather than claiming it
         // is still to come.
         case .recurring: return "Recurring maintenance agreements, and the visits the scheduler books from them."
-        case .subscription: return "The company's Harbour South plan, its active seats and how the monthly price is calculated."
+        case .subscription: return "The company's Harbour South plan, its active users and how the monthly price is calculated."
         case .smsCredits: return "Message credit balance, bundles and the full consumption ledger."
         case .paymentTerms: return "The company's default payment terms, which any single invoice can still override."
         case .companyProfile: return "The company's name, contact details, address and default tax rate, as they appear on quotes and invoices."
@@ -85,7 +85,7 @@ struct SectionShellView: View {
         case .settings: return "Company profile, users, roles, trade configuration and subscription management."
         case .payments_integration: return "How customers pay you: your own Stripe account through Harbour South, or your existing payment provider."
         case .paymentLink: return "The company's own online payment destination, shown to customers on their invoice."
-        case .businessEmail: return "The business's customer-facing email identity, used as the reply address on the invoices customers receive."
+        case .businessEmail: return "Your business's customer-facing email address, used as the reply address on every invoice your customers receive."
         case .dataAccess: return "Permission inspector."
         case .integrations: return "Integration status."
         case .developmentTests: return "Acceptance scenarios."

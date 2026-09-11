@@ -24,7 +24,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     /// screen. No longer a top-level settings row: a pasted link is one of two
     /// models now, not the headline way to take money.
     case paymentLink
-    /// Settings → Business → Email & Invoicing.
+    /// The business's own customer-facing email identity. Reachable from the
+    /// top level of More as "Set up your email", because an owner who has not
+    /// set it yet will never go looking three levels down in Settings for it.
     case businessEmail
     case dataAccess
     case integrations
@@ -43,7 +45,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .payments: return "Accounts receivable"
         case .reports: return "Reports"
         case .recurring: return "Recurring service"
-        case .subscription: return "Subscription & seats"
+        case .subscription: return "Subscription & Users"
         case .smsCredits: return "SMS credits"
         case .paymentTerms: return "Payment terms"
         case .companyProfile: return "Company profile"
@@ -51,7 +53,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .settings: return "Settings"
         case .payments_integration: return "Payments"
         case .paymentLink: return "My payment link"
-        case .businessEmail: return "Email & Invoicing"
+        case .businessEmail: return "Set up your email"
         case .dataAccess: return "Role & data access"
         case .integrations: return "Integrations"
         case .developmentTests: return "Development tests"

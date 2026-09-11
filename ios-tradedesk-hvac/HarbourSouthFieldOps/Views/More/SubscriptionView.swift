@@ -83,6 +83,12 @@ struct SubscriptionView: View {
                         isBenefitActive: commercial.foundingBenefitActive
                     )
                 }
+            } else if let problem = viewModel.commercialError {
+                // The trial card and Founding Member badge are missing. This
+                // used to be a silent gap — the request failed behind a `try?`
+                // and the sections simply were not drawn, so the screen looked
+                // complete and was quietly wrong.
+                commercialUnavailableCard(problem)
             }
 
             priceCard(overview)
@@ -90,7 +96,7 @@ struct SubscriptionView: View {
             seatCard(overview)
             projectionCard(overview)
             tierListCard(overview)
-            connectCard()
+            paymentsLink()
 
             if !overview.pricing.isLive {
                 Text("These prices could not be read from the server and are the built-in defaults. Reconnect to confirm the current price list.")
@@ -103,6 +109,32 @@ struct SubscriptionView: View {
     }
 
     // MARK: - Cards
+
+    /// Says plainly that the trial and Founding Member position could not be
+    /// read, rather than leaving the owner to notice their absence.
+    private func commercialUnavailableCard(_ problem: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.footnote)
+                .foregroundStyle(Theme.amber)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Trial and Founding Member status unavailable")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Your plan and pricing below are unaffected.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.meta)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.amber.opacity(0.10))
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+    }
 
     private func alertCard(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -400,123 +432,62 @@ struct SubscriptionView: View {
         }
     }
 
-    /// FLOW B, kept visually and verbally distinct from everything above.
+    /// FLOW B, as a signpost and nothing more.
     ///
-    /// Deliberately a SUMMARY with a way through to the real screen. Stripe is
-    /// managed in Settings → Integrations → Payments, and duplicating those
-    /// controls here would give an owner two places to do the same thing and
-    /// two chances to see them disagree.
+    /// This screen used to host a full inline Stripe card — status, Stripe's
+    /// outstanding requirements, the business-structure question and the
+    /// onboarding button — duplicating Settings → Integrations → Payments.
+    /// Two surfaces owning one integration gave an owner two places to act and
+    /// two chances to see them disagree. The controls now live in exactly one
+    /// place and this is the way through to it.
+    ///
+    /// Subscription is what the business pays Harbour South. Payments is what
+    /// the business's own customers pay them. Keeping the boundary sharp is the
+    /// entire point.
     @ViewBuilder
-    private func connectCard() -> some View {
-        if case .loaded(let connect) = viewModel.connectState {
+    private func paymentsLink() -> some View {
+        if case .loaded(let connect) = viewModel.connectState, connect.canManage {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Taking customer payments")
                     .sectionLabelStyle()
 
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 8) {
+                NavigationLink(value: AppRoute.more(.payments_integration)) {
+                    HStack(spacing: 12) {
                         Image(systemName: connect.acceptsCards ? "checkmark.seal.fill" : "creditcard")
-                            .font(.footnote)
-                            .foregroundStyle(connect.acceptsCards ? Theme.green : Theme.secondary)
-                        Text(connect.readiness.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Theme.ink)
-                        Spacer()
-                    }
+                            .font(.title3)
+                            .foregroundStyle(connect.acceptsCards ? Theme.green : Theme.accent)
+                            .frame(width: 28)
 
-                    Text(connectDetail(connect))
-                        .font(.footnote)
-                        .foregroundStyle(Theme.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !connect.requirementsDue.isEmpty {
-                        Text("Stripe still needs: \(connect.requirementsDue.prefix(4).joined(separator: ", "))")
-                            .font(.caption)
-                            .foregroundStyle(Theme.amber)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    // Asked once, before the Stripe account exists. A sole
-                    // trader and a limited company are verified differently by
-                    // Stripe, and getting it wrong is what used to strand sole
-                    // traders part-way through onboarding.
-                    if connect.canManage, connect.readiness == .notConnected {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("How do you trade?")
-                                .font(.footnote.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(connect.readiness.title)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.ink)
-
-                            Picker("How do you trade?", selection: $viewModel.businessType) {
-                                ForEach(ConnectBusinessType.allCases) { type in
-                                    Text(type.title).tag(type)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            Text(viewModel.businessType.detail)
+                            Text(connect.acceptsCards
+                                 ? "Manage your Stripe account and payouts"
+                                 : "Set up Stripe so customers can pay by card")
                                 .font(.caption)
-                                .foregroundStyle(Theme.meta)
+                                .foregroundStyle(Theme.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.top, 2)
-                    }
 
-                    if let commercial = viewModel.commercial, commercial.stripeConnected {
-                        Divider()
-                        HStack {
-                            Text("Harbour South payment fee")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.secondary)
-                            Spacer(minLength: 8)
-                            Text(commercial.platformFeeLabel)
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Theme.ink)
-                        }
-                    }
+                        Spacer(minLength: 8)
 
-                    // One destination for every Stripe action, so this card
-                    // and the Payments screen can never disagree about state.
-                    if connect.canManage {
-                        NavigationLink(value: AppRoute.more(.payments_integration)) {
-                            HStack {
-                                Text("Manage payments")
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                            }
-                            .foregroundStyle(Theme.primary)
-                            .frame(minHeight: 44)
-                            .contentShape(.rect)
-                        }
-                        .buttonStyle(.plain)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.meta)
                     }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardSurface()
+                    .contentShape(.rect)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .cardSurface()
+                .buttonStyle(PressableTileStyle())
 
                 Text("This is separate from your Harbour South subscription above. Customer payments go straight to your own Stripe account.")
                     .font(.caption)
                     .foregroundStyle(Theme.meta)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
-
-    private func connectDetail(_ connect: ConnectAccountStatus) -> String {
-        switch connect.readiness {
-        case .notConfigured:
-            return connect.disabledReason
-                ?? "Card payments are not switched on for this deployment yet."
-        case .notConnected:
-            return "Connect a Stripe account to let customers pay their invoices by card. Money goes to you, not to Harbour South."
-        case .pending:
-            return "Stripe needs a little more information before you can take payments."
-        case .ready:
-            return "You can take card payments. Funds settle into your own Stripe account."
-        case .restricted:
-            return connect.disabledReason ?? "Stripe has restricted this account. Open the dashboard for details."
         }
     }
 

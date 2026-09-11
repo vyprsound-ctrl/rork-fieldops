@@ -119,10 +119,34 @@ actor SupabaseDataGateway: DataGateway {
             let response: PostgrestResponse<Void> = try await builder.execute()
             return try SupabaseCoding.decoder.decode([T].self, from: response.data)
         } catch let error as DecodingError {
-            print("[data] could not decode \(T.self): \(error)")
-            throw DataError.unexpected("The server sent data this version of the app can't read.")
+            print("[data] could not decode \(T.self): \(Self.describe(error))")
+            throw DataError.unexpected(
+                "This screen couldn't read \(T.self) from the server. Nothing was changed."
+            )
         } catch {
             throw Self.translate(error)
+        }
+    }
+
+    /// Names the offending field instead of printing an opaque dump, so a
+    /// contract drift between this build and the database is diagnosable from
+    /// a single log line rather than a debugger session.
+    nonisolated static func describe(_ error: DecodingError) -> String {
+        func path(_ context: DecodingError.Context) -> String {
+            let parts = context.codingPath.map(\.stringValue)
+            return parts.isEmpty ? "(root)" : parts.joined(separator: ".")
+        }
+        switch error {
+        case .keyNotFound(let key, let context):
+            return "missing field '\(key.stringValue)' at \(path(context)) — the select list is narrower than the type"
+        case .typeMismatch(let type, let context):
+            return "field at \(path(context)) is not \(type)"
+        case .valueNotFound(let type, let context):
+            return "field at \(path(context)) was null but \(type) is not optional"
+        case .dataCorrupted(let context):
+            return "unreadable value at \(path(context)): \(context.debugDescription)"
+        @unknown default:
+            return String(describing: error)
         }
     }
 
@@ -206,23 +230,77 @@ actor SupabaseDataGateway: DataGateway {
         }
     }
 
-    private static func translate(_ error: Error) -> DataError {
+    /// Maps a transport or API failure onto the sentence that actually
+    /// describes it.
+    ///
+    /// The previous version funnelled everything it did not recognise into
+    /// "Couldn't reach the server. Try again in a moment." That sentence is a
+    /// lie for any deterministic failure — a missing function, a refused
+    /// permission, a malformed payload — and it invites an endless Try Again
+    /// loop over a request that can never succeed. Only a genuine transport
+    /// fault is described as a connection problem now; everything else says
+    /// what happened and whether retrying is worth anything.
+    static func translate(_ error: Error) -> DataError {
         if let dataError = error as? DataError { return dataError }
+
         if let urlError = error as? URLError {
             switch urlError.code {
             case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
                  .cannotFindHost, .timedOut, .dataNotAllowed:
                 return .offline
             default:
-                break
+                print("[data] transport failure: \(urlError.code.rawValue) \(urlError.localizedDescription)")
+                return .unexpected("The connection failed before the server answered.")
             }
         }
+
+        if let decoding = error as? DecodingError {
+            print("[data] could not decode response: \(describe(decoding))")
+            return .unexpected("The server's answer didn't match what this version expects.")
+        }
+
+        if let postgrest = error as? PostgrestError {
+            return translatePostgrest(postgrest)
+        }
+
         let text = error.localizedDescription.lowercased()
         if text.contains("jwt") || text.contains("token is expired") {
             return .unexpected("Your session has expired. Sign in again.")
         }
+
         print("[data] request failed: \(error)")
-        return .unexpected("Couldn't reach the server. Try again in a moment.")
+        return .unexpected("Something went wrong talking to the server.")
+    }
+
+    /// A refusal the API itself expressed, named honestly.
+    ///
+    /// `PGRST202` is the one that caused the Create Job "Couldn't reach the
+    /// server" loop: PostgREST answers 404 when no function matches the
+    /// argument names it was sent, which is a build/database mismatch and is
+    /// never fixed by pressing the button again.
+    private static func translatePostgrest(_ error: PostgrestError) -> DataError {
+        let code = error.code ?? "-"
+        print("[data] api refused: \(code) \(error.message) \(error.detail ?? "")")
+
+        switch code {
+        case "PGRST202":
+            return .unexpected(
+                "This version of the app is asking the server for something it doesn't recognise. Updating the app should fix it."
+            )
+        case "PGRST301", "PGRST303":
+            return .unexpected("Your session has expired. Sign in again.")
+        case "42501":
+            return .notPermitted(.jobsManage)
+        case "42702", "42703", "42883":
+            return .unexpected(
+                "The server couldn't complete that request. This needs looking at rather than retrying."
+            )
+        default:
+            if error.message.lowercased().contains("jwt") {
+                return .unexpected("Your session has expired. Sign in again.")
+            }
+            return .unexpected("The server refused that request.")
+        }
     }
 
     // MARK: - Company configuration

@@ -12,9 +12,14 @@ struct MoreView: View {
     /// actually serve this role.
     private var visibleSections: [MoreSection] {
         guard let session else { return [] }
+        // `.businessEmail` is deliberately at the top level rather than three
+        // taps down in Settings → Business. It existed and was routed before,
+        // but nothing surfaced it, so no owner ever found it and no invoice
+        // ever carried the business's own reply address. A setting nobody can
+        // find is a setting that does not exist.
         return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments,
-                .recurring, .reports, .smsCredits, .subscription, .notifications, .settings,
-                .dataAccess, .integrations]
+                .recurring, .reports, .smsCredits, .subscription, .businessEmail,
+                .notifications, .settings, .dataAccess, .integrations]
             .filter { section in
                 // Job alerts need a real device registration against a real
                 // signed-in user, so the row is only offered where turning them
@@ -223,9 +228,9 @@ struct MoreView: View {
         HStack(spacing: 12) {
             Image(systemName: section.symbolName)
                 .font(.footnote)
-                .foregroundStyle(Theme.primary)
+                .foregroundStyle(needsAttention(section) ? Color.white : Theme.primary)
                 .frame(width: 32, height: 32)
-                .background(Theme.primaryTint)
+                .background(needsAttention(section) ? Theme.accent : Theme.primaryTint)
                 .clipShape(.rect(cornerRadius: 8))
 
             Text(section.title(terms))
@@ -234,7 +239,15 @@ struct MoreView: View {
 
             Spacer(minLength: 4)
 
-            if let detail = detailText(for: section, overview: overview) {
+            if needsAttention(section) {
+                Text("Not set")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accentText)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Theme.accentTint)
+                    .clipShape(.capsule)
+            } else if let detail = detailText(for: section, overview: overview) {
                 Text(detail)
                     .font(.footnote)
                     .monospacedDigit()
@@ -248,6 +261,16 @@ struct MoreView: View {
         .padding(.horizontal, 13)
         .frame(minHeight: Theme.minTap)
         .contentShape(.rect)
+    }
+
+    /// Rows that are waiting on the owner to do something.
+    ///
+    /// Only the business email qualifies today: until it is set, every invoice
+    /// a customer receives has no return address that belongs to the business.
+    /// The accent marks it so the gap is visible from the menu rather than
+    /// discovered after an invoice has already gone out.
+    private func needsAttention(_ section: MoreSection) -> Bool {
+        section == .businessEmail && (viewModel.commercial?.businessEmail?.isEmpty ?? true)
     }
 
     private func detailText(for section: MoreSection, overview: MoreOverview) -> String? {

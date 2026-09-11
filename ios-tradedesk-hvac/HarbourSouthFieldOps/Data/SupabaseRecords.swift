@@ -23,7 +23,8 @@ nonisolated enum SupabaseCoding {
         return formatter
     }()
 
-    nonisolated(unsafe) private static let plainDay: DateFormatter = {
+    // `DateFormatter` is already Sendable, so this needs no unsafe opt-out.
+    private static let plainDay: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -441,6 +442,24 @@ nonisolated struct QuoteOperationalRecord: Decodable, Sendable {
     let status: QuoteStatus
 
     static let columns = "id,number,status"
+}
+
+/// A job's number and nothing else.
+///
+/// This exists because `JobRecord` cannot be decoded from a narrowed select:
+/// its `title`, `kind`, `priority`, `status`, `customer_id`, `address_id` and
+/// `created_at` are all non-optional, so asking for `id,number` and decoding
+/// `JobRecord` throws `keyNotFound` every single time. That is exactly what
+/// happened on the invoice screens — the read failed and the app reported
+/// "the server sent data this version of the app can't read" for an invoice
+/// the server had in fact created perfectly.
+///
+/// A back-reference needs a number, not a job, so the type now says so.
+nonisolated struct JobNumberRecord: Decodable, Sendable {
+    let id: UUID
+    let number: String
+
+    static let columns = "id,number"
 }
 
 /// The priced quote row, from the base table. Reachable only with

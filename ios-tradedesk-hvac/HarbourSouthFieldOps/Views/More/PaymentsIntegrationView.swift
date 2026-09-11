@@ -186,27 +186,17 @@ struct PaymentsIntegrationView: View {
                     }
                 }
 
-                // Asked once, before the Stripe account exists. A sole trader
-                // and a limited company are verified differently by Stripe, and
-                // guessing is what used to strand sole traders in onboarding.
+                // The business structure question used to live here, in UK
+                // terms ("Sole trader" / "Limited company") that do not fit a
+                // US market. It has been removed rather than translated:
+                // Stripe's hosted onboarding collects and *verifies* the
+                // structure itself, so asking first duplicated the question and
+                // could only ever disagree with the answer Stripe accepted.
                 if commercial.canManageBilling, commercial.stripeState == .notConnected {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("How do you trade?")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.ink)
-
-                        Picker("How do you trade?", selection: $viewModel.businessType) {
-                            ForEach(ConnectBusinessType.allCases) { type in
-                                Text(type.title).tag(type)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-
-                        Text(viewModel.businessType.detail)
-                            .font(.caption)
-                            .foregroundStyle(Theme.meta)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text("Stripe will ask about your business and verify it during setup.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if commercial.canManageBilling, let action = commercial.stripeState.actionTitle {

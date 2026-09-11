@@ -16,9 +16,6 @@ final class CommercialViewModel {
     /// A Stripe onboarding or dashboard link ready for the browser.
     var pendingLink: URL?
     var confirmation: String?
-    /// Sole trader or limited company, asked once before the Stripe account
-    /// exists. A prefill only — Stripe verifies it either way.
-    var businessType: ConnectBusinessType = .unspecified
 
     var commercial: CommercialState? {
         if case .loaded(let value) = state { return value }
@@ -39,9 +36,13 @@ final class CommercialViewModel {
         isWorking = true
         actionError = nil
         do {
+            // No business-structure prefill is sent. Stripe's hosted
+            // onboarding asks for the structure and verifies it, so asking
+            // first only duplicated the question — in UK terms that did not
+            // fit a US market — and could disagree with Stripe's own answer.
             pendingLink = try await gateway.beginConnectOnboarding(
                 session: session,
-                businessType: businessType
+                businessType: .unspecified
             )
         } catch {
             actionError = DataError.wrap(error).errorDescription

@@ -17,16 +17,19 @@ final class SubscriptionViewModel {
     ///
     /// Optional rather than a `LoadState`, because this screen is still useful
     /// without it: an unreadable commercial state hides the badge and the
-    /// trial card and leaves the seat arithmetic intact.
+    /// trial card and leaves the user arithmetic intact.
     private(set) var commercial: CommercialState?
+    /// Why the trial card and Founding Member badge are absent, when they are.
+    ///
+    /// This used to be a bare `try?`. When `company_commercial_state()` began
+    /// failing, the trial and Founding sections simply vanished with no error
+    /// anywhere — the screen looked finished and was silently wrong. The
+    /// failure is now carried so the screen can say so.
+    private(set) var commercialError: String?
     private(set) var isWorking: Bool = false
     var actionError: String?
     /// A Stripe onboarding or dashboard link ready to open in the browser.
     var pendingLink: URL?
-    /// Sole trader or limited company, asked once before the Stripe account is
-    /// created. Only a prefill — Stripe verifies it either way, and "not sure"
-    /// hands the question to Stripe rather than guessing on the owner's behalf.
-    var businessType: ConnectBusinessType = .unspecified
 
     func load(gateway: DataGateway, session: TenantSession, showLoading: Bool = true) async {
         if showLoading { state = .loading }
@@ -36,7 +39,13 @@ final class SubscriptionViewModel {
             state = .failed(DataError.wrap(error))
         }
         await loadConnect(gateway: gateway, session: session)
-        commercial = try? await gateway.commercialState(session: session)
+        do {
+            commercial = try await gateway.commercialState(session: session)
+            commercialError = nil
+        } catch {
+            commercial = nil
+            commercialError = DataError.wrap(error).errorDescription
+        }
     }
 
     func loadConnect(gateway: DataGateway, session: TenantSession) async {
@@ -54,7 +63,7 @@ final class SubscriptionViewModel {
         do {
             pendingLink = try await gateway.beginConnectOnboarding(
                 session: session,
-                businessType: businessType
+                businessType: .unspecified
             )
         } catch {
             actionError = DataError.wrap(error).errorDescription

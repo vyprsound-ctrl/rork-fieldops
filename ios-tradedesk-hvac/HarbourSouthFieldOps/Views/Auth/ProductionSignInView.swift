@@ -260,6 +260,10 @@ struct ProductionSignInView: View {
         }
     }
 
+    /// The single action on the whole screen, so it carries the accent.
+    ///
+    /// Bold at this size is WCAG "large text", which is what keeps white
+    /// legible on the orange fill.
     private var submitButton: some View {
         Button {
             Task { await submit() }
@@ -267,15 +271,15 @@ struct ProductionSignInView: View {
             HStack(spacing: 8) {
                 if env.authPhase.isBusy { ProgressView().tint(.white) }
                 Text(submitTitle)
-                    .font(.body.weight(.semibold))
+                    .font(.body.weight(.bold))
             }
             .frame(maxWidth: .infinity)
             .frame(height: Theme.minTap)
-            .background(canSubmit ? Theme.primary : Theme.primary.opacity(0.4))
+            .background(canSubmit ? Theme.accent : Theme.accent.opacity(0.35))
             .foregroundStyle(.white)
             .clipShape(.rect(cornerRadius: Theme.buttonRadius))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableTileStyle())
         .disabled(!canSubmit)
     }
 

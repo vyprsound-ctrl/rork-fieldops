@@ -158,8 +158,8 @@ extension SupabaseDataGateway {
         let convertedIDs = Array(Set(matching.compactMap(\.convertedJobID)))
         if !convertedIDs.isEmpty, session.can(.jobsReadAll) || session.can(.jobsReadAssignedOnly) {
             let rows = try await fetch(
-                JobRecord.self,
-                client.from("jobs").select("id,number").in("id", values: convertedIDs)
+                JobNumberRecord.self,
+                client.from("jobs").select(JobNumberRecord.columns).in("id", values: convertedIDs)
             )
             jobNumbers = Dictionary(rows.map { ($0.id.uuidString, $0.number) }, uniquingKeysWith: { first, _ in first })
         }
@@ -255,8 +255,8 @@ extension SupabaseDataGateway {
         var convertedNumber: String?
         if let jobID = quote.convertedJobID, session.can(.jobsReadAll) || session.can(.jobsReadAssignedOnly) {
             let rows = try await fetch(
-                JobRecord.self,
-                client.from("jobs").select("id,number").eq("id", value: jobID).limit(1)
+                JobNumberRecord.self,
+                client.from("jobs").select(JobNumberRecord.columns).eq("id", value: jobID).limit(1)
             )
             convertedNumber = rows.first?.number
         }
@@ -427,8 +427,8 @@ extension SupabaseDataGateway {
         let jobIDs = Array(Set(invoices.compactMap(\.jobID)))
         if !jobIDs.isEmpty, session.can(.jobsReadAll) || session.can(.jobsReadAssignedOnly) {
             let rows = try await fetch(
-                JobRecord.self,
-                client.from("jobs").select("id,number").in("id", values: jobIDs)
+                JobNumberRecord.self,
+                client.from("jobs").select(JobNumberRecord.columns).in("id", values: jobIDs)
             )
             jobNumbers = Dictionary(rows.map { ($0.id.uuidString, $0.number) }, uniquingKeysWith: { first, _ in first })
         }
