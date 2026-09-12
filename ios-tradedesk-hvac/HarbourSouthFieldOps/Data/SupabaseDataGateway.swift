@@ -240,7 +240,13 @@ actor SupabaseDataGateway: DataGateway {
     /// loop over a request that can never succeed. Only a genuine transport
     /// fault is described as a connection problem now; everything else says
     /// what happened and whether retrying is worth anything.
-    static func translate(_ error: Error) -> DataError {
+    ///
+    /// `nonisolated` because `DataError.wrap` — the normaliser every view model
+    /// calls from its catch blocks — is itself nonisolated, and this function
+    /// only reads value types that are already nonisolated and `Sendable`.
+    /// Nothing here touches actor state, so there is no reason to make a catch
+    /// block hop to the main actor just to name an error.
+    nonisolated static func translate(_ error: Error) -> DataError {
         if let dataError = error as? DataError { return dataError }
 
         if let urlError = error as? URLError {
@@ -278,7 +284,7 @@ actor SupabaseDataGateway: DataGateway {
     /// server" loop: PostgREST answers 404 when no function matches the
     /// argument names it was sent, which is a build/database mismatch and is
     /// never fixed by pressing the button again.
-    private static func translatePostgrest(_ error: PostgrestError) -> DataError {
+    private nonisolated static func translatePostgrest(_ error: PostgrestError) -> DataError {
         let code = error.code ?? "-"
         print("[data] api refused: \(code) \(error.message) \(error.detail ?? "")")
 
