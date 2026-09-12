@@ -32,7 +32,7 @@ struct ContactEditorView: View {
                     Toggle("Billing contact", isOn: $draft.isBillingContact)
                         .tint(Theme.primary)
                 } footer: {
-                    Text("The main contact is who engineers call from the doorstep. The billing contact is who invoices go to.")
+                    Text("The main contact is who your field workers call from the doorstep. The billing contact is who invoices go to.")
                 }
             }
             .navigationTitle(isEditing ? "Edit contact" : "New contact")

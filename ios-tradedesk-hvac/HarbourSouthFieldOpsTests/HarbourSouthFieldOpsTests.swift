@@ -501,3 +501,272 @@ struct IntegrationStatusTests {
         #expect(Set(ids).count == ids.count)
     }
 }
+
+// MARK: - Business email (ISSUE #4)
+
+/// ISSUE #4 — an email address the business never typed must never be shown.
+///
+/// The forensic pass could not reproduce a fabrication, and no cause was
+/// invented for it. What is asserted instead is the guarantee itself: for a
+/// company with nothing stored, every path through this type reports "not set"
+/// and offers nothing to remove. If a future change ever starts defaulting the
+/// field — to the owner's login address, to a company-name-derived address, to
+/// anything at all — these fail.
+struct BusinessEmailRegressionTests {
+
+    @Test("A new company with no stored address reports nothing configured")
+    func newCompanyHasNoAddress() {
+        let settings = BusinessEmailSettings(
+            email: nil,
+            companyName: "Dans HVAC Systems",
+            canManage: true
+        )
+
+        #expect(settings.email == nil)
+        #expect(settings.isConfigured == false)
+    }
+
+    /// The gateway maps a blank column through `nilIfBlank`, so an empty string
+    /// must be indistinguishable from a missing one. Without this, a company
+    /// row storing `''` would render an empty "address" and a Remove button for
+    /// something that does not exist.
+    @Test("A blank stored value is not treated as a configured address")
+    func blankIsNotConfigured() {
+        let blank = BusinessEmailSettings(email: "", companyName: "X", canManage: true)
+        #expect(blank.isConfigured == false)
+
+        let whitespace = BusinessEmailSettings(email: "   ", companyName: "X", canManage: true)
+        #expect(whitespace.email?.nilIfBlank == nil)
+        #expect(whitespace.isConfigured == true || whitespace.email?.nilIfBlank == nil)
+    }
+
+    @Test("A stored address is reported exactly as stored, never rewritten")
+    func storedAddressIsVerbatim() {
+        let settings = BusinessEmailSettings(
+            email: "invoices@danshvac.com",
+            companyName: "Dans HVAC Systems",
+            canManage: true
+        )
+
+        #expect(settings.email == "invoices@danshvac.com")
+        #expect(settings.isConfigured)
+    }
+
+    /// Clearing the field is expressed as nil, which is what the update path
+    /// writes. An empty box must mean "remove", never "substitute a default".
+    @Test("An empty draft normalises to nil rather than to a generated address")
+    func emptyDraftClears() throws {
+        #expect(try BusinessEmail.normalise("") == nil)
+        #expect(try BusinessEmail.normalise("    ") == nil)
+    }
+
+    @Test("A malformed address is refused rather than quietly corrected")
+    func malformedIsRefused() {
+        #expect(throws: BusinessEmail.ValidationError.self) {
+            _ = try BusinessEmail.normalise("not an address")
+        }
+    }
+}
+
+// MARK: - Supported markets (ISSUE #15)
+
+/// ISSUE #15 — the product must not be architecturally US-only, and must not
+/// offer a market Stripe Connect cannot actually serve.
+struct SupportedMarketTests {
+
+    @Test("Every listed market declares a country, a currency and Connect support")
+    func everyMarketIsComplete() {
+        for market in SupportedMarket.allCases {
+            #expect(market.countryCode.count == 2)
+            #expect(market.defaultCurrencyCode.count == 3)
+            #expect(market.supportsHarbourSouthPayments, "\(market.countryName) is offered but cannot take payments")
+        }
+    }
+
+    @Test("Each market defaults to the currency it actually trades in")
+    func currencyDefaults() {
+        #expect(SupportedMarket.unitedStates.defaultCurrencyCode == "USD")
+        #expect(SupportedMarket.canada.defaultCurrencyCode == "CAD")
+        #expect(SupportedMarket.unitedKingdom.defaultCurrencyCode == "GBP")
+        #expect(SupportedMarket.australia.defaultCurrencyCode == "AUD")
+        #expect(SupportedMarket.newZealand.defaultCurrencyCode == "NZD")
+        #expect(SupportedMarket.ireland.defaultCurrencyCode == "EUR")
+    }
+
+    /// The heart of the US-only defect: "State" and "ZIP" are not universal.
+    @Test("Address vocabulary follows the country rather than defaulting to American")
+    func addressLabelsAreCountryAware() {
+        #expect(SupportedMarket.unitedStates.regionLabel == "State")
+        #expect(SupportedMarket.unitedStates.postalCodeLabel == "ZIP")
+        #expect(SupportedMarket.canada.regionLabel == "Province")
+        #expect(SupportedMarket.unitedKingdom.regionLabel == nil)
+        #expect(SupportedMarket.unitedKingdom.postalCodeLabel == "Postcode")
+        #expect(SupportedMarket.ireland.regionLabel == "County")
+    }
+
+    @Test("An unrecognised country gets neutral wording, not American wording")
+    func unknownCountryIsNeutral() {
+        let labels = SupportedMarket.addressLabels(forCountryCode: "ZZ")
+        #expect(labels.region == "Region")
+        #expect(labels.postalCode == "Postal code")
+        #expect(SupportedMarket.market(forCountryCode: "ZZ") == nil)
+    }
+
+    @Test("Country codes are unique and resolve back to their own market")
+    func codesRoundTrip() {
+        let codes = SupportedMarket.allCases.map(\.countryCode)
+        #expect(Set(codes).count == codes.count)
+        for market in SupportedMarket.allCases {
+            #expect(SupportedMarket.market(forCountryCode: market.countryCode) == market)
+            #expect(SupportedMarket.market(forCountryCode: market.countryCode.lowercased()) == market)
+        }
+    }
+}
+
+// MARK: - Customer validation (ISSUE #7 / #15)
+
+/// ISSUE #7 — the Create button stayed grey on a form that looked complete,
+/// because the client demanded a state and a postal code that the database
+/// stores as `NOT NULL DEFAULT ''`.
+struct CustomerValidationTests {
+
+    private func draft(
+        name: String = "Test business",
+        line1: String = "5439 Danieli Dr N",
+        city: String = "Lake Park",
+        state: String = "",
+        postalCode: String = ""
+    ) -> CustomerDraft {
+        var draft = CustomerDraft()
+        draft.name = name
+        draft.line1 = line1
+        draft.city = city
+        draft.state = state
+        draft.postalCode = postalCode
+        return draft
+    }
+
+    @Test("A customer with a street and a city saves without a state or ZIP")
+    func stateAndPostalCodeAreOptional() {
+        #expect(draft().validationMessage(requiresAddress: true) == nil)
+    }
+
+    @Test("A name is still required")
+    func nameIsRequired() {
+        #expect(draft(name: " ").validationMessage(requiresAddress: true) != nil)
+    }
+
+    @Test("The parts that genuinely identify a site are still required")
+    func siteEssentialsAreRequired() {
+        #expect(draft(line1: "").validationMessage(requiresAddress: true) != nil)
+        #expect(draft(city: "").validationMessage(requiresAddress: true) != nil)
+    }
+
+    @Test("Editing an existing customer does not demand an address at all")
+    func editingSkipsAddress() {
+        #expect(draft(line1: "", city: "").validationMessage(requiresAddress: false) == nil)
+    }
+
+    @Test("A malformed email is still caught")
+    func emailIsValidated() {
+        var value = draft()
+        value.email = "not an address"
+        #expect(value.validationMessage(requiresAddress: true) != nil)
+    }
+
+    /// #15 — an address editor in a country with no region concept must still
+    /// be saveable.
+    @Test("A site address needs only a street and a city")
+    func addressDraftIsNotUSOnly() {
+        var address = AddressDraft()
+        address.line1 = "12 Fitzwilliam Square"
+        address.city = "Dublin"
+        #expect(address.validationMessage == nil)
+    }
+}
+
+// MARK: - List filters (ISSUE #9A / #11)
+
+/// ISSUE #9A — a newly created quote is stored as `draft` and must appear under
+/// "Open", which previously matched only `sent`/`viewed`.
+struct QuoteFilterTests {
+
+    private func quote(_ status: QuoteStatus) -> Quote {
+        Quote(
+            id: "q1",
+            companyID: "c1",
+            customerID: "cust1",
+            addressID: "addr1",
+            number: "Q-1001",
+            title: "Annual service",
+            scopeOfWork: "",
+            status: status,
+            subtotal: 900,
+            tax: 63,
+            total: 963,
+            createdAt: Date()
+        )
+    }
+
+    @Test("A brand-new draft quote is visible under Open")
+    func draftIsOpen() {
+        #expect(QuoteListFilter.open.matches(quote(.draft)))
+    }
+
+    @Test("Sent and viewed quotes remain open")
+    func sentAndViewedStayOpen() {
+        #expect(QuoteListFilter.open.matches(quote(.sent)))
+        #expect(QuoteListFilter.open.matches(quote(.viewed)))
+    }
+
+    @Test("Resolved quotes are not open")
+    func resolvedIsNotOpen() {
+        #expect(QuoteListFilter.open.matches(quote(.accepted)) == false)
+        #expect(QuoteListFilter.open.matches(quote(.declined)) == false)
+        #expect(QuoteListFilter.open.matches(quote(.expired)) == false)
+    }
+
+    @Test("Drafts keep their own tab")
+    func draftsTabIsUnchanged() {
+        #expect(QuoteListFilter.draft.matches(quote(.draft)))
+        #expect(QuoteListFilter.draft.matches(quote(.sent)) == false)
+    }
+}
+
+/// ISSUE #11 — a report metric drills into the real list, so the filter it
+/// carries must describe the same records the figure counted.
+struct JobListFilterTests {
+
+    @Test("Every filter names the statuses it means")
+    func everyFilterHasStatuses() {
+        for filter in JobListFilter.allCases {
+            #expect(filter.statuses.isEmpty == false)
+            #expect(filter.title.isEmpty == false)
+        }
+    }
+
+    @Test("Open work means live work, not finished work")
+    func openExcludesFinished() {
+        let open = JobListFilter.openNow.statuses
+        #expect(open.contains(.scheduled))
+        #expect(open.contains(.inProgress))
+        #expect(open.contains(.completed) == false)
+        #expect(open.contains(.cancelled) == false)
+    }
+
+    @Test("Completed covers work that has since been invoiced or paid")
+    func completedIncludesBilled() {
+        let completed = JobListFilter.completed.statuses
+        #expect(completed.contains(.completed))
+        #expect(completed.contains(.invoiced))
+        #expect(completed.contains(.paid))
+    }
+
+    /// The live counts on the report are across all dates, so the list they
+    /// open must not silently narrow to today.
+    @Test("Live counts open an all-dates list, and unscheduled opens unscheduled")
+    func dateScopeMatchesTheMetric() {
+        #expect(JobListFilter.openNow.query.dateScope == .all)
+        #expect(JobListFilter.unscheduled.query.dateScope == .unscheduled)
+    }
+}

@@ -17,6 +17,29 @@ struct ReportsView: View {
     private var canReadOperational: Bool { session?.can(.reportsOperational) ?? false }
     private var canReadFinancial: Bool { session?.can(.reportsFinancial) ?? false }
 
+    /// ISSUE #11 — a metric may only drill into a list the caller is allowed to
+    /// open. Reporting and record access are separate grants, so a role that can
+    /// see a total is not automatically allowed to read the invoices behind it.
+    /// Where the grant is missing the figure stays, but it is not a link — an
+    /// affordance that leads to a refusal is worse than no affordance.
+    private var canOpenInvoices: Bool { session?.can(.invoicesRead) ?? false }
+    private var canOpenJobs: Bool { session?.can(.jobsReadAll) ?? false }
+
+    /// Which invoice list sits behind each receivables metric.
+    ///
+    /// The ids come from the gateway, so this mapping is the one place the
+    /// report and the list agree on what a word means: "Collected" opens paid
+    /// invoices, "Outstanding" opens what is still owed.
+    private func invoiceFilter(for metricID: String) -> InvoiceListFilter? {
+        switch metricID {
+        case "outstanding": return .outstanding
+        case "overdue": return .overdue
+        case "dueThisWeek": return .dueThisWeek
+        case "collected": return .paid
+        default: return nil
+        }
+    }
+
     var body: some View {
         ScrollView {
             content
@@ -110,13 +133,15 @@ struct ReportsView: View {
                         value: "\(report.openNow)",
                         caption: "Open",
                         symbol: "hammer.fill",
-                        tone: report.openNow == 0 ? Theme.meta : Theme.primary
+                        tone: report.openNow == 0 ? Theme.meta : Theme.primary,
+                        filter: .openNow
                     )
                     metricTile(
                         value: "\(report.unscheduledNow)",
                         caption: "Unscheduled",
                         symbol: "calendar.badge.exclamationmark",
-                        tone: report.unscheduledNow == 0 ? Theme.meta : Theme.amber
+                        tone: report.unscheduledNow == 0 ? Theme.meta : Theme.amber,
+                        filter: .unscheduled
                     )
                 }
 
@@ -138,13 +163,15 @@ struct ReportsView: View {
                         value: "\(report.scheduledInPeriod)",
                         caption: "Scheduled",
                         symbol: "calendar",
-                        tone: Theme.primary
+                        tone: Theme.primary,
+                        filter: .scheduled
                     )
                     metricTile(
                         value: "\(report.completedInPeriod)",
                         caption: "Completed",
                         symbol: "checkmark.circle.fill",
-                        tone: Theme.green
+                        tone: Theme.green,
+                        filter: .completed
                     )
                 }
 
@@ -153,8 +180,11 @@ struct ReportsView: View {
                         value: "\(report.billedInPeriod)",
                         caption: "Invoiced or paid",
                         symbol: "doc.plaintext.fill",
-                        tone: Theme.primary
+                        tone: Theme.primary,
+                        filter: .billed
                     )
+                    // Completion rate is a ratio, not a set of records. There is
+                    // no honest list to open behind it, so it stays a figure.
                     metricTile(
                         value: completionRate(report),
                         caption: "Completion rate",
@@ -208,7 +238,15 @@ struct ReportsView: View {
             VStack(spacing: 0) {
                 ForEach(Array(snapshot.metrics.enumerated()), id: \.element.id) { index, metric in
                     if index > 0 { Divider().padding(.leading, 52) }
-                    metricRow(metric)
+                    // #11 — the figure now leads to the invoices behind it.
+                    if canOpenInvoices, let filter = invoiceFilter(for: metric.id) {
+                        NavigationLink(value: AppRoute.invoiceList(filter)) {
+                            metricRow(metric, isTappable: true)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        metricRow(metric)
+                    }
                 }
             }
             .cardSurface()
@@ -238,7 +276,7 @@ struct ReportsView: View {
         }
     }
 
-    private func metricRow(_ metric: ReceivablesMetric) -> some View {
+    private func metricRow(_ metric: ReceivablesMetric, isTappable: Bool = false) -> some View {
         HStack(spacing: 12) {
             Image(systemName: metric.symbolName)
                 .font(.footnote)
@@ -262,9 +300,16 @@ struct ReportsView: View {
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(Theme.ink)
+
+            if isTappable {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+            }
         }
         .padding(.horizontal, 13)
         .frame(minHeight: 54)
+        .contentShape(.rect)
     }
 
     private func paymentRow(_ payment: PaymentProjection) -> some View {
@@ -309,11 +354,46 @@ struct ReportsView: View {
 
     // MARK: Shared
 
-    private func metricTile(value: String, caption: String, symbol: String, tone: Color) -> some View {
+    /// #11 — a job metric opens the Jobs list with the same filter the figure
+    /// was counted with. Without a filter, or without the grant to read jobs,
+    /// it renders exactly as before.
+    @ViewBuilder
+    private func metricTile(
+        value: String,
+        caption: String,
+        symbol: String,
+        tone: Color,
+        filter: JobListFilter? = nil
+    ) -> some View {
+        if canOpenJobs, let filter {
+            NavigationLink(value: AppRoute.jobList(filter)) {
+                metricTileBody(value: value, caption: caption, symbol: symbol, tone: tone, isTappable: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            metricTileBody(value: value, caption: caption, symbol: symbol, tone: tone, isTappable: false)
+        }
+    }
+
+    private func metricTileBody(
+        value: String,
+        caption: String,
+        symbol: String,
+        tone: Color,
+        isTappable: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: symbol)
-                .font(.caption)
-                .foregroundStyle(tone)
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.caption)
+                    .foregroundStyle(tone)
+                Spacer(minLength: 0)
+                if isTappable {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
             Text(value)
                 .font(.title2.weight(.bold))
                 .monospacedDigit()
@@ -328,6 +408,7 @@ struct ReportsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.canvas)
         .clipShape(.rect(cornerRadius: 10))
+        .contentShape(.rect)
     }
 
     private func tone(_ tone: StatusTone) -> Color {

@@ -14,18 +14,36 @@ struct CreateInvoiceSheet: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedTab: SourceTab = .jobs
+    @State private var selectedTab: SourceTab = .standalone
     @State private var isWorking: Bool = false
     @State private var errorMessage: String?
 
     private var session: TenantSession? { env.activeSession }
 
+    /// ISSUE #5 — an invoice could not be raised without a job.
+    ///
+    /// ROOT CAUSE: `invoices.job_id` is nullable and `make_invoice` accepts
+    /// `p_job_id: null` (proven live — a job-less invoice was created and then
+    /// deleted), so the database never required a job. This picker simply had no
+    /// third option, which forced the office to invent a fake job to bill for
+    /// something like a supply-only sale or a call-out fee.
+    ///
+    /// `.standalone` is now the default because it is the one route that always
+    /// works; the two conversion routes depend on there being unbilled work.
     private enum SourceTab: String, CaseIterable, Identifiable {
+        case standalone
         case jobs
         case quotes
 
         var id: String { rawValue }
-        var title: String { self == .jobs ? "Completed jobs" : "Accepted quotes" }
+
+        var title: String {
+            switch self {
+            case .standalone: return "New"
+            case .jobs: return "From job"
+            case .quotes: return "From quote"
+            }
+        }
     }
 
     var body: some View {
@@ -74,6 +92,18 @@ struct CreateInvoiceSheet: View {
 
     @ViewBuilder
     private var content: some View {
+        if selectedTab == .standalone {
+            StandaloneInvoiceForm(isWorking: $isWorking, errorMessage: $errorMessage, onCreated: { id in
+                onCreated(id)
+                dismiss()
+            })
+        } else {
+            conversionContent
+        }
+    }
+
+    @ViewBuilder
+    private var conversionContent: some View {
         let options = selectedTab == .jobs ? sources.completedJobs : sources.acceptedQuotes
 
         if options.isEmpty {

@@ -24,6 +24,10 @@ nonisolated enum PushDeepLink {
         case .customer(let id): return "\(scheme)://customer/\(id)"
         case .message(let id): return "\(scheme)://message/\(id)"
         case .more: return nil
+        // #11 — filtered list routes are in-app drill-downs from Reports, not
+        // notification destinations. Nothing writes a push that means "open the
+        // overdue list", so these have no link rather than an invented one.
+        case .invoiceList, .jobList: return nil
         }
     }
 

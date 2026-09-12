@@ -59,28 +59,36 @@ struct SubscriptionView: View {
         }
     }
 
+    /// ISSUE #3 — the order of this screen is the fix.
+    ///
+    /// THE DEFECT: Stripe was the LAST thing on the page, below the seat
+    /// arithmetic, the projection slider and the full tier table. An owner in a
+    /// free trial had to scroll past several screens of pricing detail to reach
+    /// the one action that lets their business get paid — and the Founding
+    /// Member offer, which depends on connecting Stripe, was nowhere near it.
+    ///
+    /// THE ORDER NOW, which is simply what an owner needs in the order they
+    /// need it:
+    ///   1. Anything urgent (payment failed, trial nearly up).
+    ///   2. Where you stand — trial, plan, what you actually pay.
+    ///   3. Taking customer payments — Connect Stripe.
+    ///   4. Founding Member — what it is, or what it is worth.
+    ///   5. The arithmetic, for whoever wants to check it.
+    ///
+    /// Nothing was deleted: every card that existed still exists, and the
+    /// pricing model, tiers and 0.30% fee are untouched.
     private func loaded(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             if let alert = overview.alert {
                 alertCard(alert)
             }
 
-            // The commercial position comes first when there is one to state:
-            // an owner mid-trial, or a Founding Member, wants to know where
-            // they stand before they read the seat arithmetic.
             if let commercial = viewModel.commercial {
                 if commercial.isTrialActive {
                     TrialStatusCard(
                         daysRemaining: commercial.trialDaysRemaining,
                         endsAt: commercial.trialEndsAt,
                         outcome: commercial.trialOutcomeMessage
-                    )
-                }
-
-                if let number = commercial.foundingMemberNumber {
-                    FoundingMemberBadge(
-                        number: number,
-                        isBenefitActive: commercial.foundingBenefitActive
                     )
                 }
             } else if let problem = viewModel.commercialError {
@@ -92,11 +100,18 @@ struct SubscriptionView: View {
             }
 
             priceCard(overview)
+
+            // Stripe now sits directly under the plan, not at the foot of the
+            // screen, because connecting it is the single most valuable thing
+            // an owner can do here.
+            paymentsLink()
+
+            foundingCard()
+
             breakdownCard(overview)
             seatCard(overview)
             projectionCard(overview)
             tierListCard(overview)
-            paymentsLink()
 
             if !overview.pricing.isLive {
                 Text("These prices could not be read from the server and are the built-in defaults. Reconnect to confirm the current price list.")
@@ -106,6 +121,79 @@ struct SubscriptionView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    /// ISSUE #3 — the Founding 100, stated in full and stated positively.
+    ///
+    /// Every rule here comes from `CommercialState`, which the database
+    /// computes: the number, whether the benefit is live this month, how many
+    /// places remain, and whether the offer is still open at all. This view
+    /// invents no rule and no new pricing tier — it explains what the server
+    /// has already decided.
+    ///
+    /// The monthly reminder is deliberately worded as something to keep, not
+    /// something about to be lost, and the reinstatement rule is stated plainly
+    /// so an inactive month never reads as a permanent forfeit.
+    @ViewBuilder
+    private func foundingCard() -> some View {
+        if let commercial = viewModel.commercial {
+            if let number = commercial.foundingMemberNumber {
+                VStack(alignment: .leading, spacing: 10) {
+                    FoundingMemberBadge(
+                        number: number,
+                        isBenefitActive: commercial.foundingBenefitActive
+                    )
+
+                    if let message = commercial.foundingBenefitMessage {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(commercial.foundingBenefitActive ? Theme.green : Theme.accentText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if !commercial.foundingBenefitActive {
+                        Text("Your Founding Member number is yours to keep. Take a customer payment through Harbour South in any month and the $0 benefit applies again — an inactive month never costs you your place.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.meta)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text("Founding Members pay no monthly subscription while active. Harbour South's \(commercial.platformFeeLabel) fee on customer card payments, and Stripe's own processing fees, still apply.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let invitation = commercial.foundingInvitation {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Founding Member").sectionLabelStyle()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 9) {
+                            Image(systemName: "star.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(Theme.accent)
+                            Text("\(commercial.foundingPlacesRemaining) of 100 places left")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundStyle(Theme.ink)
+                            Spacer(minLength: 0)
+                        }
+
+                        Text(invitation)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("Connect Stripe and take your first customer payment to claim a place. Connecting alone doesn't claim one — a payment has to complete successfully.")
+                            .font(.caption)
+                            .foregroundStyle(Theme.meta)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardSurface()
+                }
+            }
+        }
     }
 
     // MARK: - Cards

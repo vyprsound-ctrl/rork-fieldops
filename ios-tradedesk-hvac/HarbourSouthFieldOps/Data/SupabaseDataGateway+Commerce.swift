@@ -250,6 +250,11 @@ private nonisolated struct ConnectRequest: Encodable, Sendable {
     }
 }
 
+/// The error envelope every Edge Function in this project returns on failure.
+nonisolated struct FunctionErrorBody: Decodable, Sendable {
+    let error: String?
+}
+
 private nonisolated struct ConnectResponse: Decodable, Sendable {
     let configured: Bool?
     let connected: Bool?
@@ -1222,15 +1227,74 @@ extension SupabaseDataGateway {
 
     /// Turns an Edge Function transport failure into something a person can act
     /// on, without leaking internals.
+    ///
+    /// ISSUE #2 — every Stripe failure was reported as "Something went wrong
+    /// talking to the server."
+    ///
+    /// ROOT CAUSE, proven live: `stripe-connect` answers a Stripe rejection with
+    /// `{"error": "<Stripe's own sentence>"}` and an HTTP 400. The Supabase SDK
+    /// treats any non-2xx as a transport failure and *throws* — so the
+    /// `if let error = response.error` line below the call site never ran, and
+    /// the one genuinely useful sentence in the whole exchange was discarded.
+    /// The live 400 currently carries: "You must complete your platform profile
+    /// to use Connect and create live connected accounts." The owner saw none
+    /// of that and was told to check their signal instead.
+    ///
+    /// This now reads the body off the thrown error and returns the server's
+    /// message. Genuine transport problems still get their own wording.
     nonisolated static func functionFailureDetail(_ error: Error) -> String? {
+        if let message = functionErrorBody(error) { return message }
+
         let text = String(describing: error)
-        if text.contains("404") || text.lowercased().contains("not found") {
+        let lowered = text.lowercased()
+        if text.contains("404") || lowered.contains("not found") {
             return "This feature is not deployed for this project yet."
         }
-        if text.lowercased().contains("offline") || text.lowercased().contains("network") {
+        if lowered.contains("offline") || lowered.contains("network") || lowered.contains("timed out") {
             return "No connection. Check your signal and try again."
         }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "No connection. Check your signal and try again."
+            case .timedOut:
+                return "The server took too long to answer. Try again in a moment."
+            default:
+                return nil
+            }
+        }
         return nil
+    }
+
+    /// Recovers the `{"error": "…"}` sentence from a non-2xx Edge Function reply.
+    ///
+    /// The SDK models this as `FunctionsError.httpError(code:data:)`, and the
+    /// payload is the function's own JSON body — which is where Stripe's real
+    /// explanation lives. Anything unrecognisable returns nil so the caller can
+    /// fall back rather than show the user a blob of JSON.
+    nonisolated static func functionErrorBody(_ error: Error) -> String? {
+        guard let functionsError = error as? FunctionsError,
+              case .httpError(let code, let data) = functionsError else { return nil }
+
+        if let decoded = try? JSONDecoder().decode(FunctionErrorBody.self, from: data),
+           let message = decoded.error?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !message.isEmpty {
+            // 401/403 come from our own permission checks and are already
+            // phrased for a person; Stripe's 400 is passed through verbatim
+            // because Stripe tells the owner exactly what to go and fix.
+            return message
+        }
+
+        switch code {
+        case 401, 403:
+            return "You don't have permission to change payment settings."
+        case 409:
+            return "This company has not connected Stripe yet."
+        case 500...599:
+            return "The payments service had a problem. Try again shortly."
+        default:
+            return nil
+        }
     }
 }
 

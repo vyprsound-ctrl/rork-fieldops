@@ -58,7 +58,7 @@ struct CustomerEditorView: View {
                 } header: {
                     Text("Main contact")
                 } footer: {
-                    Text("Who your engineers call when they're outside. You can add more contacts from the customer's screen.")
+                    Text("Who your field workers call when they're outside. You can add more contacts from the customer's screen.")
                 }
 
                 if !viewModel.isEditing {
@@ -83,7 +83,7 @@ struct CustomerEditorView: View {
                     } header: {
                         Text("First service address")
                     } footer: {
-                        Text("Gate codes, parking, where the unit is — anything that saves an engineer ten minutes.")
+                        Text("Gate codes, parking, where the unit is — anything that saves a field worker ten minutes.")
                     }
                 }
 

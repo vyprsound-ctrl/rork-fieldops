@@ -190,8 +190,12 @@ struct CustomerDetailView: View {
                 sitesSection(profile)
                 equipmentSection(profile)
                 jobsSection(profile)
-                if !profile.quotes.isEmpty { documentsSection(title: "Quotes", documents: profile.quotes) }
-                if !profile.invoices.isEmpty { documentsSection(title: "Invoices", documents: profile.invoices) }
+                if !profile.quotes.isEmpty {
+                    documentsSection(title: "Quotes", documents: profile.quotes, kind: .quote)
+                }
+                if !profile.invoices.isEmpty {
+                    documentsSection(title: "Invoices", documents: profile.invoices, kind: .invoice)
+                }
             }
             .padding(.horizontal, Theme.margin)
             .padding(.top, 4)
@@ -556,33 +560,74 @@ struct CustomerDetailView: View {
         .contentShape(.rect)
     }
 
-    private func documentsSection(title: String, documents: [CustomerDocumentProjection]) -> some View {
+    /// Which screen a document row opens.
+    private enum DocumentKind {
+        case quote
+        case invoice
+
+        func route(_ id: String) -> AppRoute {
+            switch self {
+            case .quote: return .quote(id)
+            case .invoice: return .invoice(id)
+            }
+        }
+    }
+
+    /// ISSUE #8 — invoices in a customer's history are now actionable.
+    ///
+    /// THE DEFECT: these rows were plain `HStack`s. An invoice appeared in the
+    /// customer's record showing a number, an amount and a status, and tapping
+    /// it did nothing — so the one place an office naturally looks up "what does
+    /// this customer owe us" was a dead end. Chasing a payment meant leaving the
+    /// customer, opening Invoices, and searching for the number by hand.
+    ///
+    /// THE FIX: the row opens `InvoiceDetailView`, which already carries every
+    /// action this issue asks for — view, edit, send/resend, record a payment,
+    /// payment status, and the linked job or quote. No second invoice screen and
+    /// no duplicated actions were built.
+    ///
+    /// PERMISSIONS ARE UNCHANGED: `profile.invoices` is already empty for a role
+    /// without `invoicesRead` (the gateway omits it), so a field worker sees no
+    /// section to tap. The destination re-checks on its own behalf, and the
+    /// database refuses regardless of what the UI offers.
+    private func documentsSection(
+        title: String,
+        documents: [CustomerDocumentProjection],
+        kind: DocumentKind
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).sectionLabelStyle()
             VStack(spacing: 0) {
                 ForEach(Array(documents.prefix(20).enumerated()), id: \.element.id) { index, document in
                     if index > 0 { Divider().padding(.leading, 14) }
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(document.title)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Theme.ink)
-                                .lineLimit(1)
-                            Text([document.number, document.dateLabel.nilIfBlank].compactMap { $0 }.joined(separator: " · "))
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondary)
+                    NavigationLink(value: kind.route(document.id)) {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(document.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Theme.ink)
+                                    .lineLimit(1)
+                                Text([document.number, document.dateLabel.nilIfBlank].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            if let amount = document.amountLabel {
+                                Text(amount)
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Theme.ink)
+                            }
+                            StatusPill(badge: document.badge)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.accent)
                         }
-                        Spacer(minLength: 4)
-                        if let amount = document.amountLabel {
-                            Text(amount)
-                                .font(.subheadline.weight(.semibold))
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.ink)
-                        }
-                        StatusPill(badge: document.badge)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: Theme.minTap)
+                        .contentShape(.rect)
                     }
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: Theme.minTap)
+                    .buttonStyle(.plain)
                 }
             }
             .cardSurface()

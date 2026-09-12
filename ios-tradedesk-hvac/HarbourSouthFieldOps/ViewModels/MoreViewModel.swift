@@ -16,12 +16,29 @@ final class MoreViewModel {
     /// badge instead of leaving a silent gap where one should be.
     private(set) var commercialError: String?
 
+    /// ISSUE #13 — unread field worker messages waiting for the office.
+    ///
+    /// Best-effort and defaulted to zero for exactly the same reason as
+    /// `commercial`: a role without an office grant reads no threads, and a
+    /// failure here must never turn the More tab into an error screen. Zero
+    /// means "nothing to report", never "the request failed".
+    private(set) var unreadMessageCount: Int = 0
+
     func load(gateway: DataGateway, session: TenantSession, showLoading: Bool = true) async {
         if showLoading { state = .loading }
         do {
             state = .loaded(try await gateway.moreOverview(session: session))
         } catch {
             state = .failed(DataError.wrap(error))
+        }
+
+        // #13 — asked only of a role the database would actually answer for.
+        // `office_threads_select` admits a caller holding `assignmentsManage` or
+        // `usersManage`, so anyone else would simply read an empty inbox.
+        if session.can(.assignmentsManage) || session.can(.usersManage) {
+            unreadMessageCount = (try? await gateway.officeInbox(session: session))?.unreadCount ?? 0
+        } else {
+            unreadMessageCount = 0
         }
 
         // Asked only of a role that could possibly be granted it, so a

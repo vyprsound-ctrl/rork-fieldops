@@ -15,16 +15,29 @@ import SwiftUI
 ///
 /// THE DIVISION OF LABOUR, which is deliberate and narrow:
 ///
-///   Royal blue  brand, primary navigation, primary actions, selected states
-///   Orange      accent, attention, the one call to action that matters most
+///   Royal blue  brand, navigation chrome, structure, primary actions
+///   Orange      action affordances, selected states, emphasis, key CTAs
 ///   Green       success · paid · completed
 ///   Amber       warning · needs attention
 ///   Red         error · failed · overdue · destructive
 ///   Neutrals    surfaces and secondary information
 ///
-/// Orange is an accent, not a second primary: it is never used for navigation
-/// chrome, for a whole screen's worth of controls, or in place of a semantic
-/// status colour. A paid invoice is green whatever the brand is.
+/// ISSUE #1 — orange was under-used everywhere except the sign-in screens.
+///
+/// The authentication screens carry a confident royal-blue-and-orange identity;
+/// the rest of the app had almost none, so signing in felt like entering a
+/// different product. Orange has been promoted from "the single most important
+/// button on a screen" to the app's action colour: the thing you tap, the thing
+/// that is selected, the thing being pointed at.
+///
+/// The line that has NOT moved: orange never replaces a semantic status colour,
+/// and never fills a whole screen. A paid invoice is green whatever the brand
+/// is; an overdue one is red. Royal blue still owns navigation chrome and
+/// structure, so the app reads as blue with orange action, not as an orange app.
+///
+/// Use `selectedFill` for a chosen chip or segment and `actionTint` for an
+/// interactive glyph, rather than reaching for `accent` directly — a screen
+/// that hard-codes its own shade is how the drift started.
 ///
 /// CONTRAST
 /// Every pairing below meets WCAG AA for the size it is used at. The two that
@@ -78,6 +91,19 @@ nonisolated enum Theme {
     static let accentTint = Color(hex: 0xFDF1E6)
     /// Orange dark enough to be read as text on a light surface (5.9:1).
     static let accentText = Color(hex: 0xA8480B)
+
+    // MARK: - Roles
+    //
+    // #1 — named by JOB rather than by colour, so the brand can be adjusted in
+    // one place instead of hunted for across sixty screens.
+
+    /// Fill behind a selected filter chip, segment or tab row.
+    static let selectedFill = accent
+    /// An interactive glyph: a toolbar action, a disclosure chevron on a row
+    /// that does something, an "add" affordance.
+    static let actionTint = accent
+    /// A pale plate behind an action glyph.
+    static let actionTintSoft = accentTint
 
     // MARK: - Semantic status
     //

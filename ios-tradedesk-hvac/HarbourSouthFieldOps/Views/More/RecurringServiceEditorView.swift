@@ -148,7 +148,7 @@ struct RecurringServiceEditorView: View {
                 }
             }
 
-            TextField("Notes for the engineer", text: $draft.description, axis: .vertical)
+            TextField("Notes for the field worker", text: $draft.description, axis: .vertical)
                 .lineLimit(2...5)
                 .textInputAutocapitalization(.sentences)
         }

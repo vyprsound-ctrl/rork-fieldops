@@ -23,14 +23,30 @@ struct ProductionSignInView: View {
         }
     }
 
+    /// ISSUE #15 — the currencies a new company may be created in.
+    ///
+    /// Exactly the set the supported markets trade in, so an unsupported
+    /// currency cannot be entered. Deduplicated because Ireland and any future
+    /// euro market share one.
+    private static let selectableCurrencyCodes: [String] = {
+        var seen = Set<String>()
+        return SupportedMarket.allCases
+            .map(\.defaultCurrencyCode)
+            .filter { seen.insert($0).inserted }
+    }()
+
     @State private var flow: Flow = .signIn
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var ownerName: String = ""
     @State private var companyName: String = ""
     @State private var trade: Trade = .hvac
-    @State private var countryCode: String = "US"
-    @State private var currencyCode: String = "USD"
+    /// ISSUE #15 — country and currency were two free-text boxes, so a company
+    /// could be founded in a market Stripe Connect cannot serve and only find
+    /// out on the day it tried to get paid. The market is now chosen from the
+    /// list Harbour South actually supports, and it supplies the currency.
+    @State private var market: SupportedMarket = .fallback
+    @State private var currencyCode: String = SupportedMarket.fallback.defaultCurrencyCode
     @State private var joinName: String = ""
     @State private var joinCode: String = ""
 
@@ -45,11 +61,12 @@ struct ProductionSignInView: View {
                 && !joinName.trimmingCharacters(in: .whitespaces).isEmpty
                 && joinCode.trimmingCharacters(in: .whitespaces).count >= 6
         case .createCompany:
+            // The market picker cannot produce an invalid country, and the
+            // currency picker is seeded from it, so neither needs a length check
+            // any more — both are now closed sets rather than typed strings.
             return hasCredentials
                 && !ownerName.trimmingCharacters(in: .whitespaces).isEmpty
                 && !companyName.trimmingCharacters(in: .whitespaces).isEmpty
-                && countryCode.count == 2
-                && currencyCode.count == 3
         }
     }
 
@@ -210,14 +227,26 @@ struct ProductionSignInView: View {
 
                 Divider().padding(.leading, 14)
 
-                HStack(spacing: 12) {
-                    TextField("Country", text: $countryCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    Divider()
-                    TextField("Currency", text: $currencyCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
+                Picker("Country", selection: $market) {
+                    ForEach(SupportedMarket.allCases) { item in
+                        Text(item.countryName).tag(item)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: Theme.minTap)
+                // Choosing a country sets the currency it trades in. It stays a
+                // separate, explicit value — a business may invoice in another
+                // currency — but it is never left to be typed from scratch.
+                .onChange(of: market) { _, newValue in
+                    currencyCode = newValue.defaultCurrencyCode
+                }
+
+                Divider().padding(.leading, 14)
+
+                Picker("Currency", selection: $currencyCode) {
+                    ForEach(Self.selectableCurrencyCodes, id: \.self) { code in
+                        Text(code).tag(code)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: Theme.minTap)
@@ -337,7 +366,7 @@ struct ProductionSignInView: View {
                 ownerName: ownerName,
                 companyName: companyName,
                 trade: trade,
-                countryCode: countryCode.uppercased(),
+                countryCode: market.countryCode,
                 currencyCode: currencyCode.uppercased()
             )
             await env.signUpToProduction(registration)

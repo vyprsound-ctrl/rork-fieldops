@@ -17,6 +17,12 @@ struct RouteDestinationView: View {
             CustomerDetailView(customerID: customerID)
         case .message(let threadID):
             OfficeConversationView(threadID: threadID)
+        // #11 — a report metric opens the real list, already filtered, rather
+        // than a parallel screen that could disagree with it.
+        case .invoiceList(let filter):
+            InvoicesView(initialFilter: filter)
+        case .jobList(let filter):
+            JobsView(initialFilter: filter)
         case .more(let section):
             switch section {
             case .dispatch:
@@ -59,6 +65,8 @@ struct RouteDestinationView: View {
                 PaymentLinkView()
             case .businessEmail:
                 BusinessEmailView()
+            case .messages:
+                OfficeInboxView()
             }
         }
     }

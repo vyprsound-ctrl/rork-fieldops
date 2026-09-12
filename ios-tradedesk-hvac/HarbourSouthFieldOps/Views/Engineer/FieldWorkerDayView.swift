@@ -211,13 +211,16 @@ struct FieldWorkerDayView: View {
                         Text("Navigate")
                     }
                     .font(.headline)
-                    .foregroundStyle(Theme.primary)
+                    // #1 — Navigate is an action, so it carries the action
+                    // colour. Completion stays green: a semantic status is
+                    // never overwritten by the brand.
+                    .foregroundStyle(Theme.accentText)
                     .frame(maxWidth: .infinity, minHeight: Theme.minTap)
                     .background(Theme.surface)
                     .clipShape(.rect(cornerRadius: Theme.buttonRadius))
                     .overlay {
                         RoundedRectangle(cornerRadius: Theme.buttonRadius)
-                            .stroke(Theme.border, lineWidth: 1)
+                            .stroke(Theme.accent.opacity(0.35), lineWidth: 1)
                     }
                 }
                 .buttonStyle(PressableTileStyle())
@@ -243,7 +246,7 @@ struct FieldWorkerDayView: View {
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity, minHeight: Theme.minTap)
-                        .background(next == .completed ? Theme.green : Theme.primary)
+                        .background(next == .completed ? Theme.green : Theme.accent)
                         .clipShape(.rect(cornerRadius: Theme.buttonRadius))
                     }
                     .buttonStyle(PressableTileStyle())
@@ -262,7 +265,7 @@ struct FieldWorkerDayView: View {
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(Theme.primary)
+                    .foregroundStyle(Theme.accentText)
                     .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.plain)

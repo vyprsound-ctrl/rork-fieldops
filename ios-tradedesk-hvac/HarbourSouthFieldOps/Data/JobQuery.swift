@@ -186,6 +186,68 @@ nonisolated struct NewQuoteInput: Hashable, Sendable {
     var validUntil: Date?
 }
 
+/// ISSUE #11 — the job filters a report metric can drill into.
+///
+/// Reports counted "Scheduled 14 / Completed 9" and stopped there: a number
+/// with no way to reach the work behind it. Rather than build a second job list
+/// with its own querying (and its own chance of quietly disagreeing with the
+/// real one), a metric now opens the existing Jobs screen with one of these
+/// applied. Each case maps onto `JobQuery`, which is the only thing that reads
+/// jobs anywhere in the app, so permissions and tenancy are unchanged.
+nonisolated enum JobListFilter: String, CaseIterable, Sendable, Identifiable {
+    /// Live work across every date — matches the "Open" metric.
+    case openNow
+    /// Booked but with no slot — matches "Unscheduled".
+    case unscheduled
+    /// Booked for a date, in the reported window.
+    case scheduled
+    /// Finished, whether or not it has been billed.
+    case completed
+    /// Completed work that has reached an invoice.
+    case billed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .openNow: return "Open jobs"
+        case .unscheduled: return "Unscheduled jobs"
+        case .scheduled: return "Scheduled jobs"
+        case .completed: return "Completed jobs"
+        case .billed: return "Invoiced jobs"
+        }
+    }
+
+    /// The statuses this filter means. Kept here rather than in the view so the
+    /// report and the list can never drift apart.
+    var statuses: Set<JobStatus> {
+        switch self {
+        case .openNow, .unscheduled, .scheduled:
+            return [.scheduled, .workerAssigned, .travelling, .arrived, .inProgress]
+        case .completed:
+            return [.completed, .invoiced, .paid]
+        case .billed:
+            return [.invoiced, .paid]
+        }
+    }
+
+    /// `openNow` and `unscheduled` are live counts across all dates in the
+    /// report, so the list they open must not be narrowed to today.
+    var dateScope: JobDateScope {
+        switch self {
+        case .openNow, .completed, .scheduled, .billed: return .all
+        case .unscheduled: return .unscheduled
+        }
+    }
+
+    var query: JobQuery {
+        var query = JobQuery()
+        query.dateScope = dateScope
+        query.statuses = statuses
+        return query
+    }
+}
+
 nonisolated enum QuoteListFilter: String, CaseIterable, Sendable, Identifiable {
     case open
     case accepted

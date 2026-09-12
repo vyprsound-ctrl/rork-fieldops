@@ -153,11 +153,11 @@ struct OfficeComposeSheet: View {
             .padding(.horizontal, 11)
             .frame(minHeight: 52)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Theme.primary : Theme.surface)
+            .background(isSelected ? Theme.selectedFill : Theme.surface)
             .clipShape(.rect(cornerRadius: Theme.buttonRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: Theme.buttonRadius)
-                    .stroke(isSelected ? Theme.primary : Theme.border, lineWidth: 1)
+                    .stroke(isSelected ? Theme.selectedFill : Theme.border, lineWidth: 1)
             }
         }
         .buttonStyle(PressableTileStyle())

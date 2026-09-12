@@ -17,8 +17,12 @@ struct MoreView: View {
         // but nothing surfaced it, so no owner ever found it and no invoice
         // ever carried the business's own reply address. A setting nobody can
         // find is a setting that does not exist.
-        return [.dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments,
-                .recurring, .reports, .smsCredits, .subscription, .businessEmail,
+        // ISSUE #13 — `.messages` sits high in the list, next to dispatch,
+        // because it is operational: a field worker asking for a part or
+        // reporting a delay is time-critical, and the database has always
+        // delivered those threads to office roles with nowhere to read them.
+        return [.dispatch, .messages, .workerLocations, .fieldWorkers, .quotes, .invoices,
+                .payments, .recurring, .reports, .smsCredits, .subscription, .businessEmail,
                 .notifications, .settings, .dataAccess, .integrations]
             .filter { section in
                 // Job alerts need a real device registration against a real
@@ -275,6 +279,11 @@ struct MoreView: View {
 
     private func detailText(for section: MoreSection, overview: MoreOverview) -> String? {
         switch section {
+        // #13 — an unread count on the row itself, so a waiting message is
+        // visible from the menu rather than only after opening it.
+        case .messages:
+            let unread = viewModel.unreadMessageCount
+            return unread > 0 ? "\(unread) unread" : nil
         case .fieldWorkers: return overview.workerCount.map(String.init)
         case .quotes: return overview.quoteCount.map(String.init)
         case .invoices: return overview.outstandingLabel

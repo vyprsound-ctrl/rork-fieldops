@@ -86,6 +86,7 @@ struct SectionShellView: View {
         case .payments_integration: return "How customers pay you: your own Stripe account through Harbour South, or your existing payment provider."
         case .paymentLink: return "The company's own online payment destination, shown to customers on their invoice."
         case .businessEmail: return "Your business's customer-facing email address, used as the reply address on every invoice your customers receive."
+        case .messages: return "Conversations between the office and your \(terms.workerPlural), including anything raised against a specific job."
         case .dataAccess: return "Permission inspector."
         case .integrations: return "Integration status."
         case .developmentTests: return "Acceptance scenarios."

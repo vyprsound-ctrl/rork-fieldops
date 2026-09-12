@@ -1,9 +1,18 @@
 import SwiftUI
 
 struct InvoicesView: View {
+    /// ISSUE #11 — the filter this screen opens on.
+    ///
+    /// A report metric drills into this list rather than into a second,
+    /// parallel list of its own, so the figure and the records behind it can
+    /// never disagree. Nil keeps the screen's own default (Outstanding), which
+    /// is what every existing entry point relies on.
+    var initialFilter: InvoiceListFilter?
+
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = InvoicesViewModel()
     @State private var isCreating: Bool = false
+    @State private var hasAppliedInitialFilter: Bool = false
 
     private var session: TenantSession? { env.activeSession }
 
@@ -28,7 +37,7 @@ struct InvoicesView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
-                    .tint(Theme.primary)
+                    .tint(Theme.actionTint)
                     .accessibilityLabel("New invoice")
                 }
             }
@@ -42,6 +51,13 @@ struct InvoicesView: View {
             }
         }
         .task(id: session?.userID) {
+            // Applied once, before the first read, so the drill-down never
+            // flashes the default list on its way to the right one. Guarded so
+            // a later refresh doesn't undo a filter the user has since changed.
+            if let initialFilter, !hasAppliedInitialFilter {
+                viewModel.filter = initialFilter
+                hasAppliedInitialFilter = true
+            }
             await reload()
             await loadSources()
         }
@@ -62,7 +78,7 @@ struct InvoicesView: View {
                             .foregroundStyle(isSelected ? Color.white : Theme.secondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(isSelected ? Theme.primary : Theme.surface)
+                            .background(isSelected ? Theme.selectedFill : Theme.surface)
                             .clipShape(.capsule)
                             .overlay {
                                 Capsule().stroke(isSelected ? Color.clear : Theme.border, lineWidth: 1)

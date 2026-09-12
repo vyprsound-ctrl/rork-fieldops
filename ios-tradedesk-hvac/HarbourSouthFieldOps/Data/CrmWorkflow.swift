@@ -43,6 +43,23 @@ nonisolated struct CustomerDraft: Hashable, Sendable {
     ///
     /// Deliberately one message at a time: a form that lists five problems at
     /// once is read by nobody.
+    ///
+    /// ISSUE #7 — the Create button stayed grey on a form that looked complete.
+    ///
+    /// ROOT CAUSE, proven against the live schema: this required `state` and
+    /// `postalCode`, but `addresses.state` and `addresses.postal_code` are
+    /// `NOT NULL DEFAULT ''` — the database is perfectly willing to store an
+    /// address without them. The client was stricter than the product, so an
+    /// office that had typed everything it actually had was locked out with no
+    /// visible reason (the message sits below the fold on a long form).
+    ///
+    /// ISSUE #15 — the same two lines made the product US-only. "State" and
+    /// "ZIP code" are not universal: an Irish or New Zealand address may have
+    /// neither. Region and postal code are now optional everywhere, and
+    /// `CountryProfile` supplies the right *labels* per country instead.
+    ///
+    /// What is still required is what genuinely identifies a service site: a
+    /// customer name, and a street line plus city on the first address.
     func validationMessage(requiresAddress: Bool) -> String? {
         if name.tidied.isEmpty { return "Give the customer a name." }
         if !email.tidied.isEmpty, !email.contains("@") || email.contains(" ") {
@@ -51,8 +68,6 @@ nonisolated struct CustomerDraft: Hashable, Sendable {
         guard requiresAddress else { return nil }
         if line1.tidied.isEmpty { return "Add the street address for the first service site." }
         if city.tidied.isEmpty { return "Add the city for the service address." }
-        if state.tidied.isEmpty { return "Add the state for the service address." }
-        if postalCode.tidied.isEmpty { return "Add the ZIP code for the service address." }
         return nil
     }
 }
@@ -71,11 +86,12 @@ nonisolated struct AddressDraft: Hashable, Sendable, Identifiable {
     var latitude: Double?
     var longitude: Double?
 
+    /// See `CustomerDraft.validationMessage` — region and postal code are
+    /// optional for the same two reasons (the database defaults them to `''`,
+    /// and not every supported country has them).
     var validationMessage: String? {
         if line1.tidied.isEmpty { return "Add the street address." }
         if city.tidied.isEmpty { return "Add the city." }
-        if state.tidied.isEmpty { return "Add the state." }
-        if postalCode.tidied.isEmpty { return "Add the ZIP code." }
         return nil
     }
 }

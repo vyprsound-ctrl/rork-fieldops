@@ -38,8 +38,17 @@ nonisolated enum Trade: String, Codable, CaseIterable, Sendable, Identifiable {
     /// What this trade calls the people and things the platform models.
     var terminology: Terminology {
         switch self {
+        // ISSUE #14 — "engineer" is too narrow for the people doing this work,
+        // and in US field service it actively misreads as a chartered
+        // profession. The customer-facing word is now "field worker".
+        //
+        // This is the ONLY place the word needed to change: every screen already
+        // asks `Terminology` what to call the role, so correcting it here moves
+        // the whole app at once. The `fieldWorker` role identifier, the database
+        // enum and the RLS policies that depend on it are untouched — renaming
+        // those would be a migration with real risk and no user-visible benefit.
         case .hvac:
-            return Terminology(worker: "engineer", workerPlural: "engineers", asset: "unit", assetPlural: "units")
+            return Terminology(worker: "field worker", workerPlural: "field workers", asset: "unit", assetPlural: "units")
         case .plumbing:
             return Terminology(worker: "plumber", workerPlural: "plumbers", asset: "fixture", assetPlural: "fixtures")
         case .electrical:

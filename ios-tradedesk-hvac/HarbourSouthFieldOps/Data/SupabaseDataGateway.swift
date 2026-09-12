@@ -576,7 +576,10 @@ actor SupabaseDataGateway: DataGateway {
             isUrgent: job.priority == .urgent,
             isUnassigned: workerID == nil,
             value: reference.valueLabels[job.id],
-            status: job.status
+            status: job.status,
+            // #12 — dispatch needs the id, not just the name, to reassign or
+            // clear an existing assignment.
+            workerUserID: workerID
         )
     }
 

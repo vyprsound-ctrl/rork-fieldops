@@ -1,11 +1,17 @@
 import SwiftUI
 
 struct JobsView: View {
+    /// ISSUE #11 — the filter this screen opens on when a report metric drills
+    /// into it. Nil keeps the screen's own default (today), which is what the
+    /// Jobs tab itself relies on.
+    var initialFilter: JobListFilter?
+
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = JobsViewModel()
     @State private var path = NavigationPath()
     @State private var isFiltering: Bool = false
     @State private var isCreating: Bool = false
+    @State private var hasAppliedInitialFilter: Bool = false
 
     private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
@@ -31,7 +37,7 @@ struct JobsView: View {
                     } label: {
                         Image(systemName: viewModel.query.hasRefinements ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                     }
-                    .tint(Theme.primary)
+                    .tint(Theme.actionTint)
                     .accessibilityLabel("Filter jobs")
                 }
                 if session?.can(.jobsManage) == true {
@@ -41,7 +47,7 @@ struct JobsView: View {
                         } label: {
                             Image(systemName: "plus")
                         }
-                        .tint(Theme.primary)
+                        .tint(Theme.actionTint)
                         .accessibilityLabel("New job")
                     }
                 }
@@ -63,6 +69,10 @@ struct JobsView: View {
         }
         .task(id: session?.userID) {
             guard let session else { return }
+            if let initialFilter, !hasAppliedInitialFilter {
+                viewModel.query = initialFilter.query
+                hasAppliedInitialFilter = true
+            }
             await viewModel.loadOptions(gateway: env.gateway, session: session)
             await reload()
         }
@@ -83,7 +93,7 @@ struct JobsView: View {
                             .foregroundStyle(isSelected ? Color.white : Theme.secondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(isSelected ? Theme.primary : Theme.surface)
+                            .background(isSelected ? Theme.selectedFill : Theme.surface)
                             .clipShape(.capsule)
                             .overlay {
                                 Capsule().stroke(isSelected ? Color.clear : Theme.border, lineWidth: 1)
@@ -113,10 +123,10 @@ struct JobsView: View {
                 ForEach(viewModel.activeFilterLabels(terms), id: \.self) { label in
                     Text(label)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.primary)
+                        .foregroundStyle(Theme.accentText)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Theme.primaryTint)
+                        .background(Theme.actionTintSoft)
                         .clipShape(.capsule)
                 }
 

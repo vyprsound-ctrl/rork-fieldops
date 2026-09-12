@@ -181,11 +181,14 @@ struct DashboardView: View {
                     pendingAction = action
                 } label: {
                     VStack(spacing: 10) {
+                        // #1 — these four tiles are the office's primary
+                        // actions, so they carry the action colour rather than
+                        // the structural blue the rest of the card uses.
                         Image(systemName: action.symbolName)
                             .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(Theme.primary)
+                            .foregroundStyle(Theme.accent)
                             .frame(width: 56, height: 56)
-                            .background(Theme.primaryTint)
+                            .background(Theme.actionTintSoft)
                             .clipShape(.circle)
                         Text(action.title)
                             .font(.headline)

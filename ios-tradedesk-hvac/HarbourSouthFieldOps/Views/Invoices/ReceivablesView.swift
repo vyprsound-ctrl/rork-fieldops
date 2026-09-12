@@ -210,7 +210,7 @@ struct ReceivablesView: View {
                             .foregroundStyle(isSelected ? Color.white : Theme.secondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(isSelected ? Theme.primary : Theme.surface)
+                            .background(isSelected ? Theme.selectedFill : Theme.surface)
                             .clipShape(.capsule)
                             .overlay {
                                 Capsule().stroke(isSelected ? Color.clear : Theme.border, lineWidth: 1)

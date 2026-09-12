@@ -45,6 +45,18 @@ nonisolated struct JobRow: Identifiable, Hashable, Sendable {
     /// matching on badge text. Defaulted so the existing call sites and
     /// previews are unaffected.
     var status: JobStatus = .scheduled
+
+    /// ISSUE #12 — who is assigned, as an id rather than a display name.
+    ///
+    /// Dispatch could assign but never truly *reassign* or *unassign*:
+    /// `AssignWorkerSheet` decides both the tick against the current worker and
+    /// whether to offer "Remove assignment" from `currentWorkerID`, and the
+    /// board had no id to give it, so it passed nil. The row carried a worker's
+    /// name but nothing the data layer could act on.
+    ///
+    /// Defaulted to nil so every existing construction site and preview is
+    /// unaffected; the gateway fills it in where it knows the answer.
+    var workerUserID: String?
 }
 
 nonisolated struct EquipmentHistoryRow: Identifiable, Hashable, Sendable {

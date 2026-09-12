@@ -28,6 +28,12 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     /// top level of More as "Set up your email", because an owner who has not
     /// set it yet will never go looking three levels down in Settings for it.
     case businessEmail
+    /// ISSUE #13 — the office's own view of field worker conversations.
+    ///
+    /// The database already delivered these threads to office roles; there was
+    /// simply no screen to open them from. Placed at the top level of More
+    /// because an owner who has been messaged will not go hunting for it.
+    case messages
     case dataAccess
     case integrations
     case developmentTests
@@ -54,6 +60,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .payments_integration: return "Payments"
         case .paymentLink: return "My payment link"
         case .businessEmail: return "Set up your email"
+        case .messages: return "Messages"
         case .dataAccess: return "Role & data access"
         case .integrations: return "Integrations"
         case .developmentTests: return "Development tests"
@@ -87,6 +94,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .payments_integration: return "creditcard.and.123"
         case .paymentLink: return "link"
         case .businessEmail: return "envelope.fill"
+        case .messages: return "bubble.left.and.bubble.right.fill"
         case .dataAccess: return "lock.shield.fill"
         case .integrations: return "app.connected.to.app.below.fill"
         case .developmentTests: return "checklist"
@@ -127,6 +135,12 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .payments_integration: return .saasBillingRead
         case .paymentLink: return .companyProfileRead
         case .businessEmail: return .companyProfileRead
+        // Messaging is gated by the same rule the database uses: the
+        // `office_threads_select` policy admits a caller who holds
+        // `assignmentsManage` or `usersManage` (its `is_office_user()`). Naming
+        // `assignmentsManage` here keeps the menu honest — a role that would be
+        // shown an empty inbox is not offered the row at all.
+        case .messages: return .assignmentsManage
         case .dataAccess: return nil
         case .integrations: return nil
         case .developmentTests: return nil
@@ -138,7 +152,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports,
              .recurring, .subscription, .smsCredits, .paymentTerms, .notifications, .dataAccess,
              .integrations, .settings, .paymentLink, .companyProfile, .developmentTests,
-             .payments_integration, .businessEmail: return true
+             .payments_integration, .businessEmail, .messages: return true
         }
     }
 }
@@ -148,9 +162,22 @@ nonisolated enum AppRoute: Hashable, Sendable {
     case quote(String)
     case invoice(String)
     case customer(String)
-    /// One engineer ↔ office conversation, by thread id.
+    /// One field worker ↔ office conversation, by thread id.
     case message(String)
     case more(MoreSection)
+
+    /// ISSUE #11 — the invoice list, opened on a specific filter.
+    ///
+    /// Reports showed "Overdue · $4,180" and stopped there: a figure with no way
+    /// to reach the invoices behind it. Rather than build a second list screen
+    /// with its own querying (and its own chance of disagreeing with the real
+    /// one), a report metric now opens the existing Invoices screen with its
+    /// filter already applied. One list, one source of truth, one set of
+    /// permissions.
+    case invoiceList(InvoiceListFilter)
+
+    /// #11 — the jobs list, opened on a specific filter, for the same reason.
+    case jobList(JobListFilter)
 }
 
 extension AppRoute: Identifiable {
@@ -165,6 +192,8 @@ extension AppRoute: Identifiable {
         case .customer(let value): return "customer-\(value)"
         case .message(let value): return "message-\(value)"
         case .more(let section): return "more-\(section.rawValue)"
+        case .invoiceList(let filter): return "invoiceList-\(filter.rawValue)"
+        case .jobList(let filter): return "jobList-\(filter.rawValue)"
         }
     }
 }

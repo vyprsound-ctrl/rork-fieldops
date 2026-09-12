@@ -396,9 +396,16 @@ struct DispatchView: View {
                                 Button {
                                     assigningJob = row
                                 } label: {
-                                    Label("Assign", systemImage: "person.badge.plus")
+                                    // The same control does all three jobs, so it
+                                    // should not claim to only add somebody.
+                                    Label(
+                                        row.isUnassigned ? "Assign" : "Reassign",
+                                        systemImage: row.isUnassigned
+                                            ? "person.badge.plus"
+                                            : "arrow.triangle.swap"
+                                    )
                                 }
-                                .tint(Theme.green)
+                                .tint(Theme.accent)
                             }
                         }
 
@@ -419,6 +426,14 @@ struct DispatchView: View {
         }
     }
 
+    /// ISSUE #12 — assign, reassign AND unassign.
+    ///
+    /// `currentWorkerID` was hard-coded to nil here, which quietly removed two
+    /// of the three controls: the sheet shows a tick against the job's current
+    /// worker and only offers "Remove assignment" when it knows there is one.
+    /// Passing nil meant the board could book an unassigned job and nothing
+    /// else — a dispatcher could never free a worker or see who already held
+    /// the job. `JobRow.workerUserID` now carries the real answer.
     @ViewBuilder
     private func assignSheet(for job: JobRow) -> some View {
         let board = viewModel.state.value
@@ -426,10 +441,13 @@ struct DispatchView: View {
             workers: (board?.workers ?? []).map {
                 FieldWorkerOption(id: $0.id, name: $0.name, initials: $0.initials)
             },
-            currentWorkerID: nil,
+            currentWorkerID: job.workerUserID,
             terms: terms
         ) { workerID in
-            let name = board?.workers.first { $0.id == workerID }?.name ?? terms.Worker
+            // A nil id is the explicit "remove" choice, and must keep its own
+            // wording — reporting it as an assignment to somebody would be a lie.
+            let name = workerID.flatMap { id in board?.workers.first { $0.id == id }?.name }
+                ?? "nobody"
             Task { await assign(job, workerUserID: workerID, workerName: name) }
         }
     }

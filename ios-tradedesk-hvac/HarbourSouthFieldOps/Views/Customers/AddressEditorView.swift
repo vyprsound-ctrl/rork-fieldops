@@ -36,7 +36,7 @@ struct AddressEditorView: View {
                 } header: {
                     Text("On site")
                 } footer: {
-                    Text("Gate codes, parking, key safe, which door — whatever the engineer needs before they arrive.")
+                    Text("Gate codes, parking, key safe, which door — whatever the field worker needs before they arrive.")
                 }
             }
             .navigationTitle(isEditing ? "Edit site" : "New site")
