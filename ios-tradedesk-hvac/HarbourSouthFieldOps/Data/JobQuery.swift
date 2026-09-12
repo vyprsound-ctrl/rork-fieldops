@@ -203,9 +203,21 @@ nonisolated enum QuoteListFilter: String, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// ISSUE #9A — a newly created quote never appeared under "Open".
+    ///
+    /// ROOT CAUSE, verified against the live database: `create_quote` stores a
+    /// new quote with status `draft` (Q-1001 = draft), but `.open` matched only
+    /// `sent`/`viewed`. A quote the user had just written was live work that the
+    /// Open tab refused to show, so it appeared only under "All".
+    ///
+    /// "Open" now means what an operator means by it: still in play, not yet
+    /// resolved. `accepted`, `declined` and `expired` are resolutions and stay
+    /// out. `.draft` keeps its own tab, so nothing is lost — an unsent quote is
+    /// visible in Open (it is live) and in Drafts (it is unsent).
     func matches(_ quote: Quote) -> Bool {
         switch self {
-        case .open: return quote.status == .sent || quote.status == .viewed
+        case .open:
+            return quote.status == .draft || quote.status == .sent || quote.status == .viewed
         case .accepted: return quote.status == .accepted
         case .draft: return quote.status == .draft
         case .all: return true
