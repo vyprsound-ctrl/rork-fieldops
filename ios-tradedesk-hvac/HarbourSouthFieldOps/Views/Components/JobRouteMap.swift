@@ -212,6 +212,11 @@ struct FieldTeamMap: View {
 struct TravelTrackingBadge: View {
     let state: TravelTrackingState
     let pings: Int
+    /// ISSUE #14 — the company's own word for the role. This badge previously
+    /// hard-coded "engineer" in its permission explanation, which is the one
+    /// place in this file that reaches a real user rather than a preview.
+    /// Defaulted so existing call sites and previews are unaffected.
+    var worker: String = Terminology.generic.worker
 
     var body: some View {
         HStack(spacing: 8) {
@@ -262,7 +267,7 @@ struct TravelTrackingBadge: View {
         case .off:
             return "Your position is only shared while you are travelling to a job."
         case .unavailable(let authorization):
-            return authorization.explanation(worker: "engineer")
+            return authorization.explanation(worker: worker)
         }
     }
 }

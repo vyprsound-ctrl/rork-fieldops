@@ -6,6 +6,14 @@ import SwiftUI
 /// says what the status is and what sustains it, and never frames the absence
 /// of a qualifying payment as a penalty.
 ///
+/// COMMERCIAL PRIVACY REQUIREMENT — this view must never reveal the company's
+/// place in the allocation. It previously rendered "Founding Member #27", which
+/// told the customer both their position and, by implication, how full the
+/// programme was. The number is still assigned and still authoritative
+/// server-side (`CommercialState.foundingMemberNumber`) for internal use; it is
+/// simply never shown. That also keeps the programme extensible: if the
+/// allocation is widened later, nothing in the UI has promised a fixed size.
+///
 /// Two sizes because it appears in two kinds of place — a compact line on the
 /// owner's account card, and a full card on the billing and payments screens.
 /// Rationed on purpose: it belongs on the owner's dashboard, in Settings and
@@ -18,13 +26,12 @@ struct FoundingMemberBadge: View {
         case full
     }
 
-    let number: Int
     /// Whether the $0/month benefit applies this calendar month. Supplied by
     /// the server via `CommercialState` — this view never works it out.
     let isBenefitActive: Bool
     var size: Size = .full
 
-    private var badgeTitle: String { "Founding Member #\(number)" }
+    private var badgeTitle: String { "Founding Member" }
 
     var body: some View {
         switch size {
@@ -72,7 +79,7 @@ struct FoundingMemberBadge: View {
                     .clipShape(.rect(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("FOUNDING MEMBER")
+                    Text("HARBOUR SOUTH")
                         .font(.caption2.weight(.bold))
                         .tracking(0.8)
                         .foregroundStyle(Theme.accentText)
@@ -92,21 +99,28 @@ struct FoundingMemberBadge: View {
             Divider()
 
             if isBenefitActive {
-                Text("Your Harbour South subscription is $0/month while you actively process customer payments through Harbour South.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("You pay no Harbour South subscription fee for as long as you keep processing at least one customer payment through Harbour South each calendar month.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("The 0.30% Harbour South payment fee and standard Stripe processing fees still apply.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Process a customer payment through Harbour South this month to maintain your Founding Member benefit.")
+                    Text("Process a customer payment through Harbour South this month to resume your Founding Member benefit.")
                         .font(.footnote)
                         .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    // Said plainly, because the number is the part people worry
-                    // about losing and it is the part that never goes.
-                    Text("Your Founding Member number is yours to keep.")
+                    // Said plainly, because losing the status is the part people
+                    // worry about, and it is the part that never goes.
+                    Text("Your Founding Member status is yours to keep — a quiet month never takes it away.")
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -190,9 +204,9 @@ struct TrialStatusCard: View {
 #Preview {
     ScrollView {
         VStack(spacing: 16) {
-            FoundingMemberBadge(number: 27, isBenefitActive: true)
-            FoundingMemberBadge(number: 27, isBenefitActive: false)
-            FoundingMemberBadge(number: 27, isBenefitActive: true, size: .compact)
+            FoundingMemberBadge(isBenefitActive: true)
+            FoundingMemberBadge(isBenefitActive: false)
+            FoundingMemberBadge(isBenefitActive: true, size: .compact)
             TrialStatusCard(
                 daysRemaining: 11,
                 endsAt: Date().addingTimeInterval(86400 * 11),

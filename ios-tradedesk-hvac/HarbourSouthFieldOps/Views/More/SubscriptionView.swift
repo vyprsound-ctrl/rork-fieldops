@@ -137,12 +137,9 @@ struct SubscriptionView: View {
     @ViewBuilder
     private func foundingCard() -> some View {
         if let commercial = viewModel.commercial {
-            if let number = commercial.foundingMemberNumber {
+            if commercial.isFoundingMember {
                 VStack(alignment: .leading, spacing: 10) {
-                    FoundingMemberBadge(
-                        number: number,
-                        isBenefitActive: commercial.foundingBenefitActive
-                    )
+                    FoundingMemberBadge(isBenefitActive: commercial.foundingBenefitActive)
 
                     if let message = commercial.foundingBenefitMessage {
                         Text(message)
@@ -152,13 +149,13 @@ struct SubscriptionView: View {
                     }
 
                     if !commercial.foundingBenefitActive {
-                        Text("Your Founding Member number is yours to keep. Take a customer payment through Harbour South in any month and the $0 benefit applies again — an inactive month never costs you your place.")
+                        Text("Take a customer payment through Harbour South in any month and the benefit applies again — a quiet month never costs you your Founding Member status.")
                             .font(.caption)
                             .foregroundStyle(Theme.meta)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Text("Founding Members pay no monthly subscription while active. Harbour South's \(commercial.platformFeeLabel) fee on customer card payments, and Stripe's own processing fees, still apply.")
+                    Text("Founding Members pay no Harbour South subscription fee while active. The \(commercial.platformFeeLabel) Harbour South payment fee and standard Stripe processing fees still apply.")
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                         .fixedSize(horizontal: false, vertical: true)
@@ -172,7 +169,7 @@ struct SubscriptionView: View {
                             Image(systemName: "star.circle.fill")
                                 .font(.title3)
                                 .foregroundStyle(Theme.accent)
-                            Text("\(commercial.foundingPlacesRemaining) of 100 places left")
+                            Text("Founding Member benefit")
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(Theme.ink)
                             Spacer(minLength: 0)
@@ -183,7 +180,7 @@ struct SubscriptionView: View {
                             .foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        Text("Connect Stripe and take your first customer payment to claim a place. Connecting alone doesn't claim one — a payment has to complete successfully.")
+                        Text("Connect Stripe and take your first customer payment to qualify. Connecting alone doesn't qualify — a payment has to complete successfully.")
                             .font(.caption)
                             .foregroundStyle(Theme.meta)
                             .fixedSize(horizontal: false, vertical: true)

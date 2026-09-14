@@ -175,10 +175,9 @@ struct MoreView: View {
             // The Founding Member mark belongs on the owner's own account
             // card. Compact, one line, and only where it is commercially
             // relevant — it is deliberately not repeated on every screen.
-            if let commercial = viewModel.commercial,
-               let number = commercial.foundingMemberNumber {
+            // The allocation number is never shown; see FoundingMemberBadge.
+            if let commercial = viewModel.commercial, commercial.isFoundingMember {
                 FoundingMemberBadge(
-                    number: number,
                     isBenefitActive: commercial.foundingBenefitActive,
                     size: .compact
                 )

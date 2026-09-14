@@ -155,13 +155,20 @@ nonisolated struct CommercialState: Hashable, Sendable {
         return .onboarding
     }
 
-    /// True when the company holds one of the hundred places, whether or not
-    /// the benefit is active this month. A number is never taken away.
+    /// True when the company holds a Founding Member place, whether or not the
+    /// benefit is active this month. The status is never taken away.
     var isFoundingMember: Bool { foundingMemberNumber != nil }
 
-    /// "Founding Member #27"
+    /// The customer-facing name of the status.
+    ///
+    /// COMMERCIAL PRIVACY REQUIREMENT — this deliberately does NOT include the
+    /// allocation number. It used to read "Founding Member #27", which told the
+    /// customer their position and implied how full the programme was.
+    /// `foundingMemberNumber` remains authoritative server-side for internal
+    /// use; it is simply never rendered. Keeping the number out of the UI also
+    /// keeps the programme extensible — nothing has advertised a fixed size.
     var foundingBadgeTitle: String? {
-        foundingMemberNumber.map { "Founding Member #\($0)" }
+        isFoundingMember ? "Founding Member" : nil
     }
 
     /// The fee as a person reads it: "0.30%".
@@ -187,7 +194,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
         }
         if isFoundingMember {
             return foundingBenefitActive
-                ? "Founding Member — $0/month"
+                ? "Founding Member — no subscription fee"
                 : "Founding Member — subscription applies"
         }
         switch paymentModel {
@@ -204,23 +211,27 @@ nonisolated struct CommercialState: Hashable, Sendable {
     var foundingBenefitMessage: String? {
         guard isFoundingMember else { return nil }
         return foundingBenefitActive
-            ? "Your Harbour South subscription is $0/month while you actively process customer payments through Harbour South."
-            : "Process a customer payment through Harbour South this month to maintain your Founding Member benefit."
+            ? "You pay no Harbour South subscription fee for as long as you keep processing at least one customer payment through Harbour South each calendar month."
+            : "Process a customer payment through Harbour South this month to resume your Founding Member benefit."
     }
 
-    /// What an unconnected company can honestly be told about the offer. Nil
-    /// when the hundred places are gone, so nothing promises a place that no
-    /// longer exists.
+    /// What a company that holds no place can honestly be told about the offer.
+    ///
+    /// Nil once the offer is closed, so nothing promises a benefit that is no
+    /// longer available. The wording states the commercial deal in full — no
+    /// subscription fee, but the platform fee and Stripe's fees still apply —
+    /// and deliberately reveals nothing about the size of the allocation or how
+    /// much of it is left.
     var foundingInvitation: String? {
         guard !isFoundingMember, foundingOfferOpen else { return nil }
-        return "Founding Members can receive $0/month while actively processing customer payments through Harbour South. \(foundingPlacesRemaining) of 100 places remain."
+        return "Founding Members pay no Harbour South subscription fee for as long as they keep processing at least one customer payment through Harbour South each calendar month. The \(platformFeeLabel) Harbour South payment fee and standard Stripe processing fees still apply."
     }
 
     /// What the trial ends with, given the model the company is on.
     var trialOutcomeMessage: String {
         switch paymentModel {
         case .harbourSouthPayments where isFoundingMember:
-            return "When your trial ends you stay on $0/month as a Founding Member, for as long as you process customer payments through Harbour South each month."
+            return "When your trial ends you pay no Harbour South subscription fee as a Founding Member, for as long as you keep processing at least one customer payment through Harbour South each calendar month."
         case .harbourSouthPayments:
             return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Customer card payments carry a \(platformFeeLabel) Harbour South fee."
         case .externalProvider:

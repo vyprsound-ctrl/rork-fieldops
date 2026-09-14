@@ -99,11 +99,8 @@ struct PaymentsIntegrationView: View {
                 )
             }
 
-            if let number = commercial.foundingMemberNumber {
-                FoundingMemberBadge(
-                    number: number,
-                    isBenefitActive: commercial.foundingBenefitActive
-                )
+            if commercial.isFoundingMember {
+                FoundingMemberBadge(isBenefitActive: commercial.foundingBenefitActive)
             }
 
             stripeSection(commercial)

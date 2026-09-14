@@ -656,18 +656,43 @@ extension SupabaseDataGateway {
         }
     }
 
+    /// ISSUE #2 — the Connect button reported "Something went wrong talking to
+    /// the server" even though Stripe had explained itself precisely.
+    ///
+    /// THE DEFECT, exactly: `stripe-connect` answers a Stripe rejection with
+    /// `{"error": "<Stripe's sentence>"}` and HTTP 400. The Supabase SDK treats
+    /// any non-2xx as a failure and **throws**, so the `if let error =
+    /// response.error` line below the call never executed. The thrown
+    /// `FunctionsError` then reached `DataError.wrap` → `translate`, which
+    /// recognises URLError, DecodingError and PostgrestError — but not
+    /// `FunctionsError` — and so fell through to its generic last line.
+    ///
+    /// A previous pass added `functionErrorBody` but only wired it into the
+    /// *status* call, which never fails this way. The onboarding call, the one
+    /// the owner actually presses, still discarded Stripe's message. It is now
+    /// routed through `translateFunctionFailure` so the real sentence —
+    /// currently "You must complete your platform profile to use Connect…" —
+    /// reaches the owner, who is the only person who can act on it.
     func beginConnectOnboarding(
         session: TenantSession,
         businessType: ConnectBusinessType
     ) async throws -> URL {
         try require(.companyProfileManage, session, query: "payments.connect.onboard")
 
-        let response: ConnectResponse = try await client.functions.invoke(
-            "stripe-connect",
-            options: .init(
-                body: ConnectRequest(action: "onboard", businessType: businessType.wireValue)
+        let response: ConnectResponse
+        do {
+            response = try await client.functions.invoke(
+                "stripe-connect",
+                options: .init(
+                    body: ConnectRequest(action: "onboard", businessType: businessType.wireValue)
+                )
             )
-        )
+        } catch {
+            throw Self.translateFunctionFailure(
+                error,
+                fallback: "Stripe couldn't start setup just now. Try again in a moment."
+            )
+        }
 
         if let error = response.error { throw DataError.rejected(error) }
         guard let raw = response.url, let url = URL(string: raw) else {
@@ -681,10 +706,18 @@ extension SupabaseDataGateway {
     func connectDashboardLink(session: TenantSession) async throws -> URL {
         try require(.companyProfileManage, session, query: "payments.connect.dashboard")
 
-        let response: ConnectResponse = try await client.functions.invoke(
-            "stripe-connect",
-            options: .init(body: ConnectRequest(action: "dashboard"))
-        )
+        let response: ConnectResponse
+        do {
+            response = try await client.functions.invoke(
+                "stripe-connect",
+                options: .init(body: ConnectRequest(action: "dashboard"))
+            )
+        } catch {
+            throw Self.translateFunctionFailure(
+                error,
+                fallback: "Stripe couldn't open your dashboard just now. Try again in a moment."
+            )
+        }
 
         if let error = response.error { throw DataError.rejected(error) }
         guard let raw = response.url, let url = URL(string: raw) else {
@@ -1264,6 +1297,40 @@ extension SupabaseDataGateway {
             }
         }
         return nil
+    }
+
+    /// Turns an Edge Function failure into the most specific `DataError` the
+    /// evidence supports, so a caller never has to fall back to the generic
+    /// "something went wrong" line.
+    ///
+    /// Order matters: a message the server actually sent beats any guess this
+    /// app could make, a transport error is reported as offline, and only a
+    /// genuinely unrecognised failure reaches the caller's fallback sentence.
+    nonisolated static func translateFunctionFailure(_ error: Error, fallback: String) -> DataError {
+        if let dataError = error as? DataError { return dataError }
+
+        // Stripe's own words, or our function's refusal, verbatim.
+        if let message = functionErrorBody(error) { return .rejected(message) }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
+                 .cannotFindHost, .dataNotAllowed:
+                return .offline
+            case .timedOut:
+                return .unexpected("The server took too long to answer. Try again in a moment.")
+            default:
+                return .unexpected("The connection failed before the server answered.")
+            }
+        }
+
+        let text = error.localizedDescription.lowercased()
+        if text.contains("jwt") || text.contains("token is expired") {
+            return .unexpected("Your session has expired. Sign in again.")
+        }
+
+        print("[data] edge function failed: \(error)")
+        return .unexpected(fallback)
     }
 
     /// Recovers the `{"error": "…"}` sentence from a non-2xx Edge Function reply.

@@ -57,7 +57,8 @@ struct TravelModeView: View {
                 if env.travelTracker.state.isTracking || env.travelTracker.state.jobID == jobID {
                     TravelTrackingBadge(
                         state: env.travelTracker.state,
-                        pings: env.travelTracker.pingsThisLeg
+                        pings: env.travelTracker.pingsThisLeg,
+                        worker: env.terms.worker
                     )
 
                     // Offered only when it would actually change something:
