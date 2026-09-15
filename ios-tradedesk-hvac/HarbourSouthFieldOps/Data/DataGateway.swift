@@ -112,6 +112,20 @@ protocol DataGateway: Sendable {
     /// Stores one image against a job and writes its photo record.
     func attachJobMedia(session: TenantSession, jobID: String, upload: JobMediaUpload) async throws -> JobMediaResult
 
+    /// Stores one image sent in a conversation.
+    ///
+    /// A job-linked conversation passes its `jobID`, and the single row that
+    /// results is simultaneously the message attachment and that job's
+    /// permanent visual evidence — one upload, one object, both surfaces. A
+    /// general conversation passes `nil` and the image is anchored to the
+    /// thread alone, belonging to no job.
+    func attachMessageMedia(
+        session: TenantSession,
+        threadID: String,
+        jobID: String?,
+        upload: JobMediaUpload
+    ) async throws -> JobMediaResult
+
     /// A URL for an uploaded image, or `nil` when the image is held with the
     /// record itself or was never captured.
     func jobMediaURL(session: TenantSession, reference: String) async throws -> URL?

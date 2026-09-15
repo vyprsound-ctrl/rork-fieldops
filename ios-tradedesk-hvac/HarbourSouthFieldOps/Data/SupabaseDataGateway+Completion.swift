@@ -1,10 +1,38 @@
 import Foundation
 import Supabase
 
+/// An image filed against a job.
+///
+/// `thread_id` is deliberately absent rather than sent as null. A message
+/// attachment on a job conversation is stamped with its thread by
+/// `send_office_message` server-side, so this payload never has to name a
+/// column that exists only after migration 0011 — which keeps every existing
+/// job photo write working unchanged on a database that has not had it applied.
 private nonisolated struct JobMediaPayload: Encodable, Sendable {
     let id: String
     let company_id: String
     let job_id: String
+    let user_id: String
+    let storage_reference: String
+    let caption: String?
+    let kind: String
+    let captured_at: String
+}
+
+/// An image sent in a general conversation — one about no job at all.
+///
+/// `job_id` is omitted entirely so the column takes its null default, and
+/// `thread_id` is written here rather than left to the send function because
+/// the `job_photos_anchored` constraint requires an image to be anchored to
+/// something at the moment it is inserted.
+///
+/// This shape only works after migration 0011. Before it, the insert is
+/// refused by the surviving NOT NULL on `job_id`, and the caller reports that
+/// honestly instead of pretending the photo was stored.
+private nonisolated struct ThreadMediaPayload: Encodable, Sendable {
+    let id: String
+    let company_id: String
+    let thread_id: String
     let user_id: String
     let storage_reference: String
     let caption: String?
@@ -80,7 +108,13 @@ extension SupabaseDataGateway {
             )
             // A signature is part of the completion record, not an optional
             // extra, so a failure here stops the completion.
-            let result = try await storeMedia(session: session, jobID: jobID, upload: upload, allowInline: true)
+            let result = try await storeMedia(
+                session: session,
+                jobID: jobID,
+                threadID: nil,
+                upload: upload,
+                allowInline: true
+            )
             guard result.stored else {
                 throw DataError.unexpected("The signature couldn't be saved, so the job hasn't been completed.")
             }
@@ -102,7 +136,13 @@ extension SupabaseDataGateway {
         // 5. Photos. Reported individually; never allowed to block the finish.
         var media: [JobMediaResult] = []
         for upload in draft.photos {
-            let result = (try? await storeMedia(session: session, jobID: jobID, upload: upload, allowInline: true))
+            let result = (try? await storeMedia(
+                session: session,
+                jobID: jobID,
+                threadID: nil,
+                upload: upload,
+                allowInline: true
+            ))
                 ?? JobMediaResult(
                     id: upload.id,
                     kindTitle: upload.kind.title,
@@ -171,7 +211,37 @@ extension SupabaseDataGateway {
 
     func attachJobMedia(session: TenantSession, jobID: String, upload: JobMediaUpload) async throws -> JobMediaResult {
         try require(.jobPhotosCreate, session, query: "jobs.attachMedia")
-        return try await storeMedia(session: session, jobID: jobID, upload: upload, allowInline: true)
+        return try await storeMedia(session: session, jobID: jobID, threadID: nil, upload: upload, allowInline: true)
+    }
+
+    /// Stores an image sent in a conversation.
+    ///
+    /// ONE IMAGE, ONE ROW, TWO PURPOSES. When the conversation is about a job,
+    /// `jobID` is that job and the resulting row is ordinary job evidence — it
+    /// appears in the job's Photos section like any other photograph, and the
+    /// message simply references it. Nobody uploads the same picture twice and
+    /// there is no second copy to drift.
+    ///
+    /// When the conversation is general, the image is anchored to the thread
+    /// instead and belongs to no job.
+    func attachMessageMedia(
+        session: TenantSession,
+        threadID: String,
+        jobID: String?,
+        upload: JobMediaUpload
+    ) async throws -> JobMediaResult {
+        try require(.jobPhotosCreate, session, query: "messages.attachMedia")
+        // Inline storage is refused here. A `data:` blob inside a row is a
+        // reasonable last resort for a signature, but a general message image
+        // has to be a real object under the company's storage prefix for the
+        // bucket policy to be the thing protecting it.
+        return try await storeMedia(
+            session: session,
+            jobID: jobID,
+            threadID: threadID,
+            upload: upload,
+            allowInline: jobID != nil
+        )
     }
 
     /// Stores one image and writes its `job_photos` row.
@@ -180,9 +250,16 @@ extension SupabaseDataGateway {
     /// bucket is not configured the bytes are stored with the record itself, so
     /// an engineer's photo is never silently discarded — and the row says which
     /// of the two happened.
+    ///
+    /// THE OBJECT KEY CARRIES THE TENANT. Every path starts with the company
+    /// id, because that first segment is what the `job-media` storage policies
+    /// pivot on. A general message image uses `<company>/threads/<thread>/…`,
+    /// which the existing policies already authorise — no bucket or policy
+    /// change was needed to support it.
     private func storeMedia(
         session: TenantSession,
-        jobID: String,
+        jobID: String?,
+        threadID: String?,
         upload: JobMediaUpload,
         allowInline: Bool
     ) async throws -> JobMediaResult {
@@ -190,11 +267,15 @@ extension SupabaseDataGateway {
         guard !upload.data.isEmpty else {
             return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Empty image.")
         }
+        guard jobID != nil || threadID != nil else {
+            return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Nowhere to file this photo.")
+        }
 
         var reference: String?
         var detail = ""
 
-        let path = "\(session.companyID)/\(jobID)/\(upload.id.uuidString.lowercased()).\(Self.fileExtension(for: upload.mimeType))"
+        let folder = jobID ?? "threads/\(threadID ?? "")"
+        let path = "\(session.companyID)/\(folder)/\(upload.id.uuidString.lowercased()).\(Self.fileExtension(for: upload.mimeType))"
         do {
             _ = try await client.storage
                 .from(JobMediaBucket.name)
@@ -213,19 +294,60 @@ extension SupabaseDataGateway {
         }
 
         func insert(kind: JobPhotoKind) async throws {
-            try await performWrite(
-                client.from("job_photos").insert(
-                    JobMediaPayload(
-                        id: upload.id.uuidString,
-                        company_id: session.companyID,
-                        job_id: jobID,
-                        user_id: session.userID,
-                        storage_reference: storageReference,
-                        caption: upload.caption.nilIfBlank,
-                        kind: kind.rawValue,
-                        captured_at: SupabaseCoding.timestamp(Date())
+            if let jobID {
+                // Job evidence, including a photo sent in a job conversation.
+                // The thread is stamped on server-side by `send_office_message`
+                // so this write never names a column that predates 0011.
+                try await performWrite(
+                    client.from("job_photos").insert(
+                        JobMediaPayload(
+                            id: upload.id.uuidString,
+                            company_id: session.companyID,
+                            job_id: jobID,
+                            user_id: session.userID,
+                            storage_reference: storageReference,
+                            caption: upload.caption.nilIfBlank,
+                            kind: kind.rawValue,
+                            captured_at: SupabaseCoding.timestamp(Date())
+                        )
                     )
                 )
+            } else {
+                try await performWrite(
+                    client.from("job_photos").insert(
+                        ThreadMediaPayload(
+                            id: upload.id.uuidString,
+                            company_id: session.companyID,
+                            thread_id: threadID ?? "",
+                            user_id: session.userID,
+                            storage_reference: storageReference,
+                            caption: upload.caption.nilIfBlank,
+                            kind: kind.rawValue,
+                            captured_at: SupabaseCoding.timestamp(Date())
+                        )
+                    )
+                )
+            }
+        }
+
+        /// What to tell somebody when the row is refused.
+        ///
+        /// A thread-scoped image needs migration 0011 — a nullable `job_id` and
+        /// a `thread_id` column. On a database without it the insert cannot
+        /// succeed by any retry, so the message says what is actually wrong
+        /// instead of blaming the photo. The image is never reported as sent.
+        func refusal(_ error: Error) -> JobMediaResult {
+            let isThreadScoped = jobID == nil
+            if isThreadScoped {
+                print("[data] a general-conversation image was refused by job_photos. Apply migration 0011 (nullable job_id + thread_id): \(error.localizedDescription)")
+            }
+            return JobMediaResult(
+                id: upload.id,
+                kindTitle: upload.kind.title,
+                stored: false,
+                detail: isThreadScoped
+                    ? "Photos in general conversations aren't switched on for this company yet."
+                    : ((error as? DataError)?.errorDescription ?? "The job record refused the photo.")
             )
         }
 
@@ -233,31 +355,20 @@ extension SupabaseDataGateway {
             try await insert(kind: upload.kind)
         } catch {
             // The newer categories (During, Damage, Property, Equipment) are
-            // added to `job_photo_kind` by migration 0010. A build can reach a
-            // database where that has not been applied yet, and the image is
-            // already uploaded by this point — discarding a photograph of a
-            // fault because of a schema lag would be the worst possible
-            // outcome. Retry once with a label the enum has always contained.
+            // added to `job_photo_kind` by migration 0010, folded into 0011. A
+            // build can reach a database where that has not been applied yet,
+            // and the image is already uploaded by this point — discarding a
+            // photograph of a fault because of a schema lag would be the worst
+            // possible outcome. Retry once with a label the enum has always
+            // contained.
             let fallback = upload.kind.storageFallback
-            guard fallback != upload.kind else {
-                return JobMediaResult(
-                    id: upload.id,
-                    kindTitle: upload.kind.title,
-                    stored: false,
-                    detail: (error as? DataError)?.errorDescription ?? "The job record refused the photo."
-                )
-            }
+            guard fallback != upload.kind else { return refusal(error) }
 
             do {
                 try await insert(kind: fallback)
-                print("[data] job_photo_kind '\(upload.kind.rawValue)' was refused; stored as '\(fallback.rawValue)'. Apply migration 0010.")
+                print("[data] job_photo_kind '\(upload.kind.rawValue)' was refused; stored as '\(fallback.rawValue)'. Apply migration 0011.")
             } catch {
-                return JobMediaResult(
-                    id: upload.id,
-                    kindTitle: upload.kind.title,
-                    stored: false,
-                    detail: (error as? DataError)?.errorDescription ?? "The job record refused the photo."
-                )
+                return refusal(error)
             }
         }
 

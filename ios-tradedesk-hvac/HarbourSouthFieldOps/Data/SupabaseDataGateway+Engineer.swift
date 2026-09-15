@@ -91,7 +91,11 @@ private nonisolated struct JobRecordCountRow: Decodable, Sendable {
 }
 
 private nonisolated struct JobPhotoCountRow: Decodable, Sendable {
-    let jobID: UUID
+    /// Null for an image sent in a general conversation. The query that reads
+    /// this filters on a set of job ids, so such a row cannot come back here —
+    /// but decoding it as optional means a schema that permits null can never
+    /// fail an entire job list's photo counts.
+    let jobID: UUID?
     let kind: JobPhotoKind
 
     enum CodingKeys: String, CodingKey {
@@ -375,7 +379,7 @@ extension SupabaseDataGateway {
                 client.from("job_photos").select(JobPhotoCountRow.columns).in("job_id", values: ids)
             )
             for row in rows {
-                let key = row.jobID.uuidString
+                guard let key = row.jobID?.uuidString else { continue }
                 if row.kind == .proof {
                     signed.insert(key)
                 } else {

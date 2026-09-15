@@ -9,19 +9,21 @@ import UIKit
 /// condenser settles a question that three messages cannot.
 ///
 /// PHOTOGRAPHS ARE JOB EVIDENCE FIRST
-/// An attached image is stored as a `job_photos` row against the conversation's
-/// job and then referenced by the message. That is deliberate: the photo a
-/// worker sends the office becomes part of the job's permanent record without
-/// anybody uploading it twice, and it inherits the job's company scoping rather
-/// than needing a second security model. It also means attachments are only
-/// offered on a job-linked thread — `job_photos.job_id` is NOT NULL, so there
-/// is nowhere to legitimately put an image from a general enquiry.
+/// An attached image is stored as a `job_photos` row and then referenced by the
+/// message. On a job-linked conversation that row carries the job too, so the
+/// photo a worker sends the office becomes part of that job's permanent record
+/// without anybody uploading it twice, and it inherits the job's company
+/// scoping rather than needing a second security model.
+///
+/// GENERAL CONVERSATIONS CARRY IMAGES TOO
+/// A conversation about no job anchors its images to the thread instead. The
+/// attachment control is therefore offered on EVERY conversation — it is never
+/// conditioned on the job, in either direction, for either role.
 struct OfficeConversationView: View {
     let threadID: String
 
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = OfficeConversationViewModel()
-    @State private var isAttachingPhotos: Bool = false
     @FocusState private var isComposerFocused: Bool
 
     private var session: TenantSession? { env.activeSession }
@@ -159,12 +161,16 @@ struct OfficeConversationView: View {
             if message.isMine { Spacer(minLength: 40) }
 
             VStack(alignment: message.isMine ? .trailing : .leading, spacing: 6) {
-                Text(message.body)
-                    .font(.subheadline)
-                    .foregroundStyle(message.isMine ? .white : Theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // An image-only message has no text at all. Rendering an empty
+                // `Text` would leave a blank line above the photo.
+                if !message.body.isEmpty {
+                    Text(message.body)
+                        .font(.subheadline)
+                        .foregroundStyle(message.isMine ? .white : Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 if !message.photoReferences.isEmpty {
                     HStack(spacing: 6) {
@@ -191,7 +197,22 @@ struct OfficeConversationView: View {
             if !message.isMine { Spacer(minLength: 40) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(message.senderName), \(message.timeLabel). \(message.body)")
+        .accessibilityLabel(Self.spokenLabel(for: message))
+    }
+
+    /// What VoiceOver reads for one message.
+    ///
+    /// A photo is content, so it is announced. An image-only message would
+    /// otherwise be read as the sender's name and a time with nothing in it.
+    private static func spokenLabel(for message: OfficeMessageRow) -> String {
+        var parts = ["\(message.senderName), \(message.timeLabel)"]
+        if !message.body.isEmpty { parts.append(message.body) }
+        switch message.photoReferences.count {
+        case 0: break
+        case 1: parts.append("1 photo")
+        case let count: parts.append("\(count) photos")
+        }
+        return parts.joined(separator: ". ")
     }
 
     private func composer(_ conversation: OfficeConversation) -> some View {
@@ -211,28 +232,18 @@ struct OfficeConversationView: View {
             }
 
             HStack(alignment: .bottom, spacing: 10) {
-                // Only offered on a job-linked thread: an attachment is stored
-                // as evidence against that job, and `job_photos.job_id` cannot
-                // be null, so there is nowhere to file a photo from a general
-                // enquiry. Hiding the control beats failing after the fact.
-                if conversation.jobID != nil {
-                    Button {
-                        isComposerFocused = false
-                        isAttachingPhotos = true
-                    } label: {
-                        Image(systemName: "camera.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.primary)
-                            .frame(width: 44, height: 44)
-                            .background(Theme.primaryTint)
-                            .clipShape(.circle)
-                    }
-                    .buttonStyle(PressableTileStyle())
-                    .disabled(viewModel.isSending)
-                    .accessibilityLabel("Attach photos")
-                }
+                // Offered on EVERY conversation, job-linked or not, to both
+                // sides. A general thread files its images against the thread;
+                // a job thread files them against the job as well, so the same
+                // single upload is the attachment and the job's evidence.
+                MessagePhotoPicker(
+                    onPicked: { uploads in
+                        viewModel.pendingUploads.append(contentsOf: uploads)
+                    },
+                    isDisabled: viewModel.isSending
+                )
 
-                TextField("Message the office", text: $viewModel.draftBody, axis: .vertical)
+                TextField(placeholder, text: $viewModel.draftBody, axis: .vertical)
                     .font(.subheadline)
                     .lineLimit(1...5)
                     .padding(.horizontal, 14)
@@ -253,6 +264,8 @@ struct OfficeConversationView: View {
                             gateway: env.gateway,
                             session: session,
                             threadID: threadID,
+                            // Taken from the conversation, so an image can never
+                            // be filed against a job this thread is not about.
                             jobID: conversation.jobID
                         )
                     }
@@ -267,23 +280,25 @@ struct OfficeConversationView: View {
                     }
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(canSend ? Theme.primary : Theme.primary.opacity(0.35))
+                    .background(viewModel.canSend ? Theme.primary : Theme.primary.opacity(0.35))
                     .clipShape(.circle)
                 }
                 .buttonStyle(PressableTileStyle())
-                .disabled(!canSend)
+                .disabled(!viewModel.canSend)
                 .accessibilityLabel("Send message")
+                .accessibilityIdentifier("composer.send")
             }
         }
         .padding(.horizontal, Theme.margin)
         .padding(.top, 8)
         .padding(.bottom, 6)
         .background(.bar)
-        .sheet(isPresented: $isAttachingPhotos) {
-            AddPhotoSheet { uploads in
-                viewModel.pendingUploads.append(contentsOf: uploads)
-            }
-        }
+    }
+
+    /// Says what the box is for in the sender's own terms. An office user
+    /// messaging an engineer is not "messaging the office".
+    private var placeholder: String {
+        usesFieldShell ? "Message the office" : "Message your engineer"
     }
 
     /// The images waiting to go, each removable before sending.
@@ -320,11 +335,6 @@ struct OfficeConversationView: View {
             }
         }
         .frame(height: 68)
-    }
-
-    private var canSend: Bool {
-        !viewModel.draftBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !viewModel.isSending
     }
 
     private func reload(showLoading: Bool = true) async {

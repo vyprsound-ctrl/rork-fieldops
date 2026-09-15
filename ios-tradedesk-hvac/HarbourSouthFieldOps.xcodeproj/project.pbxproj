@@ -412,10 +412,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Harbour South uses the camera so you can photograph equipment and completed work and attach those photos to the job you are on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Harbour South uses the camera so you can photograph equipment and completed work, attach those photos to the job you are on, and send them to your office in a message.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Harbour South uses your location while travelling to and working on assigned jobs so your office can track your job status and provide accurate arrival information. Allowing this while your phone is locked keeps your arrival time accurate on the drive. Sharing starts when you tap Start Travel and stops as soon as you mark yourself arrived.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Harbour South uses your location while travelling to and working on assigned jobs so your office can track your job status and provide accurate arrival information. Your position is shared while you are travelling to a job, and recorded when you start travel, arrive and complete. It is not recorded at any other time.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Harbour South lets you attach photos from your library to a job when you did not take them with the camera.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Harbour South lets you attach photos from your library to a job, or send them to your office and your engineers in a message, when you did not take them with the camera.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -452,10 +452,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Harbour South uses the camera so you can photograph equipment and completed work and attach those photos to the job you are on.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Harbour South uses the camera so you can photograph equipment and completed work, attach those photos to the job you are on, and send them to your office in a message.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Harbour South uses your location while travelling to and working on assigned jobs so your office can track your job status and provide accurate arrival information. Allowing this while your phone is locked keeps your arrival time accurate on the drive. Sharing starts when you tap Start Travel and stops as soon as you mark yourself arrived.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Harbour South uses your location while travelling to and working on assigned jobs so your office can track your job status and provide accurate arrival information. Your position is shared while you are travelling to a job, and recorded when you start travel, arrive and complete. It is not recorded at any other time.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Harbour South lets you attach photos from your library to a job when you did not take them with the camera.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Harbour South lets you attach photos from your library to a job, or send them to your office and your engineers in a message, when you did not take them with the camera.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

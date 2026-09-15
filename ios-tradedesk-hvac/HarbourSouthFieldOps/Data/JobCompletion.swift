@@ -126,6 +126,16 @@ extension DataGateway {
         throw DataError.rejected(Self.completionUnavailable)
     }
 
+    /// Attaches a photo captured on the device to a conversation.
+    func attachMessageMedia(
+        session: TenantSession,
+        threadID: String,
+        jobID: String?,
+        upload: JobMediaUpload
+    ) async throws -> JobMediaResult {
+        throw DataError.rejected(Self.completionUnavailable)
+    }
+
     /// A URL the app may load an uploaded photo from, or `nil` when the media is
     /// held inline or was never captured.
     func jobMediaURL(session: TenantSession, reference: String) async throws -> URL? { nil }

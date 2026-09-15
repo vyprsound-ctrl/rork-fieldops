@@ -338,7 +338,11 @@ nonisolated struct MockDataStore: Sendable {
             // Attached to a message in thread thr_1 as well as to the job, which
             // is the point of the shared media model: one upload, visible both
             // in the conversation and in the job's permanent evidence.
-            JobPhoto(id: "pho_4", companyID: c1, jobID: "job_1042", userID: "usr_marcus", storageReference: "sim://jobs/1042/condenser.jpg", caption: "Seized fan motor and bulging capacitor", kind: .before, capturedAt: at(10, 12))
+            JobPhoto(id: "pho_4", companyID: c1, jobID: "job_1042", userID: "usr_marcus", storageReference: "sim://jobs/1042/condenser.jpg", caption: "Seized fan motor and bulging capacitor", kind: .before, capturedAt: at(10, 12), threadID: "thr_1"),
+            // The other half of the model: an image sent in a GENERAL
+            // conversation. It has no job at all, so it is anchored to the
+            // thread alone and must never appear in any job's evidence.
+            JobPhoto(id: "pho_5", companyID: c1, jobID: nil, userID: "usr_marcus", storageReference: "sim://threads/thr_4/van-park.jpg", caption: "Where the van is parked", kind: .other, capturedAt: daysAgo(1), threadID: "thr_4")
         ]
 
         let workerLocations = [
@@ -489,13 +493,27 @@ nonisolated struct MockDataStore: Sendable {
                 lastReadByEngineerAt: at(9, 5),
                 lastReadByOfficeAt: at(9, 6)
             ),
-            // No job: proves the composer hides attachments when there is no
-            // job to file the evidence against.
+            // No job. A general conversation still carries images — they are
+            // anchored to the thread rather than to a job.
             DevOfficeThread(
                 id: "thr_3",
                 companyID: c1,
                 engineerUserID: "usr_dee",
                 subject: "Timesheet question",
+                jobID: nil,
+                customerID: nil,
+                lastMessageAt: daysAgo(1),
+                lastReadByEngineerAt: daysAgo(1),
+                lastReadByOfficeAt: daysAgo(1)
+            ),
+            // A general conversation belonging to Marcus, carrying a photo that
+            // belongs to no job. This is the case that was impossible before
+            // migration 0011, so it is seeded explicitly and asserted on.
+            DevOfficeThread(
+                id: "thr_4",
+                companyID: c1,
+                engineerUserID: "usr_marcus",
+                subject: "Van parking at the depot",
                 jobID: nil,
                 customerID: nil,
                 lastMessageAt: daysAgo(1),
@@ -509,7 +527,9 @@ nonisolated struct MockDataStore: Sendable {
             DevOfficeMessage(id: "omsg_2", companyID: c1, threadID: "thr_1", senderUserID: "usr_dispatch", body: "Thanks Marcus. Quote Q-2087 is already with the customer — hold until they approve.", jobPhotoIDs: [], createdAt: at(10, 18)),
             DevOfficeMessage(id: "omsg_3", companyID: c1, threadID: "thr_2", senderUserID: "usr_marcus", body: "Front desk says the roof key is signed out. Who has it?", jobPhotoIDs: [], createdAt: at(9, 2)),
             DevOfficeMessage(id: "omsg_4", companyID: c1, threadID: "thr_2", senderUserID: "usr_owner", body: "Roy keeps it behind reception. Ask for him by name.", jobPhotoIDs: [], createdAt: at(9, 5)),
-            DevOfficeMessage(id: "omsg_5", companyID: c1, threadID: "thr_3", senderUserID: "usr_dee", body: "Do call-outs after 6pm go on this week or next?", jobPhotoIDs: [], createdAt: daysAgo(1))
+            DevOfficeMessage(id: "omsg_5", companyID: c1, threadID: "thr_3", senderUserID: "usr_dee", body: "Do call-outs after 6pm go on this week or next?", jobPhotoIDs: [], createdAt: daysAgo(1)),
+            // An image on a general conversation, with text.
+            DevOfficeMessage(id: "omsg_6", companyID: c1, threadID: "thr_4", senderUserID: "usr_marcus", body: "Parked in the far bay again.", jobPhotoIDs: ["pho_5"], createdAt: daysAgo(1))
         ]
 
         return MockDataStore(

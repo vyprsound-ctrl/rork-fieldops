@@ -348,7 +348,8 @@ nonisolated struct JobNoteRecord: Decodable, Sendable {
 
 nonisolated struct JobPhotoRecord: Decodable, Sendable {
     let id: UUID
-    let jobID: UUID
+    /// Null for an image sent in a general conversation, which is about no job.
+    let jobID: UUID?
     let userID: UUID?
     let storageReference: String
     let caption: String?
@@ -363,6 +364,14 @@ nonisolated struct JobPhotoRecord: Decodable, Sendable {
         case capturedAt = "captured_at"
     }
 
+    /// `thread_id` is deliberately not selected.
+    ///
+    /// Nothing in the app needs to read it: a conversation resolves its
+    /// attachments through `office_messages.job_photo_ids`, and the job
+    /// evidence screen reads by `job_id`. Naming a column that exists only
+    /// after migration 0011 would fail every photo read on a database where
+    /// that migration has not been applied — a far worse outcome than not
+    /// having a value nothing asks for.
     static let columns = "id,job_id,user_id,storage_reference,caption,kind,captured_at"
 }
 

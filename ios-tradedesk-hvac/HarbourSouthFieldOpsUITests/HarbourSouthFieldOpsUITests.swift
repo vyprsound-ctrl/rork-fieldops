@@ -422,25 +422,107 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         )
     }
 
-    /// Photographs attached to a message are stored as job evidence, so the
-    /// composer only offers the control where there is a job to file them
-    /// against — `job_photos.job_id` cannot be null.
-    func testMessageComposerOffersPhotosOnlyOnJobLinkedThreads() throws {
+    // MARK: - Message image attachments
+    //
+    // THE DEFECT THESE EXIST FOR: Build 14 shipped with NO visible photo control
+    // on a general conversation, because the composer hid it whenever the thread
+    // had no job. The previous version of this test asserted that hiding was
+    // correct — it was not; it was a workaround for `job_photos.job_id` being
+    // NOT NULL, which migration 0011 fixes. A test that enshrines a workaround
+    // is worse than no test, so it has been replaced by its opposite.
+
+    /// The control must be visible on a JOB-LINKED conversation, for the worker.
+    func testFieldWorkerSeesPhotoControlOnJobConversation() throws {
         signIn(as: "Marcus Hale")
         openTab("Office")
         require(app.navigationBars["Office"], "the field worker's Office tab")
 
         openThread("Condenser fan motor")
-        XCTAssertTrue(
-            app.buttons["Attach photos"].waitForExistence(timeout: 15),
-            "A job-linked conversation must offer photo attachment"
-        )
+        assertPhotoControlIsVisible(in: "a job-linked conversation, as the field worker")
 
-        // An existing attachment must render in the thread.
+        // An existing attachment must still render alongside its text.
         XCTAssertTrue(
             app.staticTexts["Fan motor is seized and the capacitor is bulging. Photo attached."]
                 .waitForExistence(timeout: 15),
             "A message carrying a photo must still display its text"
+        )
+    }
+
+    /// The control must be visible on a GENERAL conversation, for the worker.
+    ///
+    /// This is the exact case that was broken in the shipping binary: no job,
+    /// therefore no button, therefore no way to send a picture at all.
+    func testFieldWorkerSeesPhotoControlOnGeneralConversation() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Van parking at the depot")
+
+        // Prove it really is a general conversation before asserting anything:
+        // a job-linked thread announces its job, and this one must not.
+        XCTAssertFalse(
+            app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "About job")).firstMatch.exists,
+            "'Van parking at the depot' is seeded with no job — it must not claim one"
+        )
+        assertPhotoControlIsVisible(in: "a general conversation, as the field worker")
+    }
+
+    /// The same two cases from the other side. Image messaging is not
+    /// directional, so the office must see the control in both.
+    func testOwnerSeesPhotoControlOnBothConversationKinds() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Messages")
+        require(app.navigationBars["Messages"], "the Messages inbox")
+
+        // Job-linked.
+        openThread("Condenser fan motor")
+        assertJobContext(is: "J-1042")
+        assertPhotoControlIsVisible(in: "a job-linked conversation, as the owner")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        require(app.navigationBars["Messages"], "the Messages inbox again")
+
+        // General.
+        openThread("Van parking at the depot")
+        assertPhotoControlIsVisible(in: "a general conversation, as the owner")
+    }
+
+    /// An image sent on a general conversation renders in the thread and is not
+    /// text-only — the seeded general message carries a photo.
+    func testGeneralConversationRendersItsImage() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Van parking at the depot")
+        XCTAssertTrue(
+            app.staticTexts["Parked in the far bay again."].waitForExistence(timeout: 15),
+            "The general conversation's message must be readable"
+        )
+    }
+
+    /// Asserts the composer's photo control exists AND is usable.
+    ///
+    /// Existence alone is not enough: a control that is present but permanently
+    /// disabled is the same defect wearing a different hat.
+    private func assertPhotoControlIsVisible(
+        in context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let control = app.buttons["composer.attachPhotos"]
+        XCTAssertTrue(
+            control.waitForExistence(timeout: 20),
+            "The photo attachment control must be visible in \(context)",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            control.isEnabled,
+            "The photo attachment control must be usable in \(context), not merely present",
+            file: file,
+            line: line
         )
     }
 

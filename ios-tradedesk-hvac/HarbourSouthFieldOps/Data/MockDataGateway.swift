@@ -3914,14 +3914,20 @@ actor MockDataGateway: DataGateway {
         try await Task.sleep(for: latency)
 
         let body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { throw DataError.rejected("Write a message first.") }
+        // A message must say something — in words, in pictures, or both. A
+        // photograph of a failed part IS the message.
+        guard !body.isEmpty || !draft.photoIDs.isEmpty else {
+            throw DataError.rejected("Write a message or attach a photo.")
+        }
 
         let threadID: String
+        var threadJobID: String?
         if let existing = draft.threadID {
             guard let thread = readableThreads(session).first(where: { $0.id == existing }) else {
                 throw DataError.notFound
             }
             threadID = thread.id
+            threadJobID = thread.jobID
         } else {
             // A new thread always belongs to a field worker: either the sender,
             // or — when the office starts it — the worker on the job.
@@ -3947,6 +3953,33 @@ actor MockDataGateway: DataGateway {
             )
             store.officeThreads.append(new)
             threadID = new.id
+            threadJobID = new.jobID
+        }
+
+        // Attachments are validated as a set, mirroring `send_office_message`.
+        // Silently dropping one would tell the sender their photo went when it
+        // did not; silently keeping an unrelated one would be a leak. Either
+        // every id checks out or the whole message is refused.
+        if !draft.photoIDs.isEmpty {
+            let valid = draft.photoIDs.allSatisfy { id in
+                guard let photo = store.jobPhotos.first(where: { $0.id == id }) else { return false }
+                return photo.companyID == session.companyID
+                    && photo.userID == session.userID
+                    && photo.jobID == threadJobID
+                    && (photo.threadID == nil || photo.threadID == threadID)
+            }
+            guard valid else {
+                record("engineer.sendOfficeMessage", session, allowed: false, "Refused — an attachment did not belong to this conversation")
+                throw DataError.rejected("One of those photos could not be attached to this conversation.")
+            }
+
+            // Stamp the conversation onto images uploaded before it existed,
+            // which is the normal case when a message opens a new thread.
+            for index in store.jobPhotos.indices where draft.photoIDs.contains(store.jobPhotos[index].id) {
+                if store.jobPhotos[index].threadID == nil {
+                    store.jobPhotos[index].threadID = threadID
+                }
+            }
         }
 
         store.officeMessages.append(
@@ -3956,11 +3989,7 @@ actor MockDataGateway: DataGateway {
                 threadID: threadID,
                 senderUserID: session.userID,
                 body: body,
-                // Only photos that genuinely belong to this company are carried,
-                // so a fabricated id cannot pull another tenant's image in.
-                jobPhotoIDs: draft.photoIDs.filter { id in
-                    store.jobPhotos.contains { $0.id == id && $0.companyID == session.companyID }
-                },
+                jobPhotoIDs: draft.photoIDs,
                 createdAt: Date()
             )
         )
@@ -4194,6 +4223,72 @@ actor MockDataGateway: DataGateway {
             kindTitle: upload.kind.title,
             stored: true,
             detail: "Stored with the job record (\(upload.sizeLabel))"
+        )
+    }
+
+    /// Stores an image sent in a conversation.
+    ///
+    /// This mirrors the production rule exactly, because the rule is the
+    /// feature: a job conversation produces ONE row carrying both the job and
+    /// the thread, so the picture is the message attachment and the job's
+    /// evidence at the same time. A general conversation produces a row with no
+    /// job at all, which is precisely what migration 0011 makes possible.
+    func attachMessageMedia(
+        session: TenantSession,
+        threadID: String,
+        jobID: String?,
+        upload: JobMediaUpload
+    ) async throws -> JobMediaResult {
+        try await Task.sleep(for: latency)
+        try require(.jobPhotosCreate, session, query: "messages.attachMedia")
+
+        // The conversation has to be one this caller may actually post in.
+        guard let thread = readableThreads(session).first(where: { $0.id == threadID }) else {
+            record("messages.attachMedia", session, allowed: false, "Thread not readable by this caller")
+            throw DataError.notFound
+        }
+
+        // The job is taken from the thread, never from the caller. A forged job
+        // id cannot file an image against somebody else's work.
+        let resolvedJobID = thread.jobID
+        if let resolvedJobID, session.can(.jobsReadAssignedOnly), !session.can(.jobsReadAll),
+           !assignedJobIDs(session).contains(resolvedJobID) {
+            record("messages.attachMedia", session, allowed: false, "Job is not assigned to this field worker")
+            throw DataError.notFound
+        }
+
+        guard !upload.data.isEmpty else {
+            return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Empty image.")
+        }
+
+        let caption = upload.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.jobPhotos.append(
+            JobPhoto(
+                id: upload.id.uuidString,
+                companyID: session.companyID,
+                jobID: resolvedJobID,
+                userID: session.userID,
+                storageReference: JobMediaReference.inline(upload.data, mimeType: upload.mimeType),
+                caption: caption.isEmpty ? nil : caption,
+                kind: upload.kind,
+                capturedAt: Date(),
+                threadID: thread.id
+            )
+        )
+
+        record(
+            "messages.attachMedia",
+            session,
+            allowed: true,
+            resolvedJobID == nil
+                ? "\(upload.kind.title) image attached to a general conversation"
+                : "\(upload.kind.title) image attached to the conversation and filed as job evidence"
+        )
+        return JobMediaResult(
+            id: upload.id,
+            kindTitle: upload.kind.title,
+            stored: true,
+            detail: "Sent (\(upload.sizeLabel))"
         )
     }
 }

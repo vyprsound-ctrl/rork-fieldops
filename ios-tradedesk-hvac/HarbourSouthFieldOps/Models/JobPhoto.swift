@@ -79,13 +79,53 @@ nonisolated enum JobPhotoKind: String, Codable, Sendable, CaseIterable {
     }
 }
 
+/// One stored image.
+///
+/// ANCHORING
+/// An image is anchored to a job, to a conversation, or to both — and the pair
+/// is what makes a single upload serve two purposes:
+///
+///   job only      evidence added from the job screen or the completion flow
+///   thread only   an image sent in a general conversation, about no job
+///   both          an image sent in a job conversation: it is the message
+///                 attachment AND that job's permanent visual evidence, stored
+///                 once rather than uploaded twice
+///
+/// `jobID` is therefore optional. Migration 0011 relaxes the matching NOT NULL
+/// in the database; a build older than that migration simply never writes a row
+/// without one.
 nonisolated struct JobPhoto: Identifiable, Codable, Hashable, Sendable {
     let id: String
     let companyID: String
-    let jobID: String
+    let jobID: String?
     let userID: String
     var storageReference: String
     var caption: String?
     var kind: JobPhotoKind
     var capturedAt: Date
+    /// The conversation this image was sent in, when it was sent as a message
+    /// attachment. Never set for evidence added directly to a job.
+    var threadID: String?
+
+    init(
+        id: String,
+        companyID: String,
+        jobID: String?,
+        userID: String,
+        storageReference: String,
+        caption: String? = nil,
+        kind: JobPhotoKind,
+        capturedAt: Date,
+        threadID: String? = nil
+    ) {
+        self.id = id
+        self.companyID = companyID
+        self.jobID = jobID
+        self.userID = userID
+        self.storageReference = storageReference
+        self.caption = caption
+        self.kind = kind
+        self.capturedAt = capturedAt
+        self.threadID = threadID
+    }
 }

@@ -971,6 +971,362 @@ struct JobPhotoKindTests {
     }
 }
 
+// MARK: - Message image attachments
+
+/// Images sent in a conversation, in both directions and in both kinds of
+/// conversation.
+///
+/// THE RULE BEING TESTED
+/// A job-linked conversation produces ONE `job_photos` row carrying BOTH the
+/// job and the thread — so the picture is the message attachment and that
+/// job's permanent evidence at the same time, with no second upload. A general
+/// conversation produces a row with no job at all, which was impossible before
+/// migration 0011 because `job_photos.job_id` was NOT NULL.
+///
+/// These run against `MockDataGateway`, which enforces the same tenancy,
+/// assignment and attachment-validation rules as the database. That is not the
+/// production RLS — only the live database can prove that — but it does prove
+/// the app asks for the right thing and refuses the wrong thing.
+struct MessageAttachmentTests {
+
+    private func session(_ userID: String, _ role: Role) -> TenantSession {
+        TenantSession(
+            userID: userID,
+            companyID: "cmp_gulfcoast",
+            role: role,
+            displayName: userID,
+            email: "\(userID)@gulfcoastair.com",
+            trade: .hvac
+        )
+    }
+
+    private var owner: TenantSession { session("usr_owner", .owner) }
+    private var worker: TenantSession { session("usr_marcus", .fieldWorker) }
+
+    private func upload() -> JobMediaUpload {
+        JobMediaUpload(kind: .other, data: Data([0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02]))
+    }
+
+    // ---------------------------------------------------------------- general
+
+    /// The case the whole migration exists for: an image on a conversation
+    /// about no job.
+    @Test("A general conversation accepts an image with no job at all")
+    func generalThreadImageHasNoJob() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+
+        let result = try await gateway.attachMessageMedia(
+            session: worker,
+            threadID: "thr_4",
+            jobID: nil,
+            upload: image
+        )
+        #expect(result.stored)
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_4"
+        draft.body = "Parked round the back today."
+        draft.photoIDs = [image.id.uuidString]
+        _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
+
+        let conversation = try await gateway.officeConversation(session: worker, threadID: "thr_4")
+        #expect(conversation.jobID == nil, "thr_4 is the general conversation")
+        let sent = try #require(conversation.messages.last)
+        #expect(sent.photoReferences.count == 1, "the image must come back attached to the message")
+    }
+
+    /// A general image must not leak into any job's evidence — it belongs to no
+    /// job, and a job screen that showed it would be wrong.
+    @Test("A general conversation image never appears in a job's evidence")
+    func generalImageIsNotJobEvidence() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+        _ = try await gateway.attachMessageMedia(
+            session: worker,
+            threadID: "thr_4",
+            jobID: nil,
+            upload: image
+        )
+
+        for jobID in ["job_1042", "job_1043", "job_1041"] {
+            let detail = try await gateway.jobDetail(session: owner, jobID: jobID)
+            #expect(
+                detail.photos.contains { $0.id == image.id.uuidString } == false,
+                "a general message image must never be filed against \(jobID)"
+            )
+        }
+    }
+
+    // ------------------------------------------------------------- job-linked
+
+    /// One upload, two surfaces. This is the acceptance criterion.
+    @Test("An image sent in a job conversation is the attachment AND job evidence")
+    func jobThreadImageIsBothAttachmentAndEvidence() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+
+        _ = try await gateway.attachMessageMedia(
+            session: worker,
+            threadID: "thr_1",
+            jobID: "job_1042",
+            upload: image
+        )
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = "Here's the motor."
+        draft.photoIDs = [image.id.uuidString]
+        _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
+
+        // Surface one: the conversation.
+        let conversation = try await gateway.officeConversation(session: worker, threadID: "thr_1")
+        let sent = try #require(conversation.messages.last)
+        #expect(sent.photoReferences.count == 1)
+
+        // Surface two: the job's permanent evidence — the SAME photo id, not a
+        // copy, which is what proves there was only ever one upload.
+        let detail = try await gateway.jobDetail(session: owner, jobID: "job_1042")
+        #expect(
+            detail.photos.contains { $0.id == image.id.uuidString },
+            "a photo sent in a job conversation must appear in that job's evidence"
+        )
+    }
+
+    /// Bidirectional. The office sends to the worker on the same thread and the
+    /// same two surfaces must hold — image messaging is not directional.
+    @Test("The office can send an image to a field worker, and it is job evidence too")
+    func officeToFieldWorkerImage() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+
+        _ = try await gateway.attachMessageMedia(
+            session: owner,
+            threadID: "thr_1",
+            jobID: "job_1042",
+            upload: image
+        )
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = "This is the replacement part we ordered."
+        draft.photoIDs = [image.id.uuidString]
+        _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
+
+        // The field worker — the recipient — must be able to read it.
+        let asWorker = try await gateway.officeConversation(session: worker, threadID: "thr_1")
+        let received = try #require(asWorker.messages.last)
+        #expect(received.photoReferences.count == 1, "the worker must receive the office's image")
+        #expect(received.isMine == false, "it is the office's message, not the worker's")
+
+        let detail = try await gateway.jobDetail(session: owner, jobID: "job_1042")
+        #expect(detail.photos.contains { $0.id == image.id.uuidString })
+    }
+
+    /// An image the office sends on a general thread reaches the worker too.
+    @Test("The office can send an image on a general conversation")
+    func officeToFieldWorkerGeneralImage() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+
+        _ = try await gateway.attachMessageMedia(
+            session: owner,
+            threadID: "thr_4",
+            jobID: nil,
+            upload: image
+        )
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_4"
+        draft.body = "Use bay 4 from Monday."
+        draft.photoIDs = [image.id.uuidString]
+        _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
+
+        let asWorker = try await gateway.officeConversation(session: worker, threadID: "thr_4")
+        let received = try #require(asWorker.messages.last)
+        #expect(received.photoReferences.count == 1)
+        #expect(received.isMine == false)
+    }
+
+    // ------------------------------------------------------------- image-only
+
+    /// A photograph of a failed part IS the message.
+    @Test("A message may carry images with no text")
+    func imageOnlyMessageIsAccepted() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+        _ = try await gateway.attachMessageMedia(
+            session: worker,
+            threadID: "thr_1",
+            jobID: "job_1042",
+            upload: image
+        )
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = ""
+        draft.photoIDs = [image.id.uuidString]
+        _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
+
+        let conversation = try await gateway.officeConversation(session: worker, threadID: "thr_1")
+        let sent = try #require(conversation.messages.last)
+        #expect(sent.body.isEmpty)
+        #expect(sent.photoReferences.count == 1)
+    }
+
+    /// Empty in both senses is still refused — relaxing the text rule must not
+    /// let a blank message through.
+    @Test("A message with neither text nor photos is refused")
+    func entirelyEmptyMessageIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = "   "
+
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
+        }
+    }
+
+    // -------------------------------------------------------------- security
+
+    /// The defect this fixes: `send_office_message` accepted whatever photo ids
+    /// the client sent. A photo from another job must not be attachable to this
+    /// conversation by naming its id.
+    @Test("A photo from an unrelated job cannot be attached to a conversation")
+    func foreignJobPhotoIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+
+        // pho_1 is real, same company, but belongs to job_1041 — while thr_1 is
+        // the conversation about job_1042.
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = "Trying to smuggle another job's photo in."
+        draft.photoIDs = ["pho_1"]
+
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
+        }
+    }
+
+    /// A general conversation carries images that belong to no job, so a job
+    /// photo cannot be attached to one either.
+    @Test("A job photo cannot be attached to a general conversation")
+    func jobPhotoOnGeneralThreadIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_4"
+        draft.body = "Wrong anchor."
+        draft.photoIDs = ["pho_4"]
+
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
+        }
+    }
+
+    /// A fabricated id must not produce a message that merely drops it — that
+    /// would tell the sender their photo went when it did not.
+    @Test("A fabricated photo id is refused rather than silently dropped")
+    func fabricatedPhotoIDIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+
+        var draft = OfficeMessageDraft()
+        draft.threadID = "thr_1"
+        draft.body = "Attaching something that does not exist."
+        draft.photoIDs = [UUID().uuidString]
+
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
+        }
+    }
+
+    /// A field worker cannot post an image into a conversation that is not
+    /// theirs, even inside their own company.
+    @Test("A field worker cannot attach an image to somebody else's conversation")
+    func foreignThreadIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+
+        // thr_3 belongs to Dee, not Marcus.
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.attachMessageMedia(
+                session: worker,
+                threadID: "thr_3",
+                jobID: nil,
+                upload: upload()
+            )
+        }
+    }
+
+    /// Cross-company isolation, asserted rather than assumed.
+    @Test("Another company's conversation is not reachable at all")
+    func crossCompanyThreadIsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let outsider = TenantSession(
+            userID: "usr_north_owner",
+            companyID: "cmp_northline",
+            role: .owner,
+            displayName: "Erin Vaught",
+            email: "erin@northlineplumbing.com",
+            trade: .plumbing
+        )
+
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.attachMessageMedia(
+                session: outsider,
+                threadID: "thr_1",
+                jobID: "job_1042",
+                upload: upload()
+            )
+        }
+        await #expect(throws: (any Error).self) {
+            _ = try await gateway.officeConversation(session: outsider, threadID: "thr_1")
+        }
+    }
+
+    /// The job is taken from the thread, never from the caller, so naming a
+    /// different job cannot misfile the evidence.
+    @Test("The thread decides the job, not the caller")
+    func threadDecidesTheJob() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let image = upload()
+
+        // thr_1 is about job_1042. Claim job_1043 instead.
+        _ = try await gateway.attachMessageMedia(
+            session: owner,
+            threadID: "thr_1",
+            jobID: "job_1043",
+            upload: image
+        )
+
+        let wrongJob = try await gateway.jobDetail(session: owner, jobID: "job_1043")
+        #expect(
+            wrongJob.photos.contains { $0.id == image.id.uuidString } == false,
+            "a caller-supplied job id must be ignored"
+        )
+
+        let rightJob = try await gateway.jobDetail(session: owner, jobID: "job_1042")
+        #expect(
+            rightJob.photos.contains { $0.id == image.id.uuidString },
+            "the image belongs to the job the conversation is actually about"
+        )
+    }
+
+    /// An empty image is reported as not stored rather than dressed up as a
+    /// success.
+    @Test("An empty image is reported as a failure, never as sent")
+    func emptyImageIsNotStored() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let result = try await gateway.attachMessageMedia(
+            session: worker,
+            threadID: "thr_1",
+            jobID: "job_1042",
+            upload: JobMediaUpload(kind: .other, data: Data())
+        )
+        #expect(result.stored == false)
+    }
+}
+
 /// The state that drives the Founding wording, rather than the wording itself.
 ///
 /// `CommercialState` decides WHICH sentence is shown; these assert it cannot
