@@ -30,8 +30,13 @@ struct FoundingMemberBadge: View {
     /// the server via `CommercialState` — this view never works it out.
     let isBenefitActive: Bool
     var size: Size = .full
+    /// The platform fee as a person reads it ("0.30%"). Passed in rather than
+    /// hard-coded so the rider always matches the company's actual fee.
+    var feeLabel: String = "0.30%"
 
-    private var badgeTitle: String { "Founding Member" }
+    /// All Founding wording comes from `FoundingCopy`, so this view cannot
+    /// drift away from the other screens that describe the same programme.
+    private var badgeTitle: String { FoundingCopy.badgeTitle }
 
     var body: some View {
         switch size {
@@ -79,7 +84,7 @@ struct FoundingMemberBadge: View {
                     .clipShape(.rect(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("HARBOUR SOUTH")
+                    Text(FoundingCopy.programme.uppercased())
                         .font(.caption2.weight(.bold))
                         .tracking(0.8)
                         .foregroundStyle(Theme.accentText)
@@ -100,24 +105,24 @@ struct FoundingMemberBadge: View {
 
             if isBenefitActive {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("You pay no Harbour South subscription fee for as long as you keep processing at least one customer payment through Harbour South each calendar month.")
+                    Text(FoundingCopy.benefitActive)
                         .font(.footnote)
                         .foregroundStyle(Theme.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("The 0.30% Harbour South payment fee and standard Stripe processing fees still apply.")
+                    Text(FoundingCopy.feeRider(feeLabel))
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Process a customer payment through Harbour South this month to resume your Founding Member benefit.")
+                    Text(FoundingCopy.benefitPaused)
                         .font(.footnote)
                         .foregroundStyle(Theme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     // Said plainly, because losing the status is the part people
                     // worry about, and it is the part that never goes.
-                    Text("Your Founding Member status is yours to keep — a quiet month never takes it away.")
+                    Text(FoundingCopy.statusKept)
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                         .fixedSize(horizontal: false, vertical: true)

@@ -126,10 +126,13 @@ struct SubscriptionView: View {
     /// ISSUE #3 — the Founding 100, stated in full and stated positively.
     ///
     /// Every rule here comes from `CommercialState`, which the database
-    /// computes: the number, whether the benefit is live this month, how many
-    /// places remain, and whether the offer is still open at all. This view
-    /// invents no rule and no new pricing tier — it explains what the server
-    /// has already decided.
+    /// computes: whether the benefit is live this month and whether the offer
+    /// is still open at all. This view invents no rule and no new pricing tier
+    /// — it explains what the server has already decided.
+    ///
+    /// The wording itself comes from `FoundingCopy`, and the allocation size,
+    /// the number of places left and the company's own member number are
+    /// deliberately never rendered here.
     ///
     /// The monthly reminder is deliberately worded as something to keep, not
     /// something about to be lost, and the reinstatement rule is stated plainly
@@ -139,7 +142,10 @@ struct SubscriptionView: View {
         if let commercial = viewModel.commercial {
             if commercial.isFoundingMember {
                 VStack(alignment: .leading, spacing: 10) {
-                    FoundingMemberBadge(isBenefitActive: commercial.foundingBenefitActive)
+                    FoundingMemberBadge(
+                        isBenefitActive: commercial.foundingBenefitActive,
+                        feeLabel: commercial.platformFeeLabel
+                    )
 
                     if let message = commercial.foundingBenefitMessage {
                         Text(message)
@@ -149,13 +155,13 @@ struct SubscriptionView: View {
                     }
 
                     if !commercial.foundingBenefitActive {
-                        Text("Take a customer payment through Harbour South in any month and the benefit applies again — a quiet month never costs you your Founding Member status.")
+                        Text(FoundingCopy.statusKept)
                             .font(.caption)
                             .foregroundStyle(Theme.meta)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Text("Founding Members pay no Harbour South subscription fee while active. The \(commercial.platformFeeLabel) Harbour South payment fee and standard Stripe processing fees still apply.")
+                    Text(FoundingCopy.feeRider(commercial.platformFeeLabel))
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                         .fixedSize(horizontal: false, vertical: true)
@@ -265,7 +271,7 @@ struct SubscriptionView: View {
                 .foregroundStyle(Theme.secondary)
 
             if let commercial = viewModel.commercial, commercial.foundingBenefitActive {
-                Text("Founding Member — your \(commercial.tierName) subscription of \(commercial.subscriptionPriceLabel)/month is $0 while you process customer payments through Harbour South.")
+                Text("Founding Member — your \(commercial.tierName) subscription of \(commercial.subscriptionPriceLabel)/month is $0 while you actively process customer payments through \(FoundingCopy.programme).")
                     .font(.caption)
                     .foregroundStyle(Theme.green)
                     .fixedSize(horizontal: false, vertical: true)

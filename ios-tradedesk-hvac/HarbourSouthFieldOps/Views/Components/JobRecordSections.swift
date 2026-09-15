@@ -152,15 +152,30 @@ struct JobPhotosSection: View {
     let canAdd: Bool
     let onAdd: () -> Void
 
+    /// The photo being viewed full screen, if any.
+    @State private var viewing: JobPhotoProjection?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Photos")
                     .sectionLabelStyle()
+                Spacer(minLength: 0)
                 if canAdd {
-                    Button("Add", action: onAdd)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Theme.primary)
+                    Button(action: onAdd) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "camera.fill")
+                            Text("Add Photos")
+                        }
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Theme.accentText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Theme.accentTint)
+                        .clipShape(.capsule)
+                    }
+                    .buttonStyle(PressableTileStyle())
+                    .accessibilityLabel("Add photos")
                 }
             }
 
@@ -173,29 +188,19 @@ struct JobPhotosSection: View {
                         .padding(14)
                 } else {
                     ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
-                        HStack(spacing: 12) {
-                            JobPhotoThumbnail(reference: photo.storageReference, size: 46)
+                        // Tappable, because evidence has to be readable: a
+                        // thumbnail cannot show a serial number or a hairline
+                        // crack. Only offered when there is a file behind the
+                        // reference, so the viewer never opens onto nothing.
+                        let hasImage = JobMediaReference.parse(photo.storageReference).hasImage
 
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(photo.caption ?? photo.kindTitle)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundStyle(Theme.ink)
-                                    .lineLimit(2)
-                                Text("\(photo.kindTitle) · \(photo.authorName) · \(photo.timeLabel)")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            // Only a reference with nothing behind it is called
-                            // out. A real image simply shows.
-                            if !JobMediaReference.parse(photo.storageReference).hasImage {
-                                SimulatedBadge(text: "No file")
-                            }
+                        Button {
+                            if hasImage { viewing = photo }
+                        } label: {
+                            photoRow(photo, hasImage: hasImage)
                         }
-                        .padding(14)
+                        .buttonStyle(.plain)
+                        .disabled(!hasImage)
 
                         if index < photos.count - 1 {
                             Divider().padding(.leading, 14)
@@ -206,6 +211,44 @@ struct JobPhotosSection: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .cardSurface()
         }
+        .fullScreenCover(item: $viewing) { photo in
+            JobPhotoViewer(
+                reference: photo.storageReference,
+                title: photo.caption ?? photo.kindTitle,
+                subtitle: "\(photo.kindTitle) · \(photo.authorName)"
+            )
+        }
+    }
+
+    private func photoRow(_ photo: JobPhotoProjection, hasImage: Bool) -> some View {
+        HStack(spacing: 12) {
+            JobPhotoThumbnail(reference: photo.storageReference, size: 46)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(photo.caption ?? photo.kindTitle)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(2)
+                Text("\(photo.kindTitle) · \(photo.authorName) · \(photo.timeLabel)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            // Only a reference with nothing behind it is called out. A real
+            // image simply shows.
+            if hasImage {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.meta)
+            } else {
+                SimulatedBadge(text: "No file")
+            }
+        }
+        .padding(14)
+        .contentShape(.rect)
     }
 }
 

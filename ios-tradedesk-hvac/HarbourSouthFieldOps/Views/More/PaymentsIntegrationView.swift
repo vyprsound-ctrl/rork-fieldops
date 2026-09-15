@@ -100,7 +100,10 @@ struct PaymentsIntegrationView: View {
             }
 
             if commercial.isFoundingMember {
-                FoundingMemberBadge(isBenefitActive: commercial.foundingBenefitActive)
+                FoundingMemberBadge(
+                    isBenefitActive: commercial.foundingBenefitActive,
+                    feeLabel: commercial.platformFeeLabel
+                )
             }
 
             stripeSection(commercial)

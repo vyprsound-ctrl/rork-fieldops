@@ -27,6 +27,13 @@ struct OfficeMessagesView: View {
             .navigationDestination(for: OfficeThreadRoute.self) { route in
                 OfficeConversationView(threadID: route.threadID)
             }
+            // A job-linked conversation offers to open that job. Without this
+            // the "Open" button was a dead link: the button existed, the route
+            // value was correct, but this stack had never been told what a
+            // `FieldJobRoute` looks like, so SwiftUI had nothing to push.
+            .navigationDestination(for: FieldJobRoute.self) { route in
+                FieldWorkerJobView(jobID: route.jobID)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

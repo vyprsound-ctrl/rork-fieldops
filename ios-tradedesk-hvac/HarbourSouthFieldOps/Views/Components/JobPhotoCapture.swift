@@ -100,7 +100,11 @@ struct CameraPicker: UIViewControllerRepresentable {
 /// engineer meets the same control in both places.
 struct JobPhotoCollector: View {
     @Binding var uploads: [JobMediaUpload]
-    var allowedKinds: [JobPhotoKind] = [.before, .after, .part, .proof]
+    /// Categorisation is optional and deliberately quick: a segmented row would
+    /// not fit ten categories, so this is a menu that defaults to something
+    /// sensible. A worker on a roof can shoot several photos without ever
+    /// opening it.
+    var allowedKinds: [JobPhotoKind] = JobPhotoKind.selectable
 
     @State private var libraryItem: PhotosPickerItem?
     @State private var isShowingCamera: Bool = false
@@ -109,12 +113,25 @@ struct JobPhotoCollector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("Photo type", selection: $pendingKind) {
-                ForEach(allowedKinds, id: \.self) { kind in
-                    Text(kind.title).tag(kind)
+            HStack(spacing: 8) {
+                Text("Category")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondary)
+
+                Picker("Category", selection: $pendingKind) {
+                    ForEach(allowedKinds, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
                 }
+                .pickerStyle(.menu)
+                .tint(Theme.primary)
+
+                Spacer(minLength: 0)
+
+                Text("Optional")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.meta)
             }
-            .pickerStyle(.segmented)
 
             HStack(spacing: 10) {
                 if CameraPicker.isAvailable {
@@ -239,6 +256,99 @@ struct JobPhotoCollector: View {
         }
         errorMessage = nil
         uploads.append(JobMediaUpload(kind: pendingKind, data: data))
+    }
+}
+
+/// One stored photo, full screen.
+///
+/// Evidence is only useful if it can be read: a 46pt thumbnail cannot show a
+/// rating plate, a serial number or a hairline crack. This loads the stored
+/// image at full size and allows pinch-to-zoom, which is the difference between
+/// "there is a photo of the fault" and "I can see the fault".
+///
+/// The image is shown directly rather than behind a `Color` anchor because this
+/// is a full-screen interactive viewer — the zoom and pan gestures have to
+/// reach the image itself.
+struct JobPhotoViewer: View {
+    let reference: String
+    let title: String
+    let subtitle: String
+
+    @Environment(AppEnvironment.self) private var env
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage?
+    @State private var isLoading: Bool = true
+    @State private var zoom: CGFloat = 1
+    @State private var committedZoom: CGFloat = 1
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .scaleEffect(zoom)
+                        .gesture(
+                            MagnifyGesture()
+                                .onChanged { value in
+                                    // Clamped so the image cannot be pinched
+                                    // away to nothing or into a blur.
+                                    zoom = min(max(committedZoom * value.magnification, 1), 6)
+                                }
+                                .onEnded { _ in committedZoom = zoom }
+                        )
+                        .onTapGesture(count: 2) {
+                            withAnimation(.snappy) {
+                                zoom = zoom > 1 ? 1 : 2.5
+                                committedZoom = zoom
+                            }
+                        }
+                } else if isLoading {
+                    ProgressView().tint(.white)
+                } else {
+                    ContentUnavailableView(
+                        "Photo unavailable",
+                        systemImage: "photo",
+                        description: Text("This photo couldn't be loaded. Check your connection and try again.")
+                    )
+                    .foregroundStyle(.white)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task(id: reference) { await load() }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        switch JobMediaReference.parse(reference) {
+        case .inlineData(let data, _):
+            image = UIImage(data: data)
+        case .storage:
+            guard let session = env.activeSession else { return }
+            guard let url = try? await env.gateway.jobMediaURL(session: session, reference: reference) else { return }
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+            image = UIImage(data: data)
+        case .simulated, .unrecognised:
+            image = nil
+        }
     }
 }
 

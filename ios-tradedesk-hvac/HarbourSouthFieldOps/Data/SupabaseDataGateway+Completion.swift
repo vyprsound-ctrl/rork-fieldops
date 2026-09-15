@@ -212,7 +212,7 @@ extension SupabaseDataGateway {
             return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Couldn't be stored.")
         }
 
-        do {
+        func insert(kind: JobPhotoKind) async throws {
             try await performWrite(
                 client.from("job_photos").insert(
                     JobMediaPayload(
@@ -222,18 +222,43 @@ extension SupabaseDataGateway {
                         user_id: session.userID,
                         storage_reference: storageReference,
                         caption: upload.caption.nilIfBlank,
-                        kind: upload.kind.rawValue,
+                        kind: kind.rawValue,
                         captured_at: SupabaseCoding.timestamp(Date())
                     )
                 )
             )
+        }
+
+        do {
+            try await insert(kind: upload.kind)
         } catch {
-            return JobMediaResult(
-                id: upload.id,
-                kindTitle: upload.kind.title,
-                stored: false,
-                detail: (error as? DataError)?.errorDescription ?? "The job record refused the photo."
-            )
+            // The newer categories (During, Damage, Property, Equipment) are
+            // added to `job_photo_kind` by migration 0010. A build can reach a
+            // database where that has not been applied yet, and the image is
+            // already uploaded by this point — discarding a photograph of a
+            // fault because of a schema lag would be the worst possible
+            // outcome. Retry once with a label the enum has always contained.
+            let fallback = upload.kind.storageFallback
+            guard fallback != upload.kind else {
+                return JobMediaResult(
+                    id: upload.id,
+                    kindTitle: upload.kind.title,
+                    stored: false,
+                    detail: (error as? DataError)?.errorDescription ?? "The job record refused the photo."
+                )
+            }
+
+            do {
+                try await insert(kind: fallback)
+                print("[data] job_photo_kind '\(upload.kind.rawValue)' was refused; stored as '\(fallback.rawValue)'. Apply migration 0010.")
+            } catch {
+                return JobMediaResult(
+                    id: upload.id,
+                    kindTitle: upload.kind.title,
+                    stored: false,
+                    detail: (error as? DataError)?.errorDescription ?? "The job record refused the photo."
+                )
+            }
         }
 
         record("jobs.attachMedia", session, allowed: true, "\(upload.kind.title) image attached — \(detail.lowercased())")

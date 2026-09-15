@@ -3784,6 +3784,418 @@ actor MockDataGateway: DataGateway {
         case .failed: return .danger
         }
     }
+
+    // MARK: - Office messaging
+
+    /// Mirrors the `office_threads_select` policy:
+    /// `company_id = current_company_id() AND (engineer_user_id = auth.uid() OR is_office_user())`.
+    ///
+    /// The development stack used to refuse messaging outright, which meant no
+    /// automated test could reach the conversation screen — and a broken "Open"
+    /// button on a job-linked message survived two shipped builds as a result.
+    private func isOfficeUser(_ session: TenantSession) -> Bool {
+        session.can(.assignmentsManage) || session.can(.usersManage)
+    }
+
+    private func readableThreads(_ session: TenantSession) -> [DevOfficeThread] {
+        scoped(store.officeThreads, session, companyID: \.companyID)
+            .filter { isOfficeUser(session) || $0.engineerUserID == session.userID }
+            .sorted { $0.lastMessageAt > $1.lastMessageAt }
+    }
+
+    private func lastReadAt(_ thread: DevOfficeThread, _ session: TenantSession) -> Date? {
+        isOfficeUser(session) ? thread.lastReadByOfficeAt : thread.lastReadByEngineerAt
+    }
+
+    func officeInbox(session: TenantSession) async throws -> OfficeInbox {
+        try await Task.sleep(for: latency)
+
+        let threads = readableThreads(session)
+        let rows: [OfficeThreadRow] = threads.map { thread in
+            let messages = store.officeMessages
+                .filter { $0.threadID == thread.id }
+                .sorted { $0.createdAt < $1.createdAt }
+            let last = messages.last
+
+            // Unread means somebody else has written since this person last
+            // looked. Your own message never marks your own thread unread.
+            let isUnread: Bool = {
+                guard let last, last.senderUserID != session.userID else { return false }
+                guard let seenAt = lastReadAt(thread, session) else { return true }
+                return last.createdAt > seenAt
+            }()
+
+            let counterparty: String = isOfficeUser(session)
+                ? (user(thread.engineerUserID, session)?.name ?? "Field worker")
+                : "Office"
+
+            return OfficeThreadRow(
+                id: thread.id,
+                subject: thread.subject,
+                preview: last?.body ?? "",
+                timeLabel: Formatters.shortDayAndTime(thread.lastMessageAt),
+                lastMessageAt: thread.lastMessageAt,
+                counterpartyName: counterparty,
+                jobID: thread.jobID,
+                jobNumber: thread.jobID.flatMap { id in
+                    store.jobs.first { $0.id == id && $0.companyID == session.companyID }?.number
+                },
+                customerName: thread.customerID.flatMap { customer($0, session)?.name },
+                isUnread: isUnread
+            )
+        }
+
+        record(
+            "engineer.officeInbox",
+            session,
+            allowed: true,
+            isOfficeUser(session)
+                ? "Office role reads every thread in the company"
+                : "Field worker reads only their own threads"
+        )
+
+        return OfficeInbox(
+            threads: rows,
+            unreadCount: rows.filter(\.isUnread).count,
+            isAvailable: true,
+            unavailableReason: nil
+        )
+    }
+
+    func officeConversation(session: TenantSession, threadID: String) async throws -> OfficeConversation {
+        try await Task.sleep(for: latency)
+
+        // A thread the caller may not read answers `notFound` rather than
+        // "forbidden", so its existence never leaks.
+        guard let thread = readableThreads(session).first(where: { $0.id == threadID }) else {
+            record("engineer.officeConversation", session, allowed: false, "Thread not readable by this caller")
+            throw DataError.notFound
+        }
+
+        let references: [String: String] = Dictionary(
+            uniqueKeysWithValues: scoped(store.jobPhotos, session, companyID: \.companyID)
+                .map { ($0.id, $0.storageReference) }
+        )
+
+        let messages = store.officeMessages
+            .filter { $0.threadID == thread.id && $0.companyID == session.companyID }
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { message -> OfficeMessageRow in
+                let isMine = message.senderUserID == session.userID
+                let senderName = user(message.senderUserID, session)?.name ?? "Office"
+                return OfficeMessageRow(
+                    id: message.id,
+                    body: message.body,
+                    senderName: isMine ? "You" : senderName,
+                    senderInitials: Self.initials(senderName),
+                    timeLabel: Formatters.shortDayAndTime(message.createdAt),
+                    isMine: isMine,
+                    photoReferences: message.jobPhotoIDs.compactMap { references[$0] }
+                )
+            }
+
+        record("engineer.officeConversation", session, allowed: true, "Thread read with \(messages.count) message(s)")
+
+        return OfficeConversation(
+            id: thread.id,
+            subject: thread.subject,
+            jobID: thread.jobID,
+            jobNumber: thread.jobID.flatMap { id in
+                store.jobs.first { $0.id == id && $0.companyID == session.companyID }?.number
+            },
+            customerName: thread.customerID.flatMap { customer($0, session)?.name },
+            messages: messages,
+            canReply: true
+        )
+    }
+
+    @discardableResult
+    func sendOfficeMessage(session: TenantSession, draft: OfficeMessageDraft) async throws -> String {
+        try await Task.sleep(for: latency)
+
+        let body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { throw DataError.rejected("Write a message first.") }
+
+        let threadID: String
+        if let existing = draft.threadID {
+            guard let thread = readableThreads(session).first(where: { $0.id == existing }) else {
+                throw DataError.notFound
+            }
+            threadID = thread.id
+        } else {
+            // A new thread always belongs to a field worker: either the sender,
+            // or — when the office starts it — the worker on the job.
+            let job = draft.jobID.flatMap { id in
+                store.jobs.first { $0.id == id && $0.companyID == session.companyID }
+            }
+            let engineerID: String = isOfficeUser(session)
+                ? (draft.jobID.flatMap { primaryAssignment($0, session)?.userID } ?? session.userID)
+                : session.userID
+
+            let new = DevOfficeThread(
+                id: "thr_\(UUID().uuidString.prefix(8))",
+                companyID: session.companyID,
+                engineerUserID: engineerID,
+                subject: draft.subject.trimmingCharacters(in: .whitespaces).nilIfEmpty
+                    ?? job?.title
+                    ?? "Message",
+                jobID: draft.jobID,
+                customerID: job?.customerID,
+                lastMessageAt: Date(),
+                lastReadByEngineerAt: nil,
+                lastReadByOfficeAt: nil
+            )
+            store.officeThreads.append(new)
+            threadID = new.id
+        }
+
+        store.officeMessages.append(
+            DevOfficeMessage(
+                id: "omsg_\(UUID().uuidString.prefix(8))",
+                companyID: session.companyID,
+                threadID: threadID,
+                senderUserID: session.userID,
+                body: body,
+                // Only photos that genuinely belong to this company are carried,
+                // so a fabricated id cannot pull another tenant's image in.
+                jobPhotoIDs: draft.photoIDs.filter { id in
+                    store.jobPhotos.contains { $0.id == id && $0.companyID == session.companyID }
+                },
+                createdAt: Date()
+            )
+        )
+
+        if let index = store.officeThreads.firstIndex(where: { $0.id == threadID }) {
+            store.officeThreads[index].lastMessageAt = Date()
+            // The sender has, by definition, read their own message.
+            if isOfficeUser(session) {
+                store.officeThreads[index].lastReadByOfficeAt = Date()
+            } else {
+                store.officeThreads[index].lastReadByEngineerAt = Date()
+            }
+        }
+
+        record("engineer.sendOfficeMessage", session, allowed: true, "Message posted to thread \(threadID)")
+        return threadID
+    }
+
+    func markOfficeThreadRead(session: TenantSession, threadID: String) async throws {
+        guard let index = store.officeThreads.firstIndex(where: {
+            $0.id == threadID && $0.companyID == session.companyID
+        }) else { return }
+
+        if isOfficeUser(session) {
+            store.officeThreads[index].lastReadByOfficeAt = Date()
+        } else if store.officeThreads[index].engineerUserID == session.userID {
+            store.officeThreads[index].lastReadByEngineerAt = Date()
+        }
+    }
+
+    // MARK: - Subscription
+
+    /// The seeded company's subscription, seats and price list.
+    ///
+    /// The shared default refuses this, which meant the Subscription screen
+    /// never left its error state on the development stack — and because the
+    /// Founding Member card is drawn *inside* the loaded state, no automated
+    /// test could ever see it. That is the blind spot incorrect Founding copy
+    /// shipped through twice.
+    ///
+    /// The price is derived from the published tier table for the company's
+    /// real active head count, so the arithmetic on screen is the product's own
+    /// arithmetic rather than invented figures.
+    func subscriptionOverview(session: TenantSession) async throws -> SubscriptionOverview {
+        try await Task.sleep(for: latency)
+        guard session.can(.saasBillingRead) else {
+            record("subscription.overview", session, allowed: false, "Blocked — missing saasBillingRead")
+            throw DataError.notPermitted(.saasBillingRead)
+        }
+
+        let people = scoped(store.users, session, companyID: \.companyID)
+        let active = people.filter { $0.status == .active }.count
+        let pricing = PlatformPricing.fallback
+
+        record(
+            "subscription.overview",
+            session,
+            allowed: true,
+            "Development subscription — priced from the published tiers for \(active) active user(s)"
+        )
+
+        return SubscriptionOverview(
+            subscription: store.subscriptions.first { $0.companyID == session.companyID },
+            quote: pricing.quote(for: max(active, 1)),
+            pricing: pricing,
+            canManage: session.can(.saasBillingManage),
+            activeUsers: active,
+            invitedUsers: people.filter { $0.status == .invited }.count,
+            suspendedUsers: people.filter { $0.status == .suspended }.count,
+            alert: nil
+        )
+    }
+
+    /// Stripe's view of the company's own account.
+    ///
+    /// Reported as `ready` so the screens that depend on a connected account
+    /// render their real layout. Nothing here can move money: onboarding,
+    /// dashboard links and payment-model changes all still refuse on this
+    /// stack, because those are live commercial actions.
+    func connectAccountStatus(session: TenantSession) async throws -> ConnectAccountStatus {
+        try await Task.sleep(for: latency)
+        guard session.can(.paymentsRead) || session.can(.saasBillingRead) else {
+            record("payments.connect.status", session, allowed: false, "Blocked — missing paymentsRead")
+            throw DataError.notPermitted(.paymentsRead)
+        }
+
+        let link = company(session)?.onlinePaymentLinkURL
+        record("payments.connect.status", session, allowed: true, "Development Stripe position — no live account behind it")
+
+        return ConnectAccountStatus(
+            readiness: .ready,
+            accountID: "acct_development",
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            detailsSubmitted: true,
+            requirementsDue: [],
+            disabledReason: nil,
+            canManage: session.can(.paymentsManage) || session.can(.saasBillingManage),
+            fallbackLink: PaymentLinkSettings(
+                url: link,
+                displayHost: link.flatMap { URL(string: $0)?.host },
+                canManage: session.can(.paymentsManage)
+            )
+        )
+    }
+
+    // MARK: - Commercial position
+
+    /// The seeded company's commercial position.
+    ///
+    /// WHY THIS EXISTS, given the default implementation refuses
+    /// The shared default throws, on the honest grounds that a development
+    /// account has no Stripe behind it and inventing a *live* commercial
+    /// position would misrepresent a real commitment. That reasoning still
+    /// holds for anything that moves money — `selectPaymentModel`, Stripe
+    /// onboarding and SMS purchases all still refuse here.
+    ///
+    /// But refusing this one read also meant the Subscription screen fell back
+    /// to "status unavailable" in every automated run, so the Founding Member
+    /// card was never drawn and no test could inspect its wording. That is
+    /// precisely how incorrect Founding copy reached two shipped builds.
+    ///
+    /// The seeded company is therefore given a Founding Member position — and
+    /// deliberately a fully populated one: number 27, with 73 of the allocation
+    /// unclaimed. The UI must render none of those figures. A test that proves
+    /// the number is absent is only worth anything if the number was actually
+    /// there to leak.
+    func commercialState(session: TenantSession) async throws -> CommercialState {
+        try await Task.sleep(for: latency)
+        guard session.can(.saasBillingRead) else {
+            record("commercial.state", session, allowed: false, "Blocked — missing saasBillingRead")
+            throw DataError.notPermitted(.saasBillingRead)
+        }
+
+        let subscription = store.subscriptions.first { $0.companyID == session.companyID }
+        let activeUsers = scoped(store.users, session, companyID: \.companyID)
+            .filter { $0.status == .active }
+            .count
+        let quote = PlatformPricing.fallback.quote(for: max(activeUsers, 1))
+
+        record(
+            "commercial.state",
+            session,
+            allowed: true,
+            "Development commercial position — seeded, not a live Stripe account"
+        )
+
+        return CommercialState(
+            paymentModel: .harbourSouthPayments,
+            subscriptionStatus: subscription?.status ?? .active,
+            trialEndsAt: nil,
+            trialDaysRemaining: 0,
+            isTrialActive: false,
+            stripeConnected: true,
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            detailsSubmitted: true,
+            requirementsDue: [],
+            disabledReason: nil,
+            stripeAccountID: "acct_development",
+            foundingMemberNumber: 27,
+            foundingClaimedAt: Date(timeIntervalSinceNow: -60 * 60 * 24 * 45),
+            foundingPlacesClaimed: 27,
+            foundingPlacesRemaining: 73,
+            foundingOfferOpen: true,
+            foundingBenefitActive: true,
+            qualifyingPaymentsThisMonth: 3,
+            lastQualifyingPaymentAt: Date(timeIntervalSinceNow: -60 * 60 * 36),
+            activityMonthStart: Calendar.current.dateInterval(of: .month, for: Date())?.start,
+            tierID: quote.tierID,
+            tierName: quote.tierName,
+            subscriptionMonthlyCents: quote.monthlyPriceCents,
+            // Zero because the Founding benefit is live this month.
+            effectiveMonthlyCents: 0,
+            platformFeeBps: 30,
+            externalPaymentURL: company(session)?.onlinePaymentLinkURL,
+            // The development company has no customer-facing email configured;
+            // `nil` is the honest answer and exercises the "not set" path.
+            businessEmail: nil,
+            canManageBilling: session.can(.saasBillingManage)
+        )
+    }
+
+    // MARK: - Job media
+
+    /// Stores a captured image against a job.
+    ///
+    /// The development stack has no object storage, so the bytes are held with
+    /// the record as a `data:` reference — the same path the production gateway
+    /// falls back to when a project has no media bucket. The image therefore
+    /// renders for real rather than showing a placeholder, which is what makes
+    /// photo evidence testable here at all.
+    func attachJobMedia(
+        session: TenantSession,
+        jobID: String,
+        upload: JobMediaUpload
+    ) async throws -> JobMediaResult {
+        try await Task.sleep(for: latency)
+        try require(.jobPhotosCreate, session, query: "jobs.attachMedia")
+
+        guard let job = store.jobs.first(where: { $0.id == jobID && $0.companyID == session.companyID }) else {
+            throw DataError.notFound
+        }
+        // A field worker may only add evidence to their own work.
+        if session.can(.jobsReadAssignedOnly), !session.can(.jobsReadAll),
+           !assignedJobIDs(session).contains(job.id) {
+            record("jobs.attachMedia", session, allowed: false, "Job is not assigned to this field worker")
+            throw DataError.notFound
+        }
+        guard !upload.data.isEmpty else {
+            return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Empty image.")
+        }
+
+        let caption = upload.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.jobPhotos.append(
+            JobPhoto(
+                id: upload.id.uuidString,
+                companyID: session.companyID,
+                jobID: job.id,
+                userID: session.userID,
+                storageReference: JobMediaReference.inline(upload.data, mimeType: upload.mimeType),
+                caption: caption.isEmpty ? nil : caption,
+                kind: upload.kind,
+                capturedAt: Date()
+            )
+        )
+
+        record("jobs.attachMedia", session, allowed: true, "\(upload.kind.title) image stored with the job record")
+        return JobMediaResult(
+            id: upload.id,
+            kindTitle: upload.kind.title,
+            stored: true,
+            detail: "Stored with the job record (\(upload.sizeLabel))"
+        )
+    }
 }
 
 nonisolated extension String {

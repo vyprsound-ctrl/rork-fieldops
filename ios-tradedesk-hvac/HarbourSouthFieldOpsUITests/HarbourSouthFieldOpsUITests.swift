@@ -90,14 +90,46 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
     @discardableResult
     private func type(_ text: String, into field: XCUIElement, timeout: TimeInterval = 10) -> Bool {
         guard field.waitForExistence(timeout: timeout) else { return false }
-        _ = scrollTo(field)
+
+        // The open keyboard covers the lower half of the screen. A field below
+        // that line reports as existing and even as hittable, but a tap lands on
+        // a key instead of the field and focus never moves — which is exactly
+        // how this failed on the street and city fields.
+        dismissKeyboard()
+        guard scrollAboveKeyboard(field) else { return false }
+
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
 
         // Focus is asynchronous; give the keyboard a moment to attach.
         _ = app.keyboards.element.waitForExistence(timeout: 5)
         guard field.value as? String != nil else { return false }
         field.typeText(text)
+
+        // Put the keyboard away so the NEXT field is reachable.
+        dismissKeyboard()
         return true
+    }
+
+    /// Closes the keyboard without touching app content.
+    private func dismissKeyboard() {
+        guard app.keyboards.element.exists else { return }
+        // "return" commits a single-line SwiftUI TextField and resigns focus.
+        app.typeText("\n")
+        _ = app.keyboards.element.waitForNonExistence(timeout: 3)
+    }
+
+    /// Scrolls until the element sits clear of the keyboard and is tappable.
+    @discardableResult
+    private func scrollAboveKeyboard(_ element: XCUIElement, attempts: Int = 10) -> Bool {
+        for _ in 0..<attempts {
+            guard element.exists else { return false }
+            let limit = app.keyboards.element.exists
+                ? app.keyboards.element.frame.minY
+                : app.frame.maxY
+            if element.isHittable, element.frame.maxY < limit - 12 { return true }
+            app.swipeUp()
+        }
+        return element.exists && element.isHittable
     }
 
     /// Taps an element even when SwiftUI reports it as not hittable.
@@ -316,6 +348,139 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
             app.navigationBars["Messages"].waitForExistence(timeout: 20),
             "Owner must be able to open the Messages inbox"
         )
+
+        // The inbox has to actually contain the company's conversations, not
+        // just render an empty shell.
+        XCTAssertTrue(
+            app.staticTexts["Condenser fan motor"].waitForExistence(timeout: 15),
+            "The office inbox must list the field worker's conversations"
+        )
+    }
+
+    /// THE "OPEN" DEFECT — a job-linked message offers an Open button, and it
+    /// did nothing at all.
+    ///
+    /// Root cause: the button pushed a `FieldJobRoute`, but neither stack that
+    /// hosts the conversation registered a destination for that type, so
+    /// SwiftUI had nothing to push.
+    ///
+    /// This opens TWO different conversations, each linked to a DIFFERENT job,
+    /// and asserts each lands on its own job. Testing one would pass even if
+    /// the button were hard-coded to a single job — which is exactly the class
+    /// of bug worth ruling out.
+    func testOwnerOpenButtonOpensTheExactRelatedJob() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Messages")
+        require(app.navigationBars["Messages"], "the Messages inbox")
+
+        // Conversation A — J-1042.
+        openThread("Condenser fan motor")
+        assertJobContext(is: "J-1042")
+        tapOpen(job: "J-1042")
+        XCTAssertTrue(
+            app.staticTexts["J-1042"].waitForExistence(timeout: 20),
+            "Open must navigate to job J-1042, the job this message is about"
+        )
+        XCTAssertFalse(
+            app.staticTexts["J-1043"].exists,
+            "Open must not land on a different job"
+        )
+
+        // Back out to the inbox for conversation B.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        require(app.navigationBars["Messages"], "the Messages inbox again")
+
+        // Conversation B — a DIFFERENT job, J-1043.
+        openThread("Roof access at Whitfield")
+        assertJobContext(is: "J-1043")
+        tapOpen(job: "J-1043")
+        XCTAssertTrue(
+            app.staticTexts["J-1043"].waitForExistence(timeout: 20),
+            "Open must navigate to J-1043 for the second conversation, not repeat the first job"
+        )
+        XCTAssertFalse(
+            app.staticTexts["J-1042"].exists,
+            "Open must not be hard-coded to the previously opened job"
+        )
+    }
+
+    /// The same button, in the field worker's own shell, which is a different
+    /// navigation stack and therefore a genuinely separate code path.
+    func testFieldWorkerOpenButtonOpensTheRelatedJob() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Condenser fan motor")
+        assertJobContext(is: "J-1042")
+        tapOpen(job: "J-1042")
+
+        XCTAssertTrue(
+            app.staticTexts["J-1042"].waitForExistence(timeout: 20),
+            "A field worker's Open button must reach their own job"
+        )
+    }
+
+    /// Photographs attached to a message are stored as job evidence, so the
+    /// composer only offers the control where there is a job to file them
+    /// against — `job_photos.job_id` cannot be null.
+    func testMessageComposerOffersPhotosOnlyOnJobLinkedThreads() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Condenser fan motor")
+        XCTAssertTrue(
+            app.buttons["Attach photos"].waitForExistence(timeout: 15),
+            "A job-linked conversation must offer photo attachment"
+        )
+
+        // An existing attachment must render in the thread.
+        XCTAssertTrue(
+            app.staticTexts["Fan motor is seized and the capacitor is bulging. Photo attached."]
+                .waitForExistence(timeout: 15),
+            "A message carrying a photo must still display its text"
+        )
+    }
+
+    /// Opens a conversation from whichever inbox is on screen.
+    private func openThread(_ subject: String, file: StaticString = #filePath, line: UInt = #line) {
+        let row = app.staticTexts[subject]
+        guard scrollTo(row) || row.waitForExistence(timeout: 15) else {
+            XCTFail("Conversation '\(subject)' never appeared", file: file, line: line)
+            return
+        }
+        forceTap(row)
+    }
+
+    /// Asserts the conversation names the job it is about, before Open is used.
+    private func assertJobContext(is number: String, file: StaticString = #filePath, line: UInt = #line) {
+        let context = app.staticTexts["About job \(number)"]
+        XCTAssertTrue(
+            context.waitForExistence(timeout: 20),
+            "The conversation must state which job it concerns (\(number))",
+            file: file,
+            line: line
+        )
+    }
+
+    /// Taps the Open button for a specific job.
+    ///
+    /// Matched by its accessibility label ("Open job J-1042") rather than by the
+    /// word "Open", which additionally proves the control is bound to the job
+    /// the conversation is actually about.
+    private func tapOpen(job number: String, file: StaticString = #filePath, line: UInt = #line) {
+        let open = app.buttons["Open job \(number)"]
+        guard open.waitForExistence(timeout: 15) else {
+            XCTFail(
+                "The Open button for job \(number) never appeared on the job-linked message",
+                file: file,
+                line: line
+            )
+            return
+        }
+        forceTap(open)
     }
 
     // MARK: - Dispatch
@@ -397,11 +562,24 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
 
     /// COMMERCIAL PRIVACY — the customer must never be told their place in the
     /// Founding allocation, nor how many places remain.
+    ///
+    /// THIS TEST IS ONLY MEANINGFUL IF THE CARD IS ACTUALLY ON SCREEN. The
+    /// development company is deliberately seeded as Founding Member number 27
+    /// with 73 places unclaimed, so every forbidden figure genuinely exists in
+    /// the state behind this screen and the UI has to be the thing suppressing
+    /// them. It first asserts the card rendered, so the screen cannot pass by
+    /// failing to load.
     func testSubscriptionNeverRevealsFoundingAllocation() throws {
         signIn(as: "Tom Ellison")
         openMoreSection("Subscription & Users")
 
         require(app.navigationBars["Subscription"], "the Subscription screen")
+
+        // Guard against a vacuous pass: the Founding card must be present.
+        XCTAssertTrue(
+            app.staticTexts["Founding Member"].waitForExistence(timeout: 20),
+            "The Founding Member card must render, otherwise this test proves nothing"
+        )
 
         // Walk the whole screen so lazily-realised text is actually inspected.
         var seen = Set<String>()
@@ -415,16 +593,55 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
 
         for label in seen {
             XCTAssertFalse(
-                label.contains("Founding Member #"),
+                label.contains("Founding Member #") || label.contains("#27"),
                 "The Founding Member allocation number must never be shown — found: \(label)"
             )
             XCTAssertFalse(
                 label.localizedCaseInsensitiveContains("places remain")
                     || label.localizedCaseInsensitiveContains("places left")
-                    || label.localizedCaseInsensitiveContains("of 100"),
+                    || label.localizedCaseInsensitiveContains("remaining places")
+                    || label.localizedCaseInsensitiveContains("of 100")
+                    || label.localizedCaseInsensitiveContains("100 places"),
                 "The Founding allocation size must never be shown — found: \(label)"
             )
+            XCTAssertFalse(
+                label.localizedCaseInsensitiveContains("can receive"),
+                "The benefit must not be described as something the customer 'can receive' — found: \(label)"
+            )
+            // 73 places remain in the seeded state; that figure must not surface
+            // in any form, including bare.
+            XCTAssertFalse(
+                label.contains("73"),
+                "The number of unclaimed places must never be shown — found: \(label)"
+            )
         }
+
+        // And the correct commercial wording must be the thing shown instead.
+        let benefitStated = seen.contains { label in
+            label.localizedCaseInsensitiveContains("zero")
+                && label.localizedCaseInsensitiveContains("subscription fees")
+        }
+        XCTAssertTrue(
+            benefitStated,
+            "The Founding benefit must be stated as zero subscription fees. Saw: \(seen.sorted())"
+        )
+
+        // Locale-independent on purpose: the CI runner formats numbers in a
+        // comma-decimal locale, so a hard-coded "0.30%" would fail while the
+        // app was behaving perfectly. What must be true is that the rate is
+        // quoted as a percentage AND Stripe's own fees are disclosed alongside
+        // it — stating the subscription is free without that would misrepresent
+        // the commercial deal.
+        let feeRiderStated = seen.contains { label in
+            label.localizedCaseInsensitiveContains("payment fee")
+                && label.localizedCaseInsensitiveContains("Stripe processing fees")
+                && label.contains("%")
+                && label.contains(where: \.isNumber)
+        }
+        XCTAssertTrue(
+            feeRiderStated,
+            "The payment fee and Stripe's fees must still be disclosed. Saw: \(seen.sorted())"
+        )
     }
 
     // MARK: - Role isolation

@@ -106,10 +106,25 @@ struct SubscriptionPricingTests {
         }
     }
 
+    /// Asserts the SHAPE of the breakdown, not one locale's rendering of it.
+    ///
+    /// This previously hard-coded "$19.99 + 14 × $9.99" and passed only on a
+    /// runner set to a US locale; on a runner formatting USD as "US$ 19,99" it
+    /// failed while the app was behaving correctly. The arithmetic is the thing
+    /// worth protecting, so it is checked against the same formatter the app
+    /// uses — with the operands asserted independently, so a genuinely wrong
+    /// figure still fails.
     @Test("The breakdown line states the arithmetic being charged")
     func breakdownIsItemised() {
-        #expect(pricing.quote(for: 1).breakdownLine == "$19.99")
-        #expect(pricing.quote(for: 15).breakdownLine == "$19.99 + 14 × $9.99")
+        let solo = pricing.quote(for: 1)
+        #expect(solo.breakdownLine == SubscriptionQuote.money(1_999))
+        #expect(solo.breakdownLine.contains("×") == false)
+
+        let fifteen = pricing.quote(for: 15)
+        #expect(fifteen.breakdownLine == "\(SubscriptionQuote.money(1_999)) + 14 × \(SubscriptionQuote.money(999))")
+        #expect(fifteen.additionalUsers == 14)
+        #expect(fifteen.baseCents == 1_999)
+        #expect(fifteen.additionalUserCents == 999)
     }
 
     /// The fallback price list is only ever shown with a caveat, and it says so
@@ -768,5 +783,286 @@ struct JobListFilterTests {
     func dateScopeMatchesTheMetric() {
         #expect(JobListFilter.openNow.query.dateScope == .all)
         #expect(JobListFilter.unscheduled.query.dateScope == .unscheduled)
+    }
+}
+
+/// The Founding Member programme, as a customer is allowed to see it.
+///
+/// WHY THIS SUITE EXISTS
+/// The old wording — "Founding Members can receive $0/month … 100 of 100 places
+/// remain" — was removed once and came back, because the sentence was typed
+/// into several screens and only some were corrected. Every screen now reads
+/// `FoundingCopy`, and these tests assert the rules directly against it, so a
+/// reintroduction fails here rather than on a customer's phone.
+///
+/// The rules being protected are commercial, not cosmetic:
+///   - the allocation size is confidential, and the programme may grow,
+///   - a member's own number is internal,
+///   - the benefit is something they earn by trading, not something granted,
+///   - the subscription being free must never be stated without the fees that
+///     still apply.
+struct FoundingMemberCopyTests {
+
+    /// Every sentence the app can show a customer about the programme.
+    private var customerFacingCopy: [String] {
+        [
+            FoundingCopy.badgeTitle,
+            FoundingCopy.benefitActive,
+            FoundingCopy.benefitPaused,
+            FoundingCopy.statusKept,
+            FoundingCopy.trialOutcome,
+            FoundingCopy.invitation(feeLabel: "0.30%"),
+            FoundingCopy.feeRider("0.30%")
+        ]
+    }
+
+    @Test("No customer-facing sentence reveals the allocation, a member number, or 'can receive'")
+    func forbiddenWordingIsAbsent() {
+        for sentence in customerFacingCopy {
+            for fragment in FoundingCopy.forbiddenFragments {
+                #expect(
+                    sentence.localizedCaseInsensitiveContains(fragment) == false,
+                    "\"\(sentence)\" must not contain \"\(fragment)\""
+                )
+            }
+        }
+    }
+
+    /// The programme may be extended past 100, so nothing describing the STATUS
+    /// may be tied to that figure — or to any other count.
+    ///
+    /// The fee rider and the invitation are excluded because they must quote
+    /// the platform fee ("0.30%"); that is a rate, not a headcount, and
+    /// `forbiddenWordingIsAbsent` already proves neither leaks an allocation.
+    @Test("No sentence describing the status contains a figure")
+    func noDigitsAnywhere() {
+        let statusCopy = [
+            FoundingCopy.badgeTitle,
+            FoundingCopy.benefitActive,
+            FoundingCopy.benefitPaused,
+            FoundingCopy.statusKept,
+            FoundingCopy.trialOutcome
+        ]
+        for sentence in statusCopy {
+            #expect(
+                sentence.contains(where: \.isNumber) == false,
+                "\"\(sentence)\" must not contain a figure"
+            )
+        }
+    }
+
+    @Test("The benefit is stated as zero subscription fees, conditional on processing payments")
+    func benefitIsStatedCorrectly() {
+        let invitation = FoundingCopy.invitation(feeLabel: "0.30%")
+        #expect(invitation.localizedCaseInsensitiveContains("zero"))
+        #expect(invitation.localizedCaseInsensitiveContains("subscription fees"))
+        #expect(invitation.localizedCaseInsensitiveContains("actively processing customer payments"))
+    }
+
+    /// Saying the subscription is free without the rider would misstate the
+    /// commercial deal.
+    @Test("The invitation always carries the platform fee and Stripe's fees")
+    func invitationCarriesTheFeeRider() {
+        let invitation = FoundingCopy.invitation(feeLabel: "0.30%")
+        #expect(invitation.contains("0.30%"))
+        #expect(invitation.localizedCaseInsensitiveContains("stripe processing fees"))
+    }
+
+    /// The fee shown must be the company's real fee, not a constant that would
+    /// silently lie if the rate ever differed.
+    @Test("The fee rider quotes the fee it is given")
+    func feeRiderUsesTheSuppliedRate() {
+        #expect(FoundingCopy.feeRider("0.45%").contains("0.45%"))
+        #expect(FoundingCopy.feeRider("0.45%").contains("0.30%") == false)
+    }
+
+    @Test("Every sentence names the product")
+    func copyNamesTheProduct() {
+        #expect(FoundingCopy.programme == Brand.name)
+        #expect(FoundingCopy.benefitActive.contains(Brand.name))
+        #expect(FoundingCopy.invitation(feeLabel: "0.30%").contains(Brand.name))
+        #expect(FoundingCopy.trialOutcome.contains(Brand.name))
+    }
+
+    /// An inactive month pauses the benefit; it never removes the status.
+    @Test("A quiet month is described as recoverable, never as a forfeit")
+    func statusIsNeverDescribedAsLost() {
+        #expect(FoundingCopy.benefitPaused.localizedCaseInsensitiveContains("resume"))
+        #expect(FoundingCopy.statusKept.localizedCaseInsensitiveContains("yours to keep"))
+        for word in ["forfeit", "lose", "lost", "revoked", "cancelled"] {
+            #expect(FoundingCopy.statusKept.localizedCaseInsensitiveContains(word) == false)
+            #expect(FoundingCopy.benefitPaused.localizedCaseInsensitiveContains(word) == false)
+        }
+    }
+}
+
+/// Job photographs are evidence, and the category is part of the evidence.
+///
+/// The categories were widened in migration 0010. A shipped build can reach a
+/// database where that has not been applied, and by the time the category is
+/// written the image is already uploaded — so the interesting behaviour is what
+/// happens when the database refuses a label, not the happy path.
+struct JobPhotoKindTests {
+
+    /// Categories the original enum has always contained must be written as
+    /// themselves — never silently rewritten.
+    @Test("Long-standing categories are stored unchanged")
+    func originalCategoriesAreUnchanged() {
+        for kind in [JobPhotoKind.before, .after, .part, .proof, .signature] {
+            #expect(kind.storageFallback == kind)
+        }
+    }
+
+    /// Every newer category must fall back to one the enum has always had,
+    /// otherwise the retry would fail for the same reason as the first attempt.
+    @Test("New categories fall back to a label the database has always accepted")
+    func newCategoriesHaveASafeFallback() {
+        let alwaysAccepted: Set<JobPhotoKind> = [.before, .after, .part, .proof, .signature]
+        for kind in [JobPhotoKind.during, .equipment, .damage, .propertyCondition, .other] {
+            #expect(
+                alwaysAccepted.contains(kind.storageFallback),
+                "\(kind.rawValue) falls back to \(kind.storageFallback.rawValue), which the enum may not contain"
+            )
+        }
+    }
+
+    /// A fallback must not claim work is finished when it is not — that would
+    /// misrepresent the evidence rather than merely losing detail.
+    @Test("No fallback ever claims work was completed")
+    func fallbackNeverOverstatesProgress() {
+        for kind in [JobPhotoKind.during, .equipment, .damage, .propertyCondition, .other] {
+            #expect(kind.storageFallback != .after)
+        }
+    }
+
+    /// One unrecognised label must not destroy a whole job's photo list.
+    @Test("An unknown category decodes as Other rather than failing the record")
+    func unknownCategoryDecodesSafely() throws {
+        let decoded = try JSONDecoder().decode(JobPhotoKind.self, from: Data("\"a_future_category\"".utf8))
+        #expect(decoded == .other)
+    }
+
+    @Test("Known categories still decode as themselves")
+    func knownCategoriesDecodeExactly() throws {
+        let decoder = JSONDecoder()
+        #expect(try decoder.decode(JobPhotoKind.self, from: Data("\"before\"".utf8)) == .before)
+        #expect(try decoder.decode(JobPhotoKind.self, from: Data("\"property_condition\"".utf8)) == .propertyCondition)
+        #expect(try decoder.decode(JobPhotoKind.self, from: Data("\"signature\"".utf8)) == .signature)
+    }
+
+    /// A worker chooses what they are photographing. `proof` and `signature` are
+    /// written by the completion flow, which knows what it is recording —
+    /// offering them by hand invites mislabelled evidence.
+    @Test("The picker offers findings and progress, never proof or signature")
+    func selectableExcludesSystemWrittenCategories() {
+        #expect(JobPhotoKind.selectable.contains(.proof) == false)
+        #expect(JobPhotoKind.selectable.contains(.signature) == false)
+        for kind in [JobPhotoKind.before, .during, .after, .equipment, .damage, .propertyCondition, .other] {
+            #expect(JobPhotoKind.selectable.contains(kind), "\(kind.rawValue) must be selectable")
+        }
+    }
+
+    @Test("Every category has a readable title")
+    func everyCategoryIsReadable() {
+        for kind in JobPhotoKind.allCases {
+            #expect(kind.title.isEmpty == false)
+            #expect(kind.title.contains("_") == false, "\(kind.rawValue) shows a raw value to the user")
+        }
+    }
+}
+
+/// The state that drives the Founding wording, rather than the wording itself.
+///
+/// `CommercialState` decides WHICH sentence is shown; these assert it cannot
+/// offer the programme to somebody ineligible, or leak the member number
+/// through the badge title.
+struct FoundingMemberStateTests {
+
+    private func state(number: Int?, offerOpen: Bool, benefitActive: Bool) -> CommercialState {
+        CommercialState(
+            paymentModel: .harbourSouthPayments,
+            subscriptionStatus: .active,
+            trialEndsAt: nil,
+            trialDaysRemaining: 0,
+            isTrialActive: false,
+            stripeConnected: true,
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            detailsSubmitted: true,
+            requirementsDue: [],
+            disabledReason: nil,
+            stripeAccountID: "acct_1",
+            foundingMemberNumber: number,
+            foundingClaimedAt: nil,
+            foundingPlacesClaimed: 27,
+            foundingPlacesRemaining: 73,
+            foundingOfferOpen: offerOpen,
+            foundingBenefitActive: benefitActive,
+            qualifyingPaymentsThisMonth: benefitActive ? 1 : 0,
+            lastQualifyingPaymentAt: nil,
+            activityMonthStart: nil,
+            tierID: "team",
+            tierName: "Team",
+            subscriptionMonthlyCents: 3298,
+            effectiveMonthlyCents: benefitActive ? 0 : 3298,
+            platformFeeBps: 30,
+            externalPaymentURL: nil,
+            businessEmail: nil,
+            canManageBilling: true
+        )
+    }
+
+    /// The company holds place 27, and 73 places are left — neither figure may
+    /// reach the badge.
+    @Test("The badge never renders the member number")
+    func badgeTitleHidesTheNumber() {
+        let member = state(number: 27, offerOpen: true, benefitActive: true)
+        #expect(member.foundingBadgeTitle == "Founding Member")
+        #expect(member.foundingBadgeTitle?.contains("27") == false)
+    }
+
+    @Test("A member is never shown the invitation meant for non-members")
+    func membersSeeNoInvitation() {
+        #expect(state(number: 27, offerOpen: true, benefitActive: true).foundingInvitation == nil)
+    }
+
+    /// Nothing may promise a benefit that is no longer available.
+    @Test("A closed offer is not advertised to anyone")
+    func closedOfferIsSilent() {
+        #expect(state(number: nil, offerOpen: false, benefitActive: false).foundingInvitation == nil)
+        #expect(state(number: nil, offerOpen: true, benefitActive: false).foundingInvitation != nil)
+    }
+
+    @Test("A non-member has no Founding status or benefit message")
+    func nonMemberHasNoStatus() {
+        let outsider = state(number: nil, offerOpen: true, benefitActive: false)
+        #expect(outsider.isFoundingMember == false)
+        #expect(outsider.foundingBadgeTitle == nil)
+        #expect(outsider.foundingBenefitMessage == nil)
+    }
+
+    /// Status survives an inactive month; only the benefit pauses.
+    @Test("A member with no qualifying payment keeps the status")
+    func statusSurvivesAQuietMonth() {
+        let paused = state(number: 27, offerOpen: false, benefitActive: false)
+        #expect(paused.isFoundingMember)
+        #expect(paused.foundingBadgeTitle == "Founding Member")
+        #expect(paused.foundingBenefitMessage == FoundingCopy.benefitPaused)
+    }
+
+    /// The headline sits on the billing screen, so it is as customer-facing as
+    /// the card copy and must obey the same rules.
+    @Test("The headline states the benefit without leaking the allocation")
+    func headlineIsClean() {
+        let active = state(number: 27, offerOpen: true, benefitActive: true)
+        #expect(active.headline == "Founding Member — zero subscription fees")
+        for fragment in FoundingCopy.forbiddenFragments {
+            #expect(active.headline.localizedCaseInsensitiveContains(fragment) == false)
+        }
+    }
+
+    @Test("The trial outcome for a member carries the correct wording")
+    func trialOutcomeUsesSharedCopy() {
+        #expect(state(number: 27, offerOpen: true, benefitActive: true).trialOutcomeMessage == FoundingCopy.trialOutcome)
     }
 }

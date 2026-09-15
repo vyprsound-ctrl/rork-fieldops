@@ -124,6 +124,14 @@ final class OfficeConversationViewModel {
     var draftBody: String = ""
     var actionError: String?
 
+    /// Images chosen but not yet sent. Held here rather than in the view so a
+    /// keyboard dismissal or a redraw cannot quietly discard them.
+    var pendingUploads: [JobMediaUpload] = []
+
+    /// What the send button is doing, so a slow upload on site reads as
+    /// progress rather than as a frozen screen.
+    private(set) var sendProgress: String?
+
     func load(
         gateway: DataGateway,
         session: TenantSession,
@@ -140,25 +148,85 @@ final class OfficeConversationViewModel {
         }
     }
 
-    func send(gateway: DataGateway, session: TenantSession, threadID: String) async {
+    /// Sends the message, uploading any attached photographs first.
+    ///
+    /// ORDER MATTERS. Each image becomes a `job_photos` row against this
+    /// thread's job before the message is posted, and the message then carries
+    /// the resulting ids. Doing it this way means an attached photo is job
+    /// evidence in its own right — it appears in the job's Photos section —
+    /// rather than existing only inside a conversation, and nobody has to
+    /// upload the same picture twice.
+    ///
+    /// PARTIAL FAILURE IS NOT TOTAL FAILURE. If one image fails on a weak site
+    /// connection the message still goes, carrying the ones that succeeded, and
+    /// the person is told which did not. Losing a typed message because the
+    /// fourth photo timed out would be the worse outcome by far.
+    func send(
+        gateway: DataGateway,
+        session: TenantSession,
+        threadID: String,
+        jobID: String?
+    ) async {
         let body = draftBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        let uploads = pendingUploads
         guard !body.isEmpty else { return }
 
         isSending = true
         actionError = nil
+        defer {
+            isSending = false
+            sendProgress = nil
+        }
+
+        var photoIDs: [String] = []
+        var failedPhotos = 0
+
+        if !uploads.isEmpty, let jobID {
+            for (index, upload) in uploads.enumerated() {
+                sendProgress = uploads.count == 1
+                    ? "Sending photo…"
+                    : "Sending photo \(index + 1) of \(uploads.count)…"
+                do {
+                    let result = try await gateway.attachJobMedia(
+                        session: session,
+                        jobID: jobID,
+                        upload: upload
+                    )
+                    if result.stored {
+                        photoIDs.append(upload.id.uuidString)
+                    } else {
+                        failedPhotos += 1
+                    }
+                } catch {
+                    failedPhotos += 1
+                }
+            }
+        }
+
+        sendProgress = "Sending…"
         do {
             var draft = OfficeMessageDraft()
             draft.threadID = threadID
             draft.body = body
+            draft.photoIDs = photoIDs
             _ = try await gateway.sendOfficeMessage(session: session, draft: draft)
+
             // Only cleared once the server has it. A message that failed to
             // send is still in the box, not silently discarded.
             draftBody = ""
+            pendingUploads = []
+            if failedPhotos > 0 {
+                actionError = failedPhotos == 1
+                    ? "Your message was sent, but one photo couldn't be attached. Try adding it again."
+                    : "Your message was sent, but \(failedPhotos) photos couldn't be attached. Try adding them again."
+            }
             await load(gateway: gateway, session: session, threadID: threadID, showLoading: false)
         } catch {
+            // Any image that did upload is dropped from the tray, so retrying
+            // the message cannot attach the same picture to the job twice.
+            pendingUploads = pendingUploads.filter { !photoIDs.contains($0.id.uuidString) }
             actionError = DataError.wrap(error).errorDescription
         }
-        isSending = false
     }
 }
 

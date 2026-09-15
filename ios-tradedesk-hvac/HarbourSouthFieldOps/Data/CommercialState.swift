@@ -16,6 +16,79 @@ import Foundation
 // cannot compute eligibility cannot grant itself eligibility.
 // =============================================================================
 
+/// Every customer-facing sentence about the Founding Member programme.
+///
+/// WHY THIS EXISTS AS ONE TYPE
+/// The wording used to be typed directly into each screen that showed it — the
+/// badge, the subscription card and the payments screen each owned their own
+/// copy. When the commercial rules changed, three places had to change, and a
+/// screen that was missed kept publishing the old promise. That is exactly how
+/// "100 of 100 places remain" survived a correction pass.
+///
+/// Now every screen reads from here, so the wording is correct everywhere or
+/// wrong everywhere — and `forbiddenFragments` turns "wrong everywhere" into a
+/// failing test rather than something a customer discovers.
+///
+/// COMMERCIAL PRIVACY RULES, which this copy exists to enforce:
+///   - never state the size of the allocation,
+///   - never state how many places are left or taken,
+///   - never state the company's own member number,
+///   - never say a member "can receive" the benefit, which sounds conditional
+///     on someone else's decision rather than on their own trading.
+///
+/// Nothing here is tied to the number 100, so widening the programme later is a
+/// server-side change with no customer-facing consequence.
+nonisolated enum FoundingCopy {
+    /// The product's own name, so the copy renames itself with the product.
+    static var programme: String { Brand.name }
+
+    static let badgeTitle = "Founding Member"
+
+    /// The rider that must accompany every statement of the benefit. Stating
+    /// the subscription is free without it would misrepresent the deal.
+    static func feeRider(_ feeLabel: String) -> String {
+        "The \(feeLabel) \(programme) payment fee and standard Stripe processing fees still apply."
+    }
+
+    /// For a company that already holds Founding Member status.
+    static var benefitActive: String {
+        "You pay zero \(programme) subscription fees while you keep actively processing customer payments through \(programme)."
+    }
+
+    /// For a member whose month has no qualifying payment yet. Worded as
+    /// something to resume, never as something forfeited.
+    static var benefitPaused: String {
+        "Process a customer payment through \(programme) this month to resume your Founding Member benefit."
+    }
+
+    static let statusKept =
+        "Your Founding Member status is yours to keep — a quiet month never takes it away."
+
+    /// For a company that does not hold the status yet.
+    static func invitation(feeLabel: String) -> String {
+        "Founding members pay zero \(programme) subscription fees while actively processing customer payments through \(programme). \(feeRider(feeLabel))"
+    }
+
+    /// What a member is told the end of the trial means for them.
+    static var trialOutcome: String {
+        "When your trial ends you pay zero \(programme) subscription fees as a Founding Member, while you keep actively processing customer payments through \(programme)."
+    }
+
+    /// Wording that must never appear in customer-facing UI again.
+    ///
+    /// Asserted by `FoundingMemberCopyTests`, so a reintroduction fails the
+    /// test suite instead of reaching TestFlight.
+    static let forbiddenFragments: [String] = [
+        "places remain",
+        "places left",
+        "remaining places",
+        "100 places",
+        "of 100",
+        "can receive",
+        "Founding Member #"
+    ]
+}
+
 /// The two permanent payment models, plus the trial's "not chosen yet".
 nonisolated enum PaymentModel: String, Codable, Hashable, Sendable {
     /// In trial, or the end of the trial has been reached without a choice.
@@ -168,14 +241,20 @@ nonisolated struct CommercialState: Hashable, Sendable {
     /// use; it is simply never rendered. Keeping the number out of the UI also
     /// keeps the programme extensible — nothing has advertised a fixed size.
     var foundingBadgeTitle: String? {
-        isFoundingMember ? "Founding Member" : nil
+        isFoundingMember ? FoundingCopy.badgeTitle : nil
     }
 
     /// The fee as a person reads it: "0.30%".
+    ///
+    /// Always two decimal places when a fee applies, so 30 basis points reads
+    /// as "0.30%" rather than "0.3%" — the rate is quoted in the commercial
+    /// terms to two places, and a fee should be stated exactly as agreed.
+    /// Locale still governs the separator, so a comma-decimal market sees
+    /// "0,30%".
     var platformFeeLabel: String {
         guard platformFeeBps > 0 else { return "0%" }
         let percent = Decimal(platformFeeBps) / 100
-        return percent.formatted(.number.precision(.fractionLength(0...2))) + "%"
+        return percent.formatted(.number.precision(.fractionLength(2))) + "%"
     }
 
     var subscriptionPriceLabel: String { SubscriptionQuote.money(subscriptionMonthlyCents) }
@@ -194,7 +273,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
         }
         if isFoundingMember {
             return foundingBenefitActive
-                ? "Founding Member — no subscription fee"
+                ? "Founding Member — zero subscription fees"
                 : "Founding Member — subscription applies"
         }
         switch paymentModel {
@@ -210,9 +289,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
     /// The Founding Member benefit explained positively, never as a penalty.
     var foundingBenefitMessage: String? {
         guard isFoundingMember else { return nil }
-        return foundingBenefitActive
-            ? "You pay no Harbour South subscription fee for as long as you keep processing at least one customer payment through Harbour South each calendar month."
-            : "Process a customer payment through Harbour South this month to resume your Founding Member benefit."
+        return foundingBenefitActive ? FoundingCopy.benefitActive : FoundingCopy.benefitPaused
     }
 
     /// What a company that holds no place can honestly be told about the offer.
@@ -224,14 +301,14 @@ nonisolated struct CommercialState: Hashable, Sendable {
     /// much of it is left.
     var foundingInvitation: String? {
         guard !isFoundingMember, foundingOfferOpen else { return nil }
-        return "Founding Members pay no Harbour South subscription fee for as long as they keep processing at least one customer payment through Harbour South each calendar month. The \(platformFeeLabel) Harbour South payment fee and standard Stripe processing fees still apply."
+        return FoundingCopy.invitation(feeLabel: platformFeeLabel)
     }
 
     /// What the trial ends with, given the model the company is on.
     var trialOutcomeMessage: String {
         switch paymentModel {
         case .harbourSouthPayments where isFoundingMember:
-            return "When your trial ends you pay no Harbour South subscription fee as a Founding Member, for as long as you keep processing at least one customer payment through Harbour South each calendar month."
+            return FoundingCopy.trialOutcome
         case .harbourSouthPayments:
             return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Customer card payments carry a \(platformFeeLabel) Harbour South fee."
         case .externalProvider:

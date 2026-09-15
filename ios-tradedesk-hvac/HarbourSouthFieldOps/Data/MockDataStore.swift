@@ -45,6 +45,14 @@ nonisolated struct MockDataStore: Sendable {
     var invoiceShareTokens: [InvoiceShareToken] = []
     var smsLedger: [SmsCreditLedgerEntry]
     var serviceAgreements: [ServiceAgreement]
+    /// Conversations between field workers and the office.
+    ///
+    /// Seeded on purpose. The development stack used to refuse messaging
+    /// outright, which meant the messaging screens — including the "Open" button
+    /// on a job-linked message — could not be exercised by any automated test.
+    /// A defect there reached two shipped builds before a human found it.
+    var officeThreads: [DevOfficeThread] = []
+    var officeMessages: [DevOfficeMessage] = []
     /// Company-scoped document numbering. One row per company per document
     /// family; no prefix is hard-coded anywhere in the gateway.
     var documentSequences: [DocumentSequence]
@@ -326,7 +334,11 @@ nonisolated struct MockDataStore: Sendable {
         let jobPhotos = [
             JobPhoto(id: "pho_1", companyID: c1, jobID: "job_1041", userID: "usr_marcus", storageReference: "sim://jobs/1041/before.jpg", caption: "Coil before clean", kind: .before, capturedAt: at(8, 20)),
             JobPhoto(id: "pho_2", companyID: c1, jobID: "job_1041", userID: "usr_marcus", storageReference: "sim://jobs/1041/after.jpg", caption: "Coil after clean", kind: .after, capturedAt: at(9, 30)),
-            JobPhoto(id: "pho_3", companyID: c1, jobID: "job_1040", userID: "usr_dee", storageReference: "sim://jobs/1040/filters.jpg", caption: "Return filters pulled from bank B", kind: .part, capturedAt: at(9, 20))
+            JobPhoto(id: "pho_3", companyID: c1, jobID: "job_1040", userID: "usr_dee", storageReference: "sim://jobs/1040/filters.jpg", caption: "Return filters pulled from bank B", kind: .part, capturedAt: at(9, 20)),
+            // Attached to a message in thread thr_1 as well as to the job, which
+            // is the point of the shared media model: one upload, visible both
+            // in the conversation and in the job's permanent evidence.
+            JobPhoto(id: "pho_4", companyID: c1, jobID: "job_1042", userID: "usr_marcus", storageReference: "sim://jobs/1042/condenser.jpg", caption: "Seized fan motor and bulging capacitor", kind: .before, capturedAt: at(10, 12))
         ]
 
         let workerLocations = [
@@ -451,6 +463,55 @@ nonisolated struct MockDataStore: Sendable {
             DocumentSequence(id: "seq_c2_invoice", companyID: c2, kind: .invoice, prefix: "N-INV-", nextValue: 500, padWidth: 5)
         ]
 
+        // Two threads against two DIFFERENT jobs, which is what makes a
+        // hard-coded or "currently selected job" navigation bug visible: a test
+        // can open each in turn and assert it lands on its own job.
+        let officeThreads = [
+            DevOfficeThread(
+                id: "thr_1",
+                companyID: c1,
+                engineerUserID: "usr_marcus",
+                subject: "Condenser fan motor",
+                jobID: "job_1042",
+                customerID: "cus_ramirez",
+                lastMessageAt: at(10, 18),
+                lastReadByEngineerAt: at(10, 18),
+                lastReadByOfficeAt: nil
+            ),
+            DevOfficeThread(
+                id: "thr_2",
+                companyID: c1,
+                engineerUserID: "usr_marcus",
+                subject: "Roof access at Whitfield",
+                jobID: "job_1043",
+                customerID: "cus_whitfield",
+                lastMessageAt: at(9, 5),
+                lastReadByEngineerAt: at(9, 5),
+                lastReadByOfficeAt: at(9, 6)
+            ),
+            // No job: proves the composer hides attachments when there is no
+            // job to file the evidence against.
+            DevOfficeThread(
+                id: "thr_3",
+                companyID: c1,
+                engineerUserID: "usr_dee",
+                subject: "Timesheet question",
+                jobID: nil,
+                customerID: nil,
+                lastMessageAt: daysAgo(1),
+                lastReadByEngineerAt: daysAgo(1),
+                lastReadByOfficeAt: daysAgo(1)
+            )
+        ]
+
+        let officeMessages = [
+            DevOfficeMessage(id: "omsg_1", companyID: c1, threadID: "thr_1", senderUserID: "usr_marcus", body: "Fan motor is seized and the capacitor is bulging. Photo attached.", jobPhotoIDs: ["pho_4"], createdAt: at(10, 14)),
+            DevOfficeMessage(id: "omsg_2", companyID: c1, threadID: "thr_1", senderUserID: "usr_dispatch", body: "Thanks Marcus. Quote Q-2087 is already with the customer — hold until they approve.", jobPhotoIDs: [], createdAt: at(10, 18)),
+            DevOfficeMessage(id: "omsg_3", companyID: c1, threadID: "thr_2", senderUserID: "usr_marcus", body: "Front desk says the roof key is signed out. Who has it?", jobPhotoIDs: [], createdAt: at(9, 2)),
+            DevOfficeMessage(id: "omsg_4", companyID: c1, threadID: "thr_2", senderUserID: "usr_owner", body: "Roy keeps it behind reception. Ask for him by name.", jobPhotoIDs: [], createdAt: at(9, 5)),
+            DevOfficeMessage(id: "omsg_5", companyID: c1, threadID: "thr_3", senderUserID: "usr_dee", body: "Do call-outs after 6pm go on this week or next?", jobPhotoIDs: [], createdAt: daysAgo(1))
+        ]
+
         return MockDataStore(
             companies: companies,
             subscriptions: subscriptions,
@@ -474,6 +535,8 @@ nonisolated struct MockDataStore: Sendable {
             notifications: notifications,
             smsLedger: smsLedger,
             serviceAgreements: serviceAgreements,
+            officeThreads: officeThreads,
+            officeMessages: officeMessages,
             documentSequences: documentSequences
         )
     }
