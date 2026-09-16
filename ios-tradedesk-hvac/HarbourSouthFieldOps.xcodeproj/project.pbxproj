@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		XXCB0C833A4E7DDE353CE0XX /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = XX17F496E7391AF4178246XX /* Supabase */; };
+		XXCB0C833A4E7DDE353CE1XX /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = XX17F496E7391AF4178247XX /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -64,6 +65,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				XXCB0C833A4E7DDE353CE1XX /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,6 +143,7 @@
 			);
 			name = HarbourSouthFieldOpsTests;
 			packageProductDependencies = (
+				XX17F496E7391AF4178247XX /* Supabase */,
 			);
 			productName = HarbourSouthFieldOpsTests;
 			productReference = 105FC5892E9EAD3200EA8BCF /* HarbourSouthFieldOpsTests.xctest */;
@@ -406,7 +409,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = HarbourSouthFieldOps/HarbourSouthFieldOpsDebug.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -446,7 +449,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = HarbourSouthFieldOps/HarbourSouthFieldOps.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -617,6 +620,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		XX17F496E7391AF4178246XX /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = XXA26CCC1C14E04A80BED3XX /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+		XX17F496E7391AF4178247XX /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = XXA26CCC1C14E04A80BED3XX /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;

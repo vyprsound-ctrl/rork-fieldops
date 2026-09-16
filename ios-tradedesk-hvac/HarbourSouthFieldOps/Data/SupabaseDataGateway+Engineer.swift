@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Supabase
 
 // MARK: - Rows
@@ -521,6 +522,8 @@ extension SupabaseDataGateway {
                     ? "You"
                     : (thread.lastSenderUserID.flatMap { people[$0.uuidString]?.name } ?? "Office"),
                 jobID: thread.jobID?.uuidString,
+                // May be nil for a job this role cannot read. `jobID` stays
+                // authoritative: the row is still shown as job-linked.
                 jobNumber: thread.jobID.flatMap { jobNumbers[$0.uuidString] },
                 customerName: nil,
                 isUnread: isUnread
@@ -573,9 +576,24 @@ extension SupabaseDataGateway {
             for row in rows { references[row.id.uuidString] = row.storageReference }
         }
 
+        // A THREAD IS JOB-LINKED OR IT IS NOT, AND THE NUMBER IS ONLY A LABEL.
+        // This lookup used to be `try?`, so a job that could not be read —
+        // reassigned, archived, or simply outside this role's scope — produced
+        // a nil number while `jobID` stayed set. Every screen decides whether a
+        // conversation is "general" by looking at the number, but the photo
+        // path files against the id, so the same conversation could present as
+        // general and still upload to `<company>/<job>/…`. That divergence is
+        // the bug; the id remains authoritative and a missing number now says
+        // so out loud instead of quietly changing what the thread appears to be.
         var jobNumber: String?
         if let jobID = thread.jobID?.uuidString {
-            jobNumber = try? await requireJob(jobID, session, query: "engineer.officeThread").number
+            do {
+                jobNumber = try await requireJob(jobID, session, query: "engineer.officeThread").number
+            } catch {
+                AppLog.data.error(
+                    "office thread \(thread.id.uuidString.lowercased(), privacy: .public) is linked to job \(jobID.lowercased(), privacy: .public) but the job could not be read: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
 
         return OfficeConversation(

@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 import Testing
 @testable import HarbourSouthFieldOps
 
@@ -1007,6 +1008,35 @@ struct MessageAttachmentTests {
         JobMediaUpload(kind: .other, data: Data([0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02]))
     }
 
+    /// The ids already in a conversation, captured before sending.
+    private func messageIDs(
+        _ gateway: MockDataGateway,
+        _ session: TenantSession,
+        _ threadID: String
+    ) async throws -> Set<String> {
+        let conversation = try await gateway.officeConversation(session: session, threadID: threadID)
+        return Set(conversation.messages.map(\.id))
+    }
+
+    /// The message this test just sent, identified rather than assumed.
+    ///
+    /// These assertions used to read `messages.last`, which assumes the newest
+    /// message sorts last. The seeded `thr_1` conversation carries fixed
+    /// TIMES OF DAY (10:14 and 10:18 *today*) while a freshly sent message is
+    /// stamped `Date()`. Run the suite before 10:18 and the seeded reply sorts
+    /// last, so every assertion read the wrong message and the suite failed on
+    /// the clock rather than on the code. Identifying the new message by id is
+    /// independent of both the seed times and the running order.
+    private func newMessage(
+        _ gateway: MockDataGateway,
+        _ session: TenantSession,
+        _ threadID: String,
+        notIn existing: Set<String>
+    ) async throws -> OfficeMessageRow? {
+        let conversation = try await gateway.officeConversation(session: session, threadID: threadID)
+        return conversation.messages.first { !existing.contains($0.id) }
+    }
+
     // ---------------------------------------------------------------- general
 
     /// The case the whole migration exists for: an image on a conversation
@@ -1073,6 +1103,7 @@ struct MessageAttachmentTests {
             upload: image
         )
 
+        let before = try await messageIDs(gateway, worker, "thr_1")
         var draft = OfficeMessageDraft()
         draft.threadID = "thr_1"
         draft.body = "Here's the motor."
@@ -1080,8 +1111,7 @@ struct MessageAttachmentTests {
         _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
 
         // Surface one: the conversation.
-        let conversation = try await gateway.officeConversation(session: worker, threadID: "thr_1")
-        let sent = try #require(conversation.messages.last)
+        let sent = try #require(await newMessage(gateway, worker, "thr_1", notIn: before))
         #expect(sent.photoReferences.count == 1)
 
         // Surface two: the job's permanent evidence — the SAME photo id, not a
@@ -1107,6 +1137,7 @@ struct MessageAttachmentTests {
             upload: image
         )
 
+        let before = try await messageIDs(gateway, owner, "thr_1")
         var draft = OfficeMessageDraft()
         draft.threadID = "thr_1"
         draft.body = "This is the replacement part we ordered."
@@ -1114,8 +1145,7 @@ struct MessageAttachmentTests {
         _ = try await gateway.sendOfficeMessage(session: owner, draft: draft)
 
         // The field worker — the recipient — must be able to read it.
-        let asWorker = try await gateway.officeConversation(session: worker, threadID: "thr_1")
-        let received = try #require(asWorker.messages.last)
+        let received = try #require(await newMessage(gateway, worker, "thr_1", notIn: before))
         #expect(received.photoReferences.count == 1, "the worker must receive the office's image")
         #expect(received.isMine == false, "it is the office's message, not the worker's")
 
@@ -1162,14 +1192,14 @@ struct MessageAttachmentTests {
             upload: image
         )
 
+        let before = try await messageIDs(gateway, worker, "thr_1")
         var draft = OfficeMessageDraft()
         draft.threadID = "thr_1"
         draft.body = ""
         draft.photoIDs = [image.id.uuidString]
         _ = try await gateway.sendOfficeMessage(session: worker, draft: draft)
 
-        let conversation = try await gateway.officeConversation(session: worker, threadID: "thr_1")
-        let sent = try #require(conversation.messages.last)
+        let sent = try #require(await newMessage(gateway, worker, "thr_1", notIn: before))
         #expect(sent.body.isEmpty)
         #expect(sent.photoReferences.count == 1)
     }
@@ -1324,6 +1354,164 @@ struct MessageAttachmentTests {
             upload: JobMediaUpload(kind: .other, data: Data())
         )
         #expect(result.stored == false)
+    }
+}
+
+// MARK: - Storage object keys
+
+/// THE BUILD 15 PHOTO FAILURE, AS A TEST.
+///
+/// Every `job-media` policy authorises a write by comparing the first path
+/// segment against `public.current_company_id()::text`. PostgreSQL renders a
+/// `uuid` as LOWER-CASE text; Swift's `UUID.uuidString` is UPPER-CASE. A key
+/// built from the raw session id therefore read `DE21FA6E-…` where the policy
+/// required `de21fa6e-…`, so the `WITH CHECK` could never match and every
+/// upload was refused — on a correctly configured bucket, by a user holding
+/// `jobPhotosCreate`, in both the job and the general-conversation flows.
+///
+/// These assert the key itself, because the key is the thing the database
+/// compares. A photo that reaches the right bucket under the wrong case is not
+/// "nearly right": it is refused.
+struct JobMediaObjectKeyTests {
+
+    /// The real identifiers from the failing Build 15 request.
+    private let company = "DE21FA6E-69CF-4BEA-B6AA-A8A355E7AE60"
+    private let job = "989972FE-0A66-4D43-AB17-33A7A7436DFC"
+
+    private func upload() -> JobMediaUpload {
+        JobMediaUpload(kind: .other, data: Data([0xFF, 0xD8, 0xFF, 0xE0]))
+    }
+
+    @Test("The company segment is lower-cased, because uuid::text is")
+    func companySegmentIsLowerCased() throws {
+        let destination = try #require(
+            JobMediaDestination(companyID: company, jobID: job, threadID: nil, upload: upload())
+        )
+        let first = try #require(destination.path.split(separator: "/").first)
+        #expect(
+            String(first) == company.lowercased(),
+            "the tenant segment must match current_company_id()::text exactly"
+        )
+        #expect(
+            destination.path.contains("DE21FA6E") == false,
+            "an upper-case tenant segment is what Build 15 sent and the policy refused"
+        )
+    }
+
+    @Test("A job key is fully lower-cased, in the exact Build 15 shape")
+    func jobKeyMatchesTheFailingRequest() throws {
+        let image = upload()
+        let destination = try #require(
+            JobMediaDestination(companyID: company, jobID: job, threadID: nil, upload: image)
+        )
+        let expected = "\(company.lowercased())/\(job.lowercased())/\(image.id.uuidString.lowercased()).jpg"
+        #expect(destination.path == expected)
+        #expect(destination.path == destination.path.lowercased())
+    }
+
+    /// The general-conversation flow shares this construction, which is why it
+    /// failed in exactly the same way.
+    @Test("A general-conversation key is lower-cased under threads/")
+    func threadKeyIsLowerCased() throws {
+        let thread = "7C1E4F20-55AA-4E31-9E0B-2B9B0C4D1A77"
+        let image = upload()
+        let destination = try #require(
+            JobMediaDestination(companyID: company, jobID: nil, threadID: thread, upload: image)
+        )
+        #expect(destination.path == "\(company.lowercased())/threads/\(thread.lowercased())/\(image.id.uuidString.lowercased()).jpg")
+        #expect(destination.path == destination.path.lowercased())
+    }
+
+    @Test("A photo with nowhere to go produces no key at all")
+    func unanchoredMediaHasNoDestination() {
+        #expect(JobMediaDestination(companyID: company, jobID: nil, threadID: nil, upload: upload()) == nil)
+        #expect(JobMediaDestination(companyID: "   ", jobID: job, threadID: nil, upload: upload()) == nil)
+    }
+
+    @Test("The extension follows the image type")
+    func extensionFollowsMimeType() {
+        #expect(JobMediaDestination.fileExtension(for: "image/png") == "png")
+        #expect(JobMediaDestination.fileExtension(for: "image/heic") == "heic")
+        #expect(JobMediaDestination.fileExtension(for: "image/jpeg") == "jpg")
+    }
+
+    /// A signature is stored as PNG and travels the same path builder.
+    @Test("A signature key is lower-cased too")
+    func signatureKeyIsLowerCased() throws {
+        let signature = JobMediaUpload(kind: .signature, data: Data([0x89, 0x50]), mimeType: "image/png")
+        let destination = try #require(
+            JobMediaDestination(companyID: company, jobID: job, threadID: nil, upload: signature)
+        )
+        #expect(destination.path.hasSuffix(".png"))
+        #expect(destination.path == destination.path.lowercased())
+    }
+}
+
+// MARK: - Photo failure reporting
+
+/// What a refused upload is allowed to say, and what it must never do.
+///
+/// Build 15 answered every storage failure with "try again when you have a
+/// better signal" and then wrote the image into the row as a ~320 KB base64
+/// blob, which produced a second and third failed request. One refused photo is
+/// now one refused request, described by the status the server actually
+/// returned.
+struct PhotoFailureReportingTests {
+
+    @Test("A refusal is never reported as a connection problem")
+    func refusalIsNotBlamedOnSignal() {
+        for status in ["400", "401", "403", "413", "415", "422"] {
+            let error = StorageError(statusCode: status, message: "refused", error: "InvalidRequest")
+            let mapped = SupabaseDataGateway.mediaError(error)
+            #expect(mapped != .offline, "HTTP \(status) is not an offline device")
+            let text = try? #require(mapped.errorDescription)
+            #expect(
+                text?.localizedCaseInsensitiveContains("signal") == false,
+                "HTTP \(status) must not send somebody looking for better signal"
+            )
+            #expect(mapped.isDeterministic, "HTTP \(status) can never be fixed by retrying")
+        }
+    }
+
+    @Test("A missing bucket is named, not disguised")
+    func missingBucketIsNamed() {
+        let error = StorageError(statusCode: "404", message: "Bucket not found", error: "NotFound")
+        #expect(SupabaseDataGateway.mediaError(error) == .rejected("Photo storage isn't set up for this company yet."))
+    }
+
+    @Test("A genuinely offline device is still called offline")
+    func offlineIsStillOffline() {
+        let mapped = SupabaseDataGateway.mediaError(URLError(.notConnectedToInternet))
+        #expect(mapped == .offline)
+        #expect(mapped.isDeterministic == false, "an offline device is worth retrying")
+    }
+
+    @Test("Storage trouble at the server is worth retrying")
+    func serverTroubleIsRetryable() {
+        let error = StorageError(statusCode: "503", message: "unavailable", error: nil)
+        let text = SupabaseDataGateway.mediaError(error).errorDescription
+        #expect(text?.localizedCaseInsensitiveContains("try again") == true)
+    }
+
+    /// The diagnostic that was missing for the whole investigation: the HTTP
+    /// status has to survive into the log.
+    @Test("The log keeps the HTTP status and the server's own message")
+    func logKeepsTheStatus() {
+        let error = StorageError(statusCode: "400", message: "new row violates row-level security policy", error: "InvalidRequest")
+        let described = SupabaseDataGateway.describeStorage(error)
+        #expect(described.contains("400"))
+        #expect(described.contains("row-level security"))
+        #expect(described.contains("InvalidRequest"))
+    }
+
+    @Test("A write failure carries the database's own SQLSTATE")
+    func writeFailureCarriesSQLState() {
+        let failure = WriteFailure(sqlState: "22P02", dataError: .rejected("bad enum"))
+        #expect(failure.sqlState == "22P02")
+        #expect(failure.errorDescription == "bad enum")
+        // Only 22P02 may trigger the legacy enum retry; everything else is
+        // reported once and not re-sent.
+        #expect(WriteFailure(sqlState: "42501", dataError: .notPermitted(.jobPhotosCreate)).sqlState != "22P02")
     }
 }
 

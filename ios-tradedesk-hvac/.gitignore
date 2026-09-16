@@ -21,7 +21,14 @@ xcuserdata/
 # Swift Package Manager
 .build/
 .swiftpm/
-Package.resolved
+
+# Package.resolved is deliberately NOT ignored.
+#
+# It was, while the dependency was declared as "2.0.0 or any later 2.x", so
+# every build resolved whatever supabase-swift happened to be newest that day.
+# A build could change behaviour with no change to this repository, which makes
+# a field failure impossible to reproduce or bisect. The resolved file is the
+# record of what was actually compiled, so it belongs in version control.
 
 # macOS
 .DS_Store

@@ -199,6 +199,10 @@ final class OfficeConversationViewModel {
 
         var photoIDs: [String] = []
         var failedUploadIDs: Set<UUID> = []
+        // The first real reason a photo was refused. Kept so the person is told
+        // what actually happened instead of being sent to check a connection
+        // that was never the problem.
+        var firstFailureReason: String?
 
         for (index, upload) in uploads.enumerated() {
             sendProgress = uploads.count == 1
@@ -218,18 +222,28 @@ final class OfficeConversationViewModel {
                     photoIDs.append(upload.id.uuidString)
                 } else {
                     failedUploadIDs.insert(upload.id)
+                    if firstFailureReason == nil, !result.detail.isEmpty {
+                        firstFailureReason = result.detail
+                    }
                 }
             } catch {
                 failedUploadIDs.insert(upload.id)
+                if firstFailureReason == nil {
+                    firstFailureReason = DataError.wrap(error).errorDescription
+                }
             }
         }
 
         // Every photo failed and there are no words behind them. Sending an
         // empty message would be a lie about what happened.
         if body.isEmpty, photoIDs.isEmpty, !uploads.isEmpty {
+            // Say what the server said. "Check your connection" was shown for
+            // every failure including ones the server refused outright, which
+            // invited an endless retry over a request that could never work.
+            let reason = firstFailureReason ?? "The photo couldn't be sent."
             actionError = uploads.count == 1
-                ? "That photo couldn't be sent. Check your connection and try again."
-                : "Those photos couldn't be sent. Check your connection and try again."
+                ? reason
+                : "\(reason) None of the \(uploads.count) photos were sent."
             return
         }
 
@@ -248,9 +262,10 @@ final class OfficeConversationViewModel {
             draftBody = ""
             pendingUploads = uploads.filter { failedUploadIDs.contains($0.id) }
             if !failedUploadIDs.isEmpty {
+                let reason = firstFailureReason.map { " \($0)" } ?? ""
                 actionError = failedUploadIDs.count == 1
-                    ? "Your message was sent, but one photo couldn't be attached. It's still here — tap send to try it again."
-                    : "Your message was sent, but \(failedUploadIDs.count) photos couldn't be attached. They're still here — tap send to try them again."
+                    ? "Your message was sent, but one photo couldn't be attached.\(reason) It's still here — tap send to try it again."
+                    : "Your message was sent, but \(failedUploadIDs.count) photos couldn't be attached.\(reason) They're still here — tap send to try them again."
             }
             await load(gateway: gateway, session: session, threadID: threadID, showLoading: false)
         } catch {

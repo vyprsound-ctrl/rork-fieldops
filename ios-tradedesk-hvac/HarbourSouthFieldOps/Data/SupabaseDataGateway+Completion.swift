@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Supabase
 
 /// An image filed against a job.
@@ -38,6 +39,50 @@ private nonisolated struct ThreadMediaPayload: Encodable, Sendable {
     let caption: String?
     let kind: String
     let captured_at: String
+}
+
+/// Where one image is being filed, and the object key that follows from it.
+///
+/// THE KEY IS CASE-SENSITIVE AND THE DATABASE IS NOT SHOUTING. Every
+/// `job-media` policy authorises a write by comparing the first path segment
+/// against `public.current_company_id()::text`, and PostgreSQL renders a `uuid`
+/// as lower-case text. Swift's `UUID.uuidString` is upper-case. An object key
+/// built from the raw session id therefore reads `DE21FA6E-…` where the policy
+/// expects `de21fa6e-…`, the `WITH CHECK` cannot match, and *every* upload is
+/// refused — on a correctly configured bucket, by a user with the right
+/// permission, in every flow that shares this path. Normalising here is the
+/// single place that has to be right.
+nonisolated struct JobMediaDestination: Sendable {
+    let jobID: String?
+    let threadID: String?
+    let path: String
+
+    init?(companyID: String, jobID: String?, threadID: String?, upload: JobMediaUpload) {
+        let company = Self.segment(companyID)
+        guard !company.isEmpty else { return nil }
+        guard jobID != nil || threadID != nil else { return nil }
+        self.jobID = jobID
+        self.threadID = threadID
+
+        let folder = jobID.map { Self.segment($0) }
+            ?? "threads/\(Self.segment(threadID ?? ""))"
+        let file = upload.id.uuidString.lowercased()
+        self.path = "\(company)/\(folder)/\(file).\(Self.fileExtension(for: upload.mimeType))"
+    }
+
+    /// Lower-cased to match `uuid::text`, and trimmed so a stray space can
+    /// never become part of a tenant segment.
+    private static func segment(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func fileExtension(for mimeType: String) -> String {
+        switch mimeType {
+        case "image/png": return "png"
+        case "image/heic": return "heic"
+        default: return "jpg"
+        }
+    }
 }
 
 private nonisolated struct EquipmentHistoryPayload: Encodable, Sendable {
@@ -136,19 +181,26 @@ extension SupabaseDataGateway {
         // 5. Photos. Reported individually; never allowed to block the finish.
         var media: [JobMediaResult] = []
         for upload in draft.photos {
-            let result = (try? await storeMedia(
-                session: session,
-                jobID: jobID,
-                threadID: nil,
-                upload: upload,
-                allowInline: true
-            ))
-                ?? JobMediaResult(
+            // Ordinary evidence is never inlined, so a refused upload is
+            // reported as one failure carrying the server's own reason rather
+            // than silently becoming a base64 blob inside the row.
+            let result: JobMediaResult
+            do {
+                result = try await storeMedia(
+                    session: session,
+                    jobID: jobID,
+                    threadID: nil,
+                    upload: upload,
+                    allowInline: false
+                )
+            } catch {
+                result = JobMediaResult(
                     id: upload.id,
                     kindTitle: upload.kind.title,
                     stored: false,
-                    detail: "Couldn't be attached — try again from the job."
+                    detail: DataError.wrap(error).errorDescription ?? "Couldn't be attached — try again from the job."
                 )
+            }
             media.append(result)
         }
 
@@ -202,7 +254,9 @@ extension SupabaseDataGateway {
             )
             return true
         } catch {
-            print("[data] completion recorded, but the asset history row was refused: \(error.localizedDescription)")
+            AppLog.data.error(
+                "completion recorded, but the asset history row was refused: \(error.localizedDescription, privacy: .public)"
+            )
             return false
         }
     }
@@ -211,7 +265,11 @@ extension SupabaseDataGateway {
 
     func attachJobMedia(session: TenantSession, jobID: String, upload: JobMediaUpload) async throws -> JobMediaResult {
         try require(.jobPhotosCreate, session, query: "jobs.attachMedia")
-        return try await storeMedia(session: session, jobID: jobID, threadID: nil, upload: upload, allowInline: true)
+        // An ordinary photograph is never inlined. A failed upload has to be
+        // reported as a failed upload — turning a 320 KB image into a `data:`
+        // blob inside the row hid the real fault and produced a second, larger
+        // failure on top of it.
+        return try await storeMedia(session: session, jobID: jobID, threadID: nil, upload: upload, allowInline: false)
     }
 
     /// Stores an image sent in a conversation.
@@ -240,7 +298,7 @@ extension SupabaseDataGateway {
             jobID: jobID,
             threadID: threadID,
             upload: upload,
-            allowInline: jobID != nil
+            allowInline: false
         )
     }
 
@@ -271,26 +329,41 @@ extension SupabaseDataGateway {
             return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Nowhere to file this photo.")
         }
 
-        var reference: String?
-        var detail = ""
+        guard let destination = JobMediaDestination(
+            companyID: session.companyID,
+            jobID: jobID,
+            threadID: threadID,
+            upload: upload
+        ) else {
+            return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Nowhere to file this photo.")
+        }
 
-        let folder = jobID ?? "threads/\(threadID ?? "")"
-        let path = "\(session.companyID)/\(folder)/\(upload.id.uuidString.lowercased()).\(Self.fileExtension(for: upload.mimeType))"
+        let storageReference: String
+        let detail: String
+
+        AppLog.media.info(
+            "upload starting \(destination.path, privacy: .public) bytes=\(upload.data.count, privacy: .public) type=\(upload.mimeType, privacy: .public)"
+        )
         do {
             _ = try await client.storage
                 .from(JobMediaBucket.name)
-                .upload(path, data: upload.data, options: FileOptions(contentType: upload.mimeType, upsert: true))
-            reference = JobMediaReference.storageReference(bucket: JobMediaBucket.name, path: path)
+                .upload(destination.path, data: upload.data, options: FileOptions(contentType: upload.mimeType, upsert: true))
+            storageReference = JobMediaReference.storageReference(bucket: JobMediaBucket.name, path: destination.path)
             detail = "Uploaded (\(upload.sizeLabel))"
+            AppLog.media.info("upload succeeded \(destination.path, privacy: .public)")
         } catch {
-            guard allowInline else { throw Self.mediaError(error) }
-            print("[data] media bucket unavailable, storing the image with the record: \(error.localizedDescription)")
-            reference = JobMediaReference.inline(upload.data, mimeType: upload.mimeType)
+            let mapped = Self.mediaError(error)
+            AppLog.media.error(
+                "upload failed \(destination.path, privacy: .public) \(Self.describeStorage(error), privacy: .public)"
+            )
+            // A signature is small, is part of the completion record, and has a
+            // deliberate inline representation. Nothing else does: an ordinary
+            // photo reports the upload failure and stops here, so one failed
+            // photo is one failed request rather than a cascade.
+            guard allowInline else { throw mapped }
+            storageReference = JobMediaReference.inline(upload.data, mimeType: upload.mimeType)
             detail = "Stored with the job record (\(upload.sizeLabel))"
-        }
-
-        guard let storageReference = reference else {
-            return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: false, detail: "Couldn't be stored.")
+            AppLog.media.notice("stored inline with the record instead \(destination.path, privacy: .public)")
         }
 
         func insert(kind: JobPhotoKind) async throws {
@@ -298,7 +371,7 @@ extension SupabaseDataGateway {
                 // Job evidence, including a photo sent in a job conversation.
                 // The thread is stamped on server-side by `send_office_message`
                 // so this write never names a column that predates 0011.
-                try await performWrite(
+                try await performWriteReportingCode(
                     client.from("job_photos").insert(
                         JobMediaPayload(
                             id: upload.id.uuidString,
@@ -313,12 +386,22 @@ extension SupabaseDataGateway {
                     )
                 )
             } else {
-                try await performWrite(
+                // `threadID` is guaranteed by the destination guard above: a
+                // photo with neither a job nor a thread never reaches here. An
+                // empty string was previously sent into a `uuid` column, which
+                // is a malformed value rather than an absent one.
+                guard let threadID else {
+                    throw WriteFailure(
+                        sqlState: nil,
+                        dataError: .unexpected("This photo has no conversation to belong to.")
+                    )
+                }
+                try await performWriteReportingCode(
                     client.from("job_photos").insert(
                         ThreadMediaPayload(
                             id: upload.id.uuidString,
                             company_id: session.companyID,
-                            thread_id: threadID ?? "",
+                            thread_id: threadID,
                             user_id: session.userID,
                             storage_reference: storageReference,
                             caption: upload.caption.nilIfBlank,
@@ -338,16 +421,28 @@ extension SupabaseDataGateway {
         /// instead of blaming the photo. The image is never reported as sent.
         func refusal(_ error: Error) -> JobMediaResult {
             let isThreadScoped = jobID == nil
-            if isThreadScoped {
-                print("[data] a general-conversation image was refused by job_photos. Apply migration 0011 (nullable job_id + thread_id): \(error.localizedDescription)")
-            }
+            let failure = error as? WriteFailure
+            let sqlState = failure?.sqlState ?? "-"
+            let described = failure?.dataError.errorDescription
+                ?? (error as? DataError)?.errorDescription
+                ?? error.localizedDescription
+
+            let scope = isThreadScoped ? "thread" : "job"
+            AppLog.media.error(
+                "job_photos write failed sqlstate=\(sqlState, privacy: .public) scope=\(scope, privacy: .public) job=\(jobID ?? "-", privacy: .public) thread=\(threadID ?? "-", privacy: .public) reason=\(described, privacy: .public)"
+            )
+
+            // Only a genuinely missing 0011 explains a thread-scoped row being
+            // impossible. Anything else is reported as what it was, rather than
+            // blamed on a migration that may well be applied.
+            let missingThreadSupport = isThreadScoped && (sqlState == "42703" || sqlState == "23502")
             return JobMediaResult(
                 id: upload.id,
                 kindTitle: upload.kind.title,
                 stored: false,
-                detail: isThreadScoped
+                detail: missingThreadSupport
                     ? "Photos in general conversations aren't switched on for this company yet."
-                    : ((error as? DataError)?.errorDescription ?? "The job record refused the photo.")
+                    : described
             )
         }
 
@@ -361,16 +456,31 @@ extension SupabaseDataGateway {
             // photograph of a fault because of a schema lag would be the worst
             // possible outcome. Retry once with a label the enum has always
             // contained.
+            //
+            // STRICTLY ONE CONDITION. `22P02` is PostgreSQL's "invalid text
+            // representation", which is exactly what an unknown enum label
+            // produces and nothing else here does. Retrying on any other
+            // failure re-sent a row the database had already refused on its
+            // merits — one refused photo became two identical 500s, and the
+            // second one told nobody anything the first had not.
             let fallback = upload.kind.storageFallback
-            guard fallback != upload.kind else { return refusal(error) }
+            let sqlState = (error as? WriteFailure)?.sqlState
+            guard sqlState == "22P02", fallback != upload.kind else { return refusal(error) }
 
             do {
                 try await insert(kind: fallback)
-                print("[data] job_photo_kind '\(upload.kind.rawValue)' was refused; stored as '\(fallback.rawValue)'. Apply migration 0011.")
+                AppLog.media.notice(
+                    "job_photo_kind '\(upload.kind.rawValue, privacy: .public)' refused as 22P02; stored as '\(fallback.rawValue, privacy: .public)'. Apply migration 0011."
+                )
             } catch {
                 return refusal(error)
             }
         }
+
+        let writtenScope = jobID == nil ? "thread" : "job"
+        AppLog.media.info(
+            "job_photos write succeeded id=\(upload.id.uuidString.lowercased(), privacy: .public) scope=\(writtenScope, privacy: .public)"
+        )
 
         record("jobs.attachMedia", session, allowed: true, "\(upload.kind.title) image attached — \(detail.lowercased())")
         return JobMediaResult(id: upload.id, kindTitle: upload.kind.title, stored: true, detail: detail)
@@ -384,27 +494,77 @@ extension SupabaseDataGateway {
         do {
             return try await client.storage.from(bucket).createSignedURL(path: path, expiresIn: 3600)
         } catch {
-            print("[data] could not sign a media URL: \(error.localizedDescription)")
+            AppLog.media.error(
+                "could not sign a media URL for \(path, privacy: .public): \(Self.describeStorage(error), privacy: .public)"
+            )
             return nil
         }
     }
 
     // MARK: - Helpers
 
-    private nonisolated static func fileExtension(for mimeType: String) -> String {
-        switch mimeType {
-        case "image/png": return "png"
-        case "image/heic": return "heic"
-        default: return "jpg"
+    /// The full technical shape of a storage failure, for the log only.
+    ///
+    /// The previous code kept `localizedDescription` and threw the rest away,
+    /// which is why a 400 could not be told apart from a 403 or a dropped
+    /// connection. `StorageError` carries the HTTP status and the server's own
+    /// message; both are recorded verbatim.
+    nonisolated static func describeStorage(_ error: Error) -> String {
+        if let storage = error as? StorageError {
+            let status = storage.statusCode ?? "-"
+            let name = storage.error ?? "-"
+            return "StorageError status=\(status) error=\(name) message=\(storage.message)"
         }
+        if let urlError = error as? URLError {
+            return "URLError code=\(urlError.code.rawValue) \(urlError.localizedDescription)"
+        }
+        return "\(type(of: error)): \(error.localizedDescription)"
     }
 
-    private nonisolated static func mediaError(_ error: Error) -> DataError {
-        let text = error.localizedDescription.lowercased()
-        if text.contains("bucket") && text.contains("not found") {
-            return .rejected("Photo storage isn't set up for this company yet.")
+    /// What a person is told when an upload fails.
+    ///
+    /// Every branch is driven by the HTTP status the server actually returned
+    /// rather than by substring-matching a localised sentence. "Check your
+    /// connection" is now reserved for failures that really are the connection:
+    /// telling somebody to find better signal when the server refused the
+    /// request outright sends them into a retry loop that can never succeed.
+    nonisolated static func mediaError(_ error: Error) -> DataError {
+        if let storage = error as? StorageError {
+            let status = storage.statusCode.flatMap(Int.init)
+            let message = storage.message.lowercased()
+
+            if message.contains("bucket") && message.contains("not found") {
+                return .rejected("Photo storage isn't set up for this company yet.")
+            }
+            switch status {
+            case 401, 403:
+                return .rejected("The server wouldn't accept this photo for your account. It hasn't been saved — this needs looking at rather than retrying.")
+            case 400, 422:
+                return .rejected("The server rejected this photo. It hasn't been saved — this needs looking at rather than retrying.")
+            case 413:
+                return .rejected("That photo is too large to upload.")
+            case 415:
+                return .rejected("That image format can't be uploaded.")
+            case 409:
+                return .rejected("That photo has already been uploaded.")
+            case .some(let code) where code >= 500:
+                return .unexpected("Photo storage is having trouble right now. Try again in a moment.")
+            default:
+                return .unexpected("The photo couldn't be uploaded. \(storage.message)")
+            }
         }
-        if text.contains("network") || text.contains("offline") { return .offline }
-        return .unexpected("The photo couldn't be uploaded. Try again when you have a better signal.")
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
+                 .cannotFindHost, .timedOut, .dataNotAllowed:
+                return .offline
+            default:
+                return .unexpected("The connection failed before the photo finished uploading.")
+            }
+        }
+
+        if let dataError = error as? DataError { return dataError }
+        return .unexpected("The photo couldn't be uploaded.")
     }
 }

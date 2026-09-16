@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Supabase
 
 /// One site address, in whatever shape the caller's role was allowed to read it.
@@ -183,6 +184,26 @@ actor SupabaseDataGateway: DataGateway {
         }
     }
 
+    /// The same write, but keeping the database's own SQLSTATE alongside the
+    /// sentence shown to a person.
+    ///
+    /// A caller that wants to recover from one *specific* database refusal has
+    /// to be able to recognise that refusal and no other. `performWrite` maps
+    /// every failure onto a `DataError`, which is right for display and useless
+    /// for deciding whether a retry could ever succeed — retrying on the
+    /// sentence rather than the code is what turned one failed photo into three
+    /// failed requests.
+    func performWriteReportingCode(_ builder: PostgrestBuilder) async throws {
+        do {
+            let _: PostgrestResponse<Void> = try await builder.execute()
+        } catch {
+            throw WriteFailure(
+                sqlState: (error as? PostgrestError)?.code,
+                dataError: Self.translateWrite(error)
+            )
+        }
+    }
+
     /// Maps the database's own refusal onto `DataError`, so a rule expressed in
     /// SQL reaches the person using the app as the same sentence the
     /// development gateway would have shown them.
@@ -222,10 +243,14 @@ actor SupabaseDataGateway: DataGateway {
             // "Couldn't reach the server", which sent people into a retry loop
             // over a request that could never succeed. The detail is logged for
             // diagnosis; the sentence shown says what actually happened.
-            print("[data] write rejected by the schema: \(postgrest.code ?? "-") \(postgrest.message) \(postgrest.detail ?? "")")
+            AppLog.data.error(
+                "write rejected by the schema: \(postgrest.code ?? "-", privacy: .public) \(postgrest.message, privacy: .public) \(postgrest.detail ?? "", privacy: .public)"
+            )
             return .rejected("The server wouldn't accept this record. Check the details and try again — if it keeps happening, this needs looking at.")
         default:
-            print("[data] write refused: \(postgrest.code ?? "-") \(postgrest.message)")
+            AppLog.data.error(
+                "write refused: \(postgrest.code ?? "-", privacy: .public) \(postgrest.message, privacy: .public)"
+            )
             return translate(error)
         }
     }

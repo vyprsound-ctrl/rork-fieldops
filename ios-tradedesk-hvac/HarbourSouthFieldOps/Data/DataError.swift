@@ -1,5 +1,23 @@
 import Foundation
 
+/// A refused write, carrying both the sentence a person should read and the
+/// database's own SQLSTATE.
+///
+/// The two are needed for different jobs. The sentence is what the UI shows;
+/// the code is the only honest basis for deciding whether a *different* request
+/// could succeed. Retrying on anything softer than the code is what turned a
+/// single refused photo row into a repeated one.
+nonisolated struct WriteFailure: Error {
+    /// e.g. `22P02` for an invalid enum label. `nil` when the failure never
+    /// reached PostgreSQL.
+    let sqlState: String?
+    let dataError: DataError
+}
+
+extension WriteFailure: LocalizedError {
+    var errorDescription: String? { dataError.errorDescription }
+}
+
 nonisolated enum DataError: LocalizedError, Equatable {
     /// Returned instead of a "forbidden" so out-of-scope records never leak
     /// their existence to the caller.
@@ -26,6 +44,14 @@ nonisolated enum DataError: LocalizedError, Equatable {
             return "No connection. Check your signal and try again."
         case .unexpected(let detail):
             return detail
+        }
+    }
+
+    /// True when the failure is one no amount of retrying can clear.
+    var isDeterministic: Bool {
+        switch self {
+        case .offline: return false
+        case .notFound, .notPermitted, .invalidTransition, .rejected, .unexpected: return true
         }
     }
 
