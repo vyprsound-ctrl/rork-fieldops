@@ -47,7 +47,7 @@ nonisolated enum FoundingCopy {
     /// The rider that must accompany every statement of the benefit. Stating
     /// the subscription is free without it would misrepresent the deal.
     static func feeRider(_ feeLabel: String) -> String {
-        "The \(feeLabel) \(programme) payment fee and standard Stripe processing fees still apply."
+        "The \(PlatformFeeCopy.phrase(feeLabel)) and standard Stripe processing fees still apply."
     }
 
     /// For a company that already holds Founding Member status.
@@ -86,6 +86,38 @@ nonisolated enum FoundingCopy {
         "of 100",
         "can receive",
         "Founding Member #"
+    ]
+}
+
+/// Every customer-facing name for Harbour South's own fee.
+///
+/// Harbour South's fee is called the "platform fee" everywhere a customer can
+/// read it — "0.3% Harbour South platform fee" for a Stripe-connected company,
+/// "0% Harbour South platform fee" for one on its own payment provider.
+/// Stripe's processing fees are a separate charge made by Stripe and are
+/// always named as such alongside it.
+///
+/// WORDING ONLY. The rate itself is `platform_settings.application_fee_bps`,
+/// read by the server; nothing here computes or changes it.
+nonisolated enum PlatformFeeCopy {
+    /// The label for an itemised fee row.
+    static var rowTitle: String { "\(Brand.company) platform fee" }
+
+    /// "0.3% Harbour South platform fee".
+    static func phrase(_ feeLabel: String) -> String {
+        "\(feeLabel) \(Brand.company) platform fee"
+    }
+
+    /// "0% Harbour South platform fee" — for payments Harbour South is not a
+    /// party to at all.
+    static var zeroPhrase: String { phrase("0%") }
+
+    /// Earlier names for the same fee. Asserted absent from customer-facing
+    /// copy so the old wording cannot drift back in.
+    static let retiredWording: [String] = [
+        "payment fee",
+        "transaction fee",
+        "0.30%"
     ]
 }
 
@@ -201,7 +233,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
     let subscriptionMonthlyCents: Int
     /// What it actually pays right now — 0 while the Founding benefit is live.
     let effectiveMonthlyCents: Int
-    /// Harbour South's platform fee in basis points. 30 = 0.30%. Always 0 for
+    /// Harbour South's platform fee in basis points. 30 = 0.3%. Always 0 for
     /// an external-provider company, because Harbour South is not a party to
     /// that payment at all.
     let platformFeeBps: Int
@@ -244,17 +276,20 @@ nonisolated struct CommercialState: Hashable, Sendable {
         isFoundingMember ? FoundingCopy.badgeTitle : nil
     }
 
-    /// The fee as a person reads it: "0.30%".
+    /// The fee as a person reads it: "0.3%".
     ///
-    /// Always two decimal places when a fee applies, so 30 basis points reads
-    /// as "0.30%" rather than "0.3%" — the rate is quoted in the commercial
-    /// terms to two places, and a fee should be stated exactly as agreed.
-    /// Locale still governs the separator, so a comma-decimal market sees
-    /// "0,30%".
-    var platformFeeLabel: String {
+    /// Presentation only — `platformFeeBps` is the server's figure and is not
+    /// altered. Trailing zeros are dropped, so 30 basis points reads "0.3%",
+    /// 25 reads "0.25%" and 100 reads "1%". Locale still governs the
+    /// separator, so a comma-decimal market sees "0,3%".
+    var platformFeeLabel: String { platformFeeLabel(locale: .current) }
+
+    /// `platformFeeLabel` for an explicit locale, so the wording can be
+    /// asserted exactly regardless of the device's region.
+    func platformFeeLabel(locale: Locale) -> String {
         guard platformFeeBps > 0 else { return "0%" }
         let percent = Decimal(platformFeeBps) / 100
-        return percent.formatted(.number.precision(.fractionLength(2))) + "%"
+        return percent.formatted(.number.precision(.fractionLength(0...2)).locale(locale)) + "%"
     }
 
     var subscriptionPriceLabel: String { SubscriptionQuote.money(subscriptionMonthlyCents) }
@@ -299,8 +334,14 @@ nonisolated struct CommercialState: Hashable, Sendable {
     /// subscription fee, but the platform fee and Stripe's fees still apply —
     /// and deliberately reveals nothing about the size of the allocation or how
     /// much of it is left.
+    ///
+    /// For a non-member the server reports the offer open only while fewer than
+    /// a hundred places have ever been allocated. `foundingPlacesRemaining` is
+    /// checked as well so that, once the last place is gone, no screen can
+    /// present the programme to a company that does not hold a place — even if
+    /// one of the two figures were ever reported inconsistently.
     var foundingInvitation: String? {
-        guard !isFoundingMember, foundingOfferOpen else { return nil }
+        guard !isFoundingMember, foundingOfferOpen, foundingPlacesRemaining > 0 else { return nil }
         return FoundingCopy.invitation(feeLabel: platformFeeLabel)
     }
 
@@ -310,9 +351,9 @@ nonisolated struct CommercialState: Hashable, Sendable {
         case .harbourSouthPayments where isFoundingMember:
             return FoundingCopy.trialOutcome
         case .harbourSouthPayments:
-            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Customer card payments carry a \(platformFeeLabel) Harbour South fee."
+            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Customer card payments carry a \(PlatformFeeCopy.phrase(platformFeeLabel)), plus Stripe's standard processing fees."
         case .externalProvider:
-            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Harbour South charges no transaction fee on payments you take through your own provider."
+            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Payments you take through your own provider carry a \(PlatformFeeCopy.zeroPhrase)."
         case .undecided:
             return "Choose how you take customer payments before your trial ends. Connect Stripe to use Harbour South Payments, or keep your own payment provider."
         }

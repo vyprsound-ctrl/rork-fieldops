@@ -859,15 +859,196 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         // it — stating the subscription is free without that would misrepresent
         // the commercial deal.
         let feeRiderStated = seen.contains { label in
-            label.localizedCaseInsensitiveContains("payment fee")
+            label.localizedCaseInsensitiveContains("Harbour South platform fee")
                 && label.localizedCaseInsensitiveContains("Stripe processing fees")
                 && label.contains("%")
                 && label.contains(where: \.isNumber)
         }
         XCTAssertTrue(
             feeRiderStated,
-            "The payment fee and Stripe's fees must still be disclosed. Saw: \(seen.sorted())"
+            "The platform fee and Stripe's fees must still be disclosed. Saw: \(seen.sorted())"
         )
+        assertNoRetiredFeeWording(seen)
+    }
+
+    // MARK: - Founding Member visibility around the end of the allocation
+
+    /// Relaunches the app, optionally reporting all hundred Founding places as
+    /// allocated (a DEBUG-only development switch).
+    private func relaunch(allocationFull: Bool) {
+        app.terminate()
+        app.launchArguments = allocationFull ? ["-founding-allocation-full"] : []
+        app.launch()
+    }
+
+    /// Every visible text on the current screen, scrolled top to bottom.
+    private func collectTexts(swipes: Int = 10) -> Set<String> {
+        var seen = Set<String>()
+        for _ in 0..<swipes {
+            for text in app.staticTexts.allElementsBoundByIndex {
+                let label = text.label
+                if !label.isEmpty { seen.insert(label) }
+            }
+            app.swipeUp()
+        }
+        return seen
+    }
+
+    private func assertNoRetiredFeeWording(
+        _ seen: Set<String>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for label in seen {
+            XCTAssertFalse(
+                label.localizedCaseInsensitiveContains("payment fee")
+                    || label.localizedCaseInsensitiveContains("transaction fee")
+                    || label.contains("0.30%") || label.contains("0,30%"),
+                "Harbour South's fee must be called the platform fee — found: \(label)",
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    /// Northline holds no place, and places remain: the offer is shown.
+    func testEligibleNonMemberSeesOfferWhilePlacesRemain() throws {
+        signIn(as: "Erin Vaught")
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+
+        XCTAssertTrue(
+            app.staticTexts["Founding Member benefit"].waitForExistence(timeout: 20)
+                || scrollTo(app.staticTexts["Founding Member benefit"]),
+            "An eligible non-member must be shown the Founding offer while places remain"
+        )
+
+        // And it never pretends they already hold the status.
+        let seen = collectTexts()
+        XCTAssertFalse(
+            seen.contains { $0.localizedCaseInsensitiveContains("yours to keep") },
+            "A non-member must not be told they hold Founding Member status"
+        )
+    }
+
+    /// All hundred places are gone: a company without one sees no Founding
+    /// wording anywhere it could otherwise appear.
+    func testNonMemberSeesNoFoundingWordingOnceAllocationIsFull() throws {
+        relaunch(allocationFull: true)
+        signIn(as: "Erin Vaught")
+
+        openTab("More")
+        let connect = app.buttons["more.section.payments_integration"]
+        require(connect, "the Connect Stripe row")
+        var seen = Set(app.staticTexts.allElementsBoundByIndex.map(\.label))
+        seen.formUnion(app.descendants(matching: .any).allElementsBoundByIndex.prefix(80).map(\.label))
+
+        // The Stripe screen.
+        _ = scrollTo(connect)
+        forceTap(connect)
+        require(app.navigationBars["Payments"], "the Stripe screen")
+        require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Connect Stripe")).firstMatch,
+                "the Connect Stripe action")
+        seen.formUnion(collectTexts())
+
+        // Back to More, then Subscription.
+        app.navigationBars["Payments"].buttons.firstMatch.tap()
+        require(app.navigationBars["More"], "the More menu")
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+        // Wait for the plan to render so the check is not vacuous.
+        require(app.staticTexts["/month"], "the plan price")
+        seen.formUnion(collectTexts())
+
+        for label in seen {
+            XCTAssertFalse(
+                label.localizedCaseInsensitiveContains("Founding"),
+                "Company #101 onward must never see Founding Member wording — found: \(label)"
+            )
+        }
+    }
+
+    /// All hundred places are gone: an existing member still sees its status.
+    func testFoundingMemberKeepsStatusOnceAllocationIsFull() throws {
+        relaunch(allocationFull: true)
+        signIn(as: "Tom Ellison")
+
+        openTab("More")
+        let badge = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Founding Member"))
+            .firstMatch
+        XCTAssertTrue(
+            badge.waitForExistence(timeout: 20),
+            "The member's badge must still show on the account card"
+        )
+
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+        XCTAssertTrue(
+            app.staticTexts["Founding Member"].waitForExistence(timeout: 20),
+            "The member's Founding card must still render after place 100 is allocated"
+        )
+    }
+
+    // MARK: - Connect Stripe
+
+    /// The dedicated menu row opens the existing Stripe screen — same title,
+    /// same controls, same fee rows.
+    func testConnectStripeMenuItemOpensExistingStripeScreen() throws {
+        signIn(as: "Tom Ellison")
+        openTab("More")
+
+        let row = app.buttons["more.section.payments_integration"]
+        require(row, "the Connect Stripe row in More")
+        XCTAssertTrue(row.label.localizedCaseInsensitiveContains("Connect Stripe"), "Row label was: \(row.label)")
+        _ = scrollTo(row)
+        forceTap(row)
+
+        require(app.navigationBars["Payments"], "the existing Stripe (Payments) screen")
+        require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Manage Stripe")).firstMatch,
+                "the existing Stripe action for a connected account")
+
+        let seen = collectTexts()
+        XCTAssertTrue(seen.contains("Harbour South platform fee"), "The fee row must be named the platform fee. Saw: \(seen.sorted())")
+        XCTAssertTrue(seen.contains("0.3%") || seen.contains("0,3%"), "A connected company's platform fee reads 0.3%. Saw: \(seen.sorted())")
+        XCTAssertTrue(seen.contains("0%"), "The own-provider platform fee reads 0%. Saw: \(seen.sorted())")
+        XCTAssertTrue(
+            seen.contains { $0.localizedCaseInsensitiveContains("Stripe's normal processing fees") },
+            "Stripe's own fees must still be stated separately"
+        )
+        assertNoRetiredFeeWording(seen)
+    }
+
+    /// A company that has not connected sees the Connect Stripe action on the
+    /// same screen.
+    func testConnectStripeMenuItemOffersConnectWhenNotConnected() throws {
+        signIn(as: "Erin Vaught")
+        openTab("More")
+
+        let row = app.buttons["more.section.payments_integration"]
+        require(row, "the Connect Stripe row in More")
+        _ = scrollTo(row)
+        forceTap(row)
+
+        require(app.navigationBars["Payments"], "the existing Stripe (Payments) screen")
+        require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Connect Stripe")).firstMatch,
+                "the existing Connect Stripe action")
+    }
+
+    /// Subscription keeps its link, and it reaches the very same screen.
+    func testSubscriptionStripeLinkStillReachesTheSameScreen() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+
+        let link = app.staticTexts["Manage your Stripe account and payouts"]
+        require(link, "the Stripe link on Subscription")
+        _ = scrollTo(link)
+        forceTap(link)
+
+        require(app.navigationBars["Payments"], "the same Stripe (Payments) screen")
+        require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Manage Stripe")).firstMatch,
+                "the existing Stripe action")
     }
 
     // MARK: - Role isolation
@@ -881,7 +1062,7 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         openTab("More")
 
         for forbidden in [
-            "Invoices", "Payments", "Accounts receivable", "Subscription & Users",
+            "Invoices", "Payments", "Connect Stripe", "Accounts receivable", "Subscription & Users",
             "Reports", "Dispatch", "Quotes", "Customers"
         ] {
             XCTAssertFalse(

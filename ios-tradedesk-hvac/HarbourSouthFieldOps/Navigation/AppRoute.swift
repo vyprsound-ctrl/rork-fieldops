@@ -17,8 +17,10 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     case paymentTerms
     case companyProfile
     case settings
-    /// Settings → Integrations → Payments. The central Stripe and
-    /// payment-model screen.
+    /// The central Stripe and payment-model screen. Offered at the top level of
+    /// More as "Connect Stripe" (see `menuTitle(_:)`) and still reachable from
+    /// Settings → Integrations → Payments and from Subscription. Every entry
+    /// opens this same route, so there is one Stripe surface, not three.
     case payments_integration
     /// The company's own external payment URL, reached from the Payments
     /// screen. No longer a top-level settings row: a pasted link is one of two
@@ -72,6 +74,18 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .fieldWorkers: return terms.WorkerPlural
         case .workerLocations: return "\(terms.Worker) locations"
         default: return title
+        }
+    }
+
+    /// The row label in the More menu.
+    ///
+    /// The same as `title(_:)` except for the Payments screen, which the menu
+    /// names by the action an owner is looking for. The row opens the existing
+    /// screen unchanged; only the label on the way in differs.
+    func menuTitle(_ terms: Terminology) -> String {
+        switch self {
+        case .payments_integration: return "Connect Stripe"
+        default: return title(terms)
         }
     }
 

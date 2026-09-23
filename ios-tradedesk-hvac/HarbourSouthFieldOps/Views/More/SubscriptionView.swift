@@ -76,7 +76,7 @@ struct SubscriptionView: View {
     ///   5. The arithmetic, for whoever wants to check it.
     ///
     /// Nothing was deleted: every card that existed still exists, and the
-    /// pricing model, tiers and 0.30% fee are untouched.
+    /// pricing model, tiers and 0.3% platform fee are untouched.
     private func loaded(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             if let alert = overview.alert {

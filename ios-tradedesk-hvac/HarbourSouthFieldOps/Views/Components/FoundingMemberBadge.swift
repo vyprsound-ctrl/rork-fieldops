@@ -30,9 +30,9 @@ struct FoundingMemberBadge: View {
     /// the server via `CommercialState` — this view never works it out.
     let isBenefitActive: Bool
     var size: Size = .full
-    /// The platform fee as a person reads it ("0.30%"). Passed in rather than
+    /// The platform fee as a person reads it ("0.3%"). Passed in rather than
     /// hard-coded so the rider always matches the company's actual fee.
-    var feeLabel: String = "0.30%"
+    var feeLabel: String = "0.3%"
 
     /// All Founding wording comes from `FoundingCopy`, so this view cannot
     /// drift away from the other screens that describe the same programme.

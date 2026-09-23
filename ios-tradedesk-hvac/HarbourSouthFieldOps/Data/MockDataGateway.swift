@@ -4077,14 +4077,15 @@ actor MockDataGateway: DataGateway {
         }
 
         let link = company(session)?.onlinePaymentLinkURL
+        let connected = Self.developmentStripeConnected(session.companyID)
         record("payments.connect.status", session, allowed: true, "Development Stripe position — no live account behind it")
 
         return ConnectAccountStatus(
-            readiness: .ready,
-            accountID: "acct_development",
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            detailsSubmitted: true,
+            readiness: connected ? .ready : .notConnected,
+            accountID: connected ? "acct_development" : nil,
+            chargesEnabled: connected,
+            payoutsEnabled: connected,
+            detailsSubmitted: connected,
             requirementsDue: [],
             disabledReason: nil,
             canManage: session.can(.paymentsManage) || session.can(.saasBillingManage),
@@ -4097,6 +4098,28 @@ actor MockDataGateway: DataGateway {
     }
 
     // MARK: - Commercial position
+
+    /// Which seeded company holds a Founding place. Gulf Coast Air does;
+    /// Northline Plumbing does not.
+    private static func developmentFoundingMember(_ companyID: String) -> Bool {
+        companyID == "cmp_gulfcoast"
+    }
+
+    /// Which seeded company has a connected Stripe account. Northline has not
+    /// connected, so the "Connect Stripe" path is the one it sees.
+    private static func developmentStripeConnected(_ companyID: String) -> Bool {
+        companyID == "cmp_gulfcoast"
+    }
+
+    /// DEBUG launch argument that reports all hundred Founding places as
+    /// allocated. Never true in a release build.
+    private static var developmentAllocationFull: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-founding-allocation-full")
+        #else
+        return false
+        #endif
+    }
 
     /// The seeded company's commercial position.
     ///
@@ -4117,6 +4140,14 @@ actor MockDataGateway: DataGateway {
     /// unclaimed. The UI must render none of those figures. A test that proves
     /// the number is absent is only worth anything if the number was actually
     /// there to leak.
+    ///
+    /// The SECOND seeded company (Northline) holds no place and has not
+    /// connected Stripe, so the non-member path — the invitation while places
+    /// remain, and silence once they are gone — is exercised as well.
+    ///
+    /// Launching a DEBUG build with `-founding-allocation-full` reports all
+    /// hundred places as allocated, which is how the UI suite proves a
+    /// non-member then sees no Founding wording while a member keeps its status.
     func commercialState(session: TenantSession) async throws -> CommercialState {
         try await Task.sleep(for: latency)
         guard session.can(.saasBillingRead) else {
@@ -4137,33 +4168,40 @@ actor MockDataGateway: DataGateway {
             "Development commercial position — seeded, not a live Stripe account"
         )
 
+        let isMember = Self.developmentFoundingMember(session.companyID)
+        let connected = Self.developmentStripeConnected(session.companyID)
+        let claimed = Self.developmentAllocationFull ? 100 : 27
+        let remaining = 100 - claimed
+
         return CommercialState(
-            paymentModel: .harbourSouthPayments,
+            paymentModel: connected ? .harbourSouthPayments : .undecided,
             subscriptionStatus: subscription?.status ?? .active,
             trialEndsAt: nil,
             trialDaysRemaining: 0,
             isTrialActive: false,
-            stripeConnected: true,
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            detailsSubmitted: true,
+            stripeConnected: connected,
+            chargesEnabled: connected,
+            payoutsEnabled: connected,
+            detailsSubmitted: connected,
             requirementsDue: [],
             disabledReason: nil,
-            stripeAccountID: "acct_development",
-            foundingMemberNumber: 27,
-            foundingClaimedAt: Date(timeIntervalSinceNow: -60 * 60 * 24 * 45),
-            foundingPlacesClaimed: 27,
-            foundingPlacesRemaining: 73,
-            foundingOfferOpen: true,
-            foundingBenefitActive: true,
-            qualifyingPaymentsThisMonth: 3,
-            lastQualifyingPaymentAt: Date(timeIntervalSinceNow: -60 * 60 * 36),
+            stripeAccountID: connected ? "acct_development" : nil,
+            foundingMemberNumber: isMember ? 27 : nil,
+            foundingClaimedAt: isMember ? Date(timeIntervalSinceNow: -60 * 60 * 24 * 45) : nil,
+            foundingPlacesClaimed: claimed,
+            foundingPlacesRemaining: remaining,
+            // Mirrors company_commercial_state(): open while a place remains,
+            // or to the company that already holds one.
+            foundingOfferOpen: remaining > 0 || isMember,
+            foundingBenefitActive: isMember,
+            qualifyingPaymentsThisMonth: isMember ? 3 : 0,
+            lastQualifyingPaymentAt: isMember ? Date(timeIntervalSinceNow: -60 * 60 * 36) : nil,
             activityMonthStart: Calendar.current.dateInterval(of: .month, for: Date())?.start,
             tierID: quote.tierID,
             tierName: quote.tierName,
             subscriptionMonthlyCents: quote.monthlyPriceCents,
-            // Zero because the Founding benefit is live this month.
-            effectiveMonthlyCents: 0,
+            // Zero only while a member's Founding benefit is live this month.
+            effectiveMonthlyCents: isMember ? 0 : quote.monthlyPriceCents,
             platformFeeBps: 30,
             externalPaymentURL: company(session)?.onlinePaymentLinkURL,
             // The development company has no customer-facing email configured;

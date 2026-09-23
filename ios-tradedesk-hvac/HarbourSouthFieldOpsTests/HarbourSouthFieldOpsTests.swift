@@ -812,8 +812,8 @@ struct FoundingMemberCopyTests {
             FoundingCopy.benefitPaused,
             FoundingCopy.statusKept,
             FoundingCopy.trialOutcome,
-            FoundingCopy.invitation(feeLabel: "0.30%"),
-            FoundingCopy.feeRider("0.30%")
+            FoundingCopy.invitation(feeLabel: "0.3%"),
+            FoundingCopy.feeRider("0.3%")
         ]
     }
 
@@ -833,7 +833,7 @@ struct FoundingMemberCopyTests {
     /// may be tied to that figure — or to any other count.
     ///
     /// The fee rider and the invitation are excluded because they must quote
-    /// the platform fee ("0.30%"); that is a rate, not a headcount, and
+    /// the platform fee ("0.3%"); that is a rate, not a headcount, and
     /// `forbiddenWordingIsAbsent` already proves neither leaks an allocation.
     @Test("No sentence describing the status contains a figure")
     func noDigitsAnywhere() {
@@ -854,7 +854,7 @@ struct FoundingMemberCopyTests {
 
     @Test("The benefit is stated as zero subscription fees, conditional on processing payments")
     func benefitIsStatedCorrectly() {
-        let invitation = FoundingCopy.invitation(feeLabel: "0.30%")
+        let invitation = FoundingCopy.invitation(feeLabel: "0.3%")
         #expect(invitation.localizedCaseInsensitiveContains("zero"))
         #expect(invitation.localizedCaseInsensitiveContains("subscription fees"))
         #expect(invitation.localizedCaseInsensitiveContains("actively processing customer payments"))
@@ -864,8 +864,8 @@ struct FoundingMemberCopyTests {
     /// commercial deal.
     @Test("The invitation always carries the platform fee and Stripe's fees")
     func invitationCarriesTheFeeRider() {
-        let invitation = FoundingCopy.invitation(feeLabel: "0.30%")
-        #expect(invitation.contains("0.30%"))
+        let invitation = FoundingCopy.invitation(feeLabel: "0.3%")
+        #expect(invitation.contains("0.3% Harbour South platform fee"))
         #expect(invitation.localizedCaseInsensitiveContains("stripe processing fees"))
     }
 
@@ -874,14 +874,14 @@ struct FoundingMemberCopyTests {
     @Test("The fee rider quotes the fee it is given")
     func feeRiderUsesTheSuppliedRate() {
         #expect(FoundingCopy.feeRider("0.45%").contains("0.45%"))
-        #expect(FoundingCopy.feeRider("0.45%").contains("0.30%") == false)
+        #expect(FoundingCopy.feeRider("0.45%").contains("0.3%") == false)
     }
 
     @Test("Every sentence names the product")
     func copyNamesTheProduct() {
         #expect(FoundingCopy.programme == Brand.name)
         #expect(FoundingCopy.benefitActive.contains(Brand.name))
-        #expect(FoundingCopy.invitation(feeLabel: "0.30%").contains(Brand.name))
+        #expect(FoundingCopy.invitation(feeLabel: "0.3%").contains(Brand.name))
         #expect(FoundingCopy.trialOutcome.contains(Brand.name))
     }
 
@@ -894,6 +894,136 @@ struct FoundingMemberCopyTests {
             #expect(FoundingCopy.statusKept.localizedCaseInsensitiveContains(word) == false)
             #expect(FoundingCopy.benefitPaused.localizedCaseInsensitiveContains(word) == false)
         }
+    }
+
+    /// The fee is called the platform fee, and Stripe's fees are named as a
+    /// separate charge alongside it.
+    @Test("The fee rider names the 0.3% Harbour South platform fee and Stripe's fees separately")
+    func feeRiderUsesPlatformFeeWording() {
+        let rider = FoundingCopy.feeRider("0.3%")
+        #expect(rider == "The 0.3% Harbour South platform fee and standard Stripe processing fees still apply.")
+        for retired in PlatformFeeCopy.retiredWording {
+            #expect(rider.localizedCaseInsensitiveContains(retired) == false, "\"\(rider)\" still says \"\(retired)\"")
+        }
+    }
+}
+
+/// Harbour South's own fee is described as the "platform fee" — 0.3% for a
+/// Stripe-connected company, 0% for one on its own provider. These tests pin
+/// the WORDING only: the rate is the server's `platformFeeBps`, which the
+/// label must render without altering.
+struct PlatformFeeWordingTests {
+
+    private func state(bps: Int, model: PaymentModel) -> CommercialState {
+        CommercialState(
+            paymentModel: model,
+            subscriptionStatus: .active,
+            trialEndsAt: nil,
+            trialDaysRemaining: 0,
+            isTrialActive: false,
+            stripeConnected: model == .harbourSouthPayments,
+            chargesEnabled: model == .harbourSouthPayments,
+            payoutsEnabled: model == .harbourSouthPayments,
+            detailsSubmitted: model == .harbourSouthPayments,
+            requirementsDue: [],
+            disabledReason: nil,
+            stripeAccountID: nil,
+            foundingMemberNumber: nil,
+            foundingClaimedAt: nil,
+            foundingPlacesClaimed: 0,
+            foundingPlacesRemaining: 100,
+            foundingOfferOpen: true,
+            foundingBenefitActive: false,
+            qualifyingPaymentsThisMonth: 0,
+            lastQualifyingPaymentAt: nil,
+            activityMonthStart: nil,
+            tierID: "team",
+            tierName: "Team",
+            subscriptionMonthlyCents: 3298,
+            effectiveMonthlyCents: 3298,
+            platformFeeBps: bps,
+            externalPaymentURL: nil,
+            businessEmail: nil,
+            canManageBilling: true
+        )
+    }
+
+    private let us = Locale(identifier: "en_US")
+
+    @Test("30 basis points reads 0.3%")
+    func thirtyBasisPointsReadsPointThree() {
+        #expect(state(bps: 30, model: .harbourSouthPayments).platformFeeLabel(locale: us) == "0.3%")
+    }
+
+    /// Dropping the trailing zero must never round a real rate away.
+    @Test("Other rates are rendered exactly, not rounded")
+    func otherRatesAreExact() {
+        #expect(state(bps: 25, model: .harbourSouthPayments).platformFeeLabel(locale: us) == "0.25%")
+        #expect(state(bps: 100, model: .harbourSouthPayments).platformFeeLabel(locale: us) == "1%")
+        #expect(state(bps: 0, model: .externalProvider).platformFeeLabel(locale: us) == "0%")
+    }
+
+    /// The calculation is untouched: the label reads the server's figure and
+    /// the figure itself is carried through unchanged.
+    @Test("The fee figure the server reports is carried through unchanged")
+    func feeFigureIsUnchanged() {
+        let connected = state(bps: 30, model: .harbourSouthPayments)
+        #expect(connected.platformFeeBps == 30)
+        #expect(Decimal(connected.platformFeeBps) / 10_000 == Decimal(string: "0.003"))
+    }
+
+    @Test("A Stripe-connected company is told the 0.3% Harbour South platform fee")
+    func connectedWording() {
+        #expect(PlatformFeeCopy.phrase("0.3%") == "0.3% Harbour South platform fee")
+        #expect(PlatformFeeCopy.rowTitle == "Harbour South platform fee")
+
+        let outcome = state(bps: 30, model: .harbourSouthPayments).trialOutcomeMessage
+        #expect(outcome.contains("Harbour South platform fee"))
+        #expect(outcome.localizedCaseInsensitiveContains("Stripe's standard processing fees"))
+    }
+
+    @Test("A company on its own provider is told the 0% Harbour South platform fee")
+    func zeroWording() {
+        #expect(PlatformFeeCopy.zeroPhrase == "0% Harbour South platform fee")
+        let outcome = state(bps: 0, model: .externalProvider).trialOutcomeMessage
+        #expect(outcome.contains("0% Harbour South platform fee"))
+    }
+
+    @Test("No fee sentence uses the retired payment-fee or transaction-fee wording")
+    func retiredWordingIsGone() {
+        let sentences = [
+            state(bps: 30, model: .harbourSouthPayments).trialOutcomeMessage,
+            state(bps: 0, model: .externalProvider).trialOutcomeMessage,
+            FoundingCopy.feeRider("0.3%"),
+            FoundingCopy.invitation(feeLabel: "0.3%"),
+            PlatformFeeCopy.zeroPhrase,
+            PlatformFeeCopy.rowTitle
+        ]
+        for sentence in sentences {
+            for retired in PlatformFeeCopy.retiredWording {
+                #expect(sentence.localizedCaseInsensitiveContains(retired) == false, "\"\(sentence)\" still says \"\(retired)\"")
+            }
+        }
+    }
+}
+
+/// The dedicated Connect Stripe entry is the existing Payments screen under a
+/// clearer menu label — the same route, the same permission, no second screen.
+struct ConnectStripeMenuTests {
+
+    @Test("The More menu names the Payments screen Connect Stripe")
+    func menuLabel() {
+        #expect(MoreSection.payments_integration.menuTitle(Trade.hvac.terminology) == "Connect Stripe")
+        // Its screen title and every other row are unchanged.
+        #expect(MoreSection.payments_integration.title == "Payments")
+        #expect(MoreSection.subscription.menuTitle(Trade.hvac.terminology) == MoreSection.subscription.title(Trade.hvac.terminology))
+    }
+
+    @Test("Connect Stripe opens the existing route under the existing owner-only gate")
+    func sameRouteSameGate() {
+        #expect(AppRoute.more(.payments_integration).id == "more-payments_integration")
+        #expect(MoreSection.payments_integration.requiredPermission == .saasBillingRead)
+        #expect(MoreSection.payments_integration.isBuilt)
     }
 }
 
@@ -1648,5 +1778,129 @@ struct FoundingMemberStateTests {
     @Test("The trial outcome for a member carries the correct wording")
     func trialOutcomeUsesSharedCopy() {
         #expect(state(number: 27, offerOpen: true, benefitActive: true).trialOutcomeMessage == FoundingCopy.trialOutcome)
+    }
+}
+
+/// Who is shown Founding wording, around the end of the allocation.
+///
+/// The server decides membership and whether places remain (proved against the
+/// live database by `backend/tests/founding-member-suite.sql`); these tests
+/// prove the app shows the offer while places remain, and only to members once
+/// they are gone.
+struct FoundingAllocationBoundaryTests {
+
+    private func state(number: Int?, claimed: Int) -> CommercialState {
+        let remaining = max(0, 100 - claimed)
+        return CommercialState(
+            paymentModel: .harbourSouthPayments,
+            subscriptionStatus: .active,
+            trialEndsAt: nil,
+            trialDaysRemaining: 0,
+            isTrialActive: false,
+            stripeConnected: true,
+            chargesEnabled: true,
+            payoutsEnabled: true,
+            detailsSubmitted: true,
+            requirementsDue: [],
+            disabledReason: nil,
+            stripeAccountID: "acct_1",
+            foundingMemberNumber: number,
+            foundingClaimedAt: number == nil ? nil : Date(),
+            foundingPlacesClaimed: claimed,
+            foundingPlacesRemaining: remaining,
+            // Exactly as company_commercial_state() computes it.
+            foundingOfferOpen: remaining > 0 || number != nil,
+            foundingBenefitActive: number != nil,
+            qualifyingPaymentsThisMonth: number == nil ? 0 : 1,
+            lastQualifyingPaymentAt: nil,
+            activityMonthStart: nil,
+            tierID: "team",
+            tierName: "Team",
+            subscriptionMonthlyCents: 3298,
+            effectiveMonthlyCents: number == nil ? 3298 : 0,
+            platformFeeBps: 30,
+            externalPaymentURL: nil,
+            businessEmail: nil,
+            canManageBilling: true
+        )
+    }
+
+    /// Every piece of Founding wording a state can produce.
+    private func foundingWording(_ s: CommercialState) -> [String] {
+        [s.foundingBadgeTitle, s.foundingBenefitMessage, s.foundingInvitation]
+            .compactMap { $0 }
+            + (s.headline.contains("Founding") ? [s.headline] : [])
+            + (s.trialOutcomeMessage.contains("Founding") ? [s.trialOutcomeMessage] : [])
+    }
+
+    @Test("With 98 places allocated an eligible non-member sees the offer (they would be #99)")
+    func offerShownBeforePosition99() {
+        #expect(state(number: nil, claimed: 98).foundingInvitation != nil)
+    }
+
+    @Test("With 99 places allocated an eligible non-member still sees the offer (they would be #100)")
+    func offerShownBeforePosition100() {
+        #expect(state(number: nil, claimed: 99).foundingInvitation != nil)
+    }
+
+    @Test("With all 100 allocated a non-member (#101 onward) sees no Founding wording at all")
+    func nothingForPosition101() {
+        let outsider = state(number: nil, claimed: 100)
+        #expect(outsider.isFoundingMember == false)
+        #expect(outsider.foundingInvitation == nil)
+        #expect(foundingWording(outsider).isEmpty, "Saw: \(foundingWording(outsider))")
+    }
+
+    @Test("Members #1, #99 and #100 keep their status after all 100 are allocated")
+    func membersKeepStatus() {
+        for number in [1, 99, 100] {
+            let member = state(number: number, claimed: 100)
+            #expect(member.isFoundingMember)
+            #expect(member.foundingBadgeTitle == FoundingCopy.badgeTitle)
+            #expect(member.foundingBenefitMessage == FoundingCopy.benefitActive)
+            #expect(member.foundingInvitation == nil)
+        }
+    }
+
+    /// Defence in depth: even if a payload ever said "open" with nothing left,
+    /// a non-member is not invited.
+    @Test("No places remaining means no invitation, whatever the open flag says")
+    func remainingIsAuthoritativeForTheInvitation() {
+        let inconsistent = CommercialState(
+            paymentModel: .undecided, subscriptionStatus: .active, trialEndsAt: nil,
+            trialDaysRemaining: 0, isTrialActive: false, stripeConnected: false,
+            chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false,
+            requirementsDue: [], disabledReason: nil, stripeAccountID: nil,
+            foundingMemberNumber: nil, foundingClaimedAt: nil,
+            foundingPlacesClaimed: 100, foundingPlacesRemaining: 0, foundingOfferOpen: true,
+            foundingBenefitActive: false, qualifyingPaymentsThisMonth: 0,
+            lastQualifyingPaymentAt: nil, activityMonthStart: nil, tierID: "team",
+            tierName: "Team", subscriptionMonthlyCents: 3298, effectiveMonthlyCents: 3298,
+            platformFeeBps: 30, externalPaymentURL: nil, businessEmail: nil, canManageBilling: true
+        )
+        #expect(inconsistent.foundingInvitation == nil)
+    }
+
+    /// The development stack seeds one member and one non-member, so the UI
+    /// suite exercises both paths for real.
+    @Test("Development data: Gulf Coast holds a place, Northline is an eligible non-member")
+    func developmentSeedCoversBothPaths() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let gulf = TenantSession(
+            userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
+            displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac
+        )
+        let north = TenantSession(
+            userID: "usr_north_owner", companyID: "cmp_northline", role: .owner,
+            displayName: "Erin Vaught", email: "erin@northlineplumbing.com", trade: .plumbing
+        )
+        let member = try await gateway.commercialState(session: gulf)
+        let outsider = try await gateway.commercialState(session: north)
+        #expect(member.isFoundingMember)
+        #expect(member.platformFeeBps == 30)
+        #expect(outsider.isFoundingMember == false)
+        #expect(outsider.foundingInvitation != nil)
+        #expect(outsider.stripeState == .notConnected)
+        #expect(outsider.platformFeeBps == 30)
     }
 }

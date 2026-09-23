@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Settings → Integrations → Payments.
+/// More → Connect Stripe, and Settings → Integrations → Payments.
 ///
+/// Both entries open this one screen; there is no second Stripe surface.
 /// The one place an owner manages how their customers pay them, and what that
 /// costs. It replaces the old "Online payment link" screen, whose copy framed a
 /// pasted URL as the primary way to take money — which is no longer the Harbour
@@ -69,7 +70,7 @@ struct PaymentsIntegrationView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your customers will pay through your existing provider's link. Harbour South charges no transaction fee on those payments, and your normal subscription applies.")
+            Text("Your customers will pay through your existing provider's link. Those payments carry a \(PlatformFeeCopy.zeroPhrase), and your normal subscription applies.")
         }
     }
 
@@ -255,7 +256,7 @@ struct PaymentsIntegrationView: View {
                 tone: commercial.foundingBenefitActive ? Theme.green : Theme.ink
             )
             Divider()
-            detailRow("Harbour South payment fee", commercial.platformFeeLabel, tone: Theme.ink)
+            detailRow(PlatformFeeCopy.rowTitle, commercial.platformFeeLabel, tone: Theme.ink)
 
             if commercial.isFoundingMember {
                 Divider()
@@ -350,7 +351,7 @@ struct PaymentsIntegrationView: View {
                         tone: Theme.ink
                     )
                     Divider()
-                    detailRow("Harbour South transaction fee", "0%", tone: Theme.green)
+                    detailRow(PlatformFeeCopy.rowTitle, "0%", tone: Theme.green)
                     Divider()
                     detailRow(
                         "Your payment link",

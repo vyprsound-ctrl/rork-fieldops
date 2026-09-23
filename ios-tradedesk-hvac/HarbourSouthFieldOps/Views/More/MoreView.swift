@@ -21,7 +21,11 @@ struct MoreView: View {
         // because it is operational: a field worker asking for a part or
         // reporting a delay is time-critical, and the database has always
         // delivered those threads to office roles with nowhere to read them.
-        return [.dispatch, .messages, .workerLocations, .fieldWorkers, .quotes, .invoices,
+        // `.payments_integration` is the "Connect Stripe" row: the existing
+        // Payments screen, surfaced at the top level so an owner does not have
+        // to know it lives under Settings → Integrations. Gated on
+        // `saasBillingRead`, so only the owner is offered it.
+        return [.dispatch, .messages, .payments_integration, .workerLocations, .fieldWorkers, .quotes, .invoices,
                 .payments, .recurring, .reports, .smsCredits, .subscription, .businessEmail,
                 .notifications, .settings, .dataAccess, .integrations]
             .filter { section in
@@ -86,6 +90,7 @@ struct MoreView: View {
                                 sectionRow(section, overview: overview)
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("more.section.\(section.rawValue)")
 
                             if index < visibleSections.count - 1 {
                                 Divider().padding(.leading, 58)
@@ -236,7 +241,7 @@ struct MoreView: View {
                 .background(needsAttention(section) ? Theme.accent : Theme.primaryTint)
                 .clipShape(.rect(cornerRadius: 8))
 
-            Text(section.title(terms))
+            Text(section.menuTitle(terms))
                 .font(.body)
                 .foregroundStyle(Theme.ink)
 
@@ -289,6 +294,9 @@ struct MoreView: View {
         case .payments: return overview.paymentCount.map(String.init)
         case .smsCredits: return overview.smsBalance.map(String.init)
         case .subscription: return overview.subscriptionSummary
+        case .payments_integration:
+            guard let state = viewModel.commercial?.stripeState else { return nil }
+            return state.isConnected ? "Connected" : state.title
         default: return nil
         }
     }

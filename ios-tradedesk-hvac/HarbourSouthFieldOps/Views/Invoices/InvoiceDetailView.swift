@@ -329,7 +329,7 @@ struct InvoiceDetailView: View {
                 .buttonStyle(.plain)
             }
         } else {
-            Text("How customers pay this invoice is set by the account owner under Settings → Integrations → Payments.")
+            Text("How customers pay this invoice is set by the account owner under Connect Stripe in the More tab.")
                 .font(.caption)
                 .foregroundStyle(Theme.meta)
                 .fixedSize(horizontal: false, vertical: true)
