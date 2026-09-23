@@ -25,6 +25,8 @@ struct OfficeConversationView: View {
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = OfficeConversationViewModel()
     @FocusState private var isComposerFocused: Bool
+    /// The chat photo open full screen, if any.
+    @State private var viewingPhoto: ViewedPhoto?
 
     private var session: TenantSession? { env.activeSession }
 
@@ -40,6 +42,16 @@ struct OfficeConversationView: View {
         .navigationTitle(viewModel.state.value?.subject ?? "Message")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: threadID) { await reload() }
+        // The SAME viewer the job screen uses — one implementation, one
+        // loading path (`jobMediaURL`), so a job-chat photo opened here is
+        // byte-for-byte the image the job page shows.
+        .fullScreenCover(item: $viewingPhoto) { photo in
+            JobPhotoViewer(
+                reference: photo.reference,
+                title: "Photo",
+                subtitle: photo.subtitle
+            )
+        }
     }
 
     @ViewBuilder
@@ -175,7 +187,7 @@ struct OfficeConversationView: View {
                 if !message.photoReferences.isEmpty {
                     HStack(spacing: 6) {
                         ForEach(message.photoReferences, id: \.self) { reference in
-                            JobPhotoThumbnail(reference: reference, size: 54)
+                            photoButton(reference, in: message)
                         }
                     }
                 }
@@ -196,23 +208,49 @@ struct OfficeConversationView: View {
 
             if !message.isMine { Spacer(minLength: 40) }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Self.spokenLabel(for: message))
+        // `.contain`, not `.combine`: combining folded the photos into one
+        // static element, so neither VoiceOver nor a test could reach them as
+        // the buttons they now are. Each photo announces itself instead.
+        .accessibilityElement(children: .contain)
     }
 
-    /// What VoiceOver reads for one message.
+    /// One chat photo, and the tap target for its full-size view.
     ///
-    /// A photo is content, so it is announced. An image-only message would
-    /// otherwise be read as the sender's name and a time with nothing in it.
-    private static func spokenLabel(for message: OfficeMessageRow) -> String {
-        var parts = ["\(message.senderName), \(message.timeLabel)"]
-        if !message.body.isEmpty { parts.append(message.body) }
-        switch message.photoReferences.count {
-        case 0: break
-        case 1: parts.append("1 photo")
-        case let count: parts.append("\(count) photos")
+    /// THE DEFECT THIS FIXES: the thumbnail used to be rendered bare, with no
+    /// action and no viewer, so a photo in a conversation could be seen but
+    /// never inspected. It is now a button onto the job screen's viewer.
+    ///
+    /// Deliberately NOT conditioned on who sent it, on the role, or on the
+    /// thread having a job: the recipient needs to read a rating plate far
+    /// more than the sender does. Only a reference with no file behind it is
+    /// inert — the same rule the job page applies, so the viewer never opens
+    /// onto nothing.
+    private func photoButton(_ reference: String, in message: OfficeMessageRow) -> some View {
+        let hasImage = JobMediaReference.parse(reference).hasImage
+        return Button {
+            guard hasImage else { return }
+            viewingPhoto = ViewedPhoto(
+                reference: reference,
+                subtitle: "\(message.senderName) · \(message.timeLabel)"
+            )
+        } label: {
+            JobPhotoThumbnail(reference: reference, size: 54)
+                // The whole visible square is the target, and a filled image's
+                // overflow can never steal a tap meant for its neighbour.
+                .contentShape(.rect(cornerRadius: 10))
         }
-        return parts.joined(separator: ". ")
+        .buttonStyle(PressableTileStyle())
+        .disabled(!hasImage)
+        .accessibilityLabel(message.isMine ? "Your photo" : "Photo from \(message.senderName)")
+        .accessibilityHint(hasImage ? "Opens the photo full size" : "No image file is attached")
+        .accessibilityIdentifier("chat.photo")
+    }
+
+    /// What the full-screen viewer is showing.
+    private struct ViewedPhoto: Identifiable {
+        let reference: String
+        let subtitle: String
+        var id: String { reference }
     }
 
     private func composer(_ conversation: OfficeConversation) -> some View {

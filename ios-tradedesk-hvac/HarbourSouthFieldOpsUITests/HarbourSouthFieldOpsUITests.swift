@@ -565,6 +565,150 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         forceTap(open)
     }
 
+    // MARK: - Opening chat photos full size
+    //
+    // THE DEFECT THESE EXIST FOR: Build 17 rendered chat photos as bare
+    // thumbnails with no action, so a recipient could see a photo but never
+    // inspect it. Every case taps the photo itself, asserts the job screen's
+    // viewer shows a real image, dismisses it, and asserts the conversation is
+    // back. Sent and received photos are both covered, so nothing can pass
+    // while the tap is conditioned on who sent the photo.
+
+    /// A. Owner, general conversation: their own photo, and the engineer's.
+    func testOwnerOpensPhotosInGeneralConversation() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Messages")
+        require(app.navigationBars["Messages"], "the Messages inbox")
+
+        openThread("Van parking at the depot")
+        assertOpensFullSize("Your photo", "the owner's own photo on a general conversation")
+        assertOpensFullSize("Photo from Marcus Hale", "the engineer's photo, received by the owner on a general conversation")
+    }
+
+    /// B. Engineer sends on a job conversation, owner receives and opens it.
+    func testOwnerOpensEngineerPhotoInJobConversation() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Messages")
+        require(app.navigationBars["Messages"], "the Messages inbox")
+
+        openThread("Condenser fan motor")
+        assertJobContext(is: "J-1042")
+        assertOpensFullSize("Photo from Marcus Hale", "the engineer's photo, received by the owner on a job conversation")
+        assertOpensFullSize("Your photo", "the owner's own photo on a job conversation")
+    }
+
+    /// C. Owner sends on a job conversation, engineer receives and opens it.
+    func testEngineerOpensOwnerPhotoInJobConversation() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Condenser fan motor")
+        assertJobContext(is: "J-1042")
+        assertOpensFullSize("Photo from Tom Ellison", "the owner's photo, received by the engineer on a job conversation")
+        assertOpensFullSize("Your photo", "the engineer's own photo on a job conversation")
+    }
+
+    /// D. The job-chat photo still opens from the job page, as in Build 17.
+    func testJobChatPhotoStillOpensFromJobPage() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Messages")
+        require(app.navigationBars["Messages"], "the Messages inbox")
+
+        openThread("Condenser fan motor")
+        tapOpen(job: "J-1042")
+        require(app.staticTexts["J-1042"], "the job page for J-1042")
+
+        let row = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "Seized fan motor and bulging capacitor")
+        ).firstMatch
+        guard scrollTo(row) || row.waitForExistence(timeout: 10) else {
+            XCTFail("The job-chat photo must be listed in the job page's Photos")
+            return
+        }
+        forceTap(row)
+        assertViewerShowsImageThenDismiss("the job-chat photo opened from the job page")
+        XCTAssertTrue(
+            app.staticTexts["J-1042"].waitForExistence(timeout: 10),
+            "Dismissing the viewer must return to the job page"
+        )
+    }
+
+    /// E. Engineer, general conversation (no job page exists): own and received.
+    func testEngineerOpensPhotosInGeneralConversation() throws {
+        signIn(as: "Marcus Hale")
+        openTab("Office")
+        require(app.navigationBars["Office"], "the field worker's Office tab")
+
+        openThread("Van parking at the depot")
+        XCTAssertFalse(
+            app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "About job")).firstMatch.exists,
+            "'Van parking at the depot' has no job, so it has no job page to fall back on"
+        )
+        assertOpensFullSize("Photo from Tom Ellison", "the owner's photo, received by the engineer on a general conversation")
+        assertOpensFullSize("Your photo", "the engineer's own photo on a general conversation")
+    }
+
+    /// Taps a chat photo by its accessibility label and proves it opens full
+    /// size and dismisses back to the same conversation.
+    private func assertOpensFullSize(
+        _ label: String,
+        _ context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let photo = app.buttons[label].firstMatch
+        guard photo.waitForExistence(timeout: 15) else {
+            XCTFail("No tappable photo labelled '\(label)' for \(context)", file: file, line: line)
+            return
+        }
+        XCTAssertTrue(photo.isEnabled, "The photo must be enabled for \(context)", file: file, line: line)
+        forceTap(photo)
+        assertViewerShowsImageThenDismiss(context, file: file, line: line)
+
+        XCTAssertTrue(
+            app.buttons["composer.attachPhotos"].waitForExistence(timeout: 10),
+            "Dismissing the viewer must return to the conversation (\(context))",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The viewer must show the decoded image, not its failure state, and
+    /// Done must close it.
+    private func assertViewerShowsImageThenDismiss(
+        _ context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let image = app.images["photoViewer.image"]
+        XCTAssertTrue(
+            image.waitForExistence(timeout: 15),
+            "The full-size viewer must show the image for \(context)",
+            file: file,
+            line: line
+        )
+        XCTAssertFalse(
+            app.otherElements["photoViewer.unavailable"].exists,
+            "The viewer must not fall back to 'Photo unavailable' for \(context)",
+            file: file,
+            line: line
+        )
+
+        let done = app.navigationBars.buttons["Done"]
+        guard done.waitForExistence(timeout: 5) else {
+            XCTFail("The viewer has no Done button for \(context)", file: file, line: line)
+            return
+        }
+        done.tap()
+        XCTAssertTrue(
+            image.waitForNonExistence(timeout: 10),
+            "Done must dismiss the viewer for \(context)",
+            file: file,
+            line: line
+        )
+    }
+
     // MARK: - Dispatch
 
     /// ISSUE #12 — dispatch must be a control centre, not a display.

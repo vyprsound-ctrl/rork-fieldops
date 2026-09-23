@@ -306,6 +306,7 @@ struct JobPhotoViewer: View {
                                 committedZoom = zoom
                             }
                         }
+                        .accessibilityIdentifier("photoViewer.image")
                 } else if isLoading {
                     ProgressView().tint(.white)
                 } else {
@@ -315,6 +316,7 @@ struct JobPhotoViewer: View {
                         description: Text("This photo couldn't be loaded. Check your connection and try again.")
                     )
                     .foregroundStyle(.white)
+                    .accessibilityIdentifier("photoViewer.unavailable")
                 }
             }
             .navigationTitle(title)

@@ -1355,6 +1355,46 @@ struct MessageAttachmentTests {
         )
         #expect(result.stored == false)
     }
+
+    // ----------------------------------------------------- opening full size
+
+    /// A chat photo is openable by BOTH sides, in both kinds of conversation.
+    ///
+    /// The chat only offers the viewer for a reference that has an image
+    /// behind it, so this proves every seeded chat photo — sent AND received,
+    /// job-linked AND general — reaches the viewer for owner and worker alike.
+    @Test("Every chat photo is openable by sender and recipient, job and general")
+    func chatPhotosAreOpenableBothWays() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+
+        for threadID in ["thr_1", "thr_4"] {
+            for viewer in [owner, worker] {
+                let conversation = try await gateway.officeConversation(session: viewer, threadID: threadID)
+                let photos = conversation.messages.filter { !$0.photoReferences.isEmpty }
+                #expect(photos.contains { $0.isMine }, "\(viewer.userID) has a photo they sent in \(threadID)")
+                #expect(photos.contains { !$0.isMine }, "\(viewer.userID) has a photo they received in \(threadID)")
+                for message in photos {
+                    for reference in message.photoReferences {
+                        #expect(
+                            JobMediaReference.parse(reference).hasImage,
+                            "\(message.id) in \(threadID) must open for \(viewer.userID)"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /// Opening a job-chat photo shows the job page's image, not a copy.
+    @Test("A job-chat photo is the same reference the job page opens")
+    func jobChatPhotoMatchesJobPage() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let conversation = try await gateway.officeConversation(session: owner, threadID: "thr_1")
+        let chatReferences = Set(conversation.messages.flatMap(\.photoReferences))
+        let jobReferences = Set(try await gateway.jobDetail(session: owner, jobID: "job_1042").photos.map(\.storageReference))
+        #expect(!chatReferences.isEmpty)
+        #expect(chatReferences.isSubset(of: jobReferences))
+    }
 }
 
 // MARK: - Storage object keys
