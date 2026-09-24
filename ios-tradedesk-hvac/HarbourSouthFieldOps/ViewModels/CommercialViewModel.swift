@@ -1,8 +1,7 @@
 import Foundation
 import Observation
 
-/// Drives every commercial surface: the Payments screen, the Founding Member
-/// badge, the trial banner and the subscription screen's commercial card.
+/// Drives the Payments (Connect Stripe) screen.
 ///
 /// It holds no commercial logic. `CommercialState` arrives fully decided from
 /// `company_commercial_state()`, and this object only tracks load state and the

@@ -1,44 +1,52 @@
 import Foundation
 import Observation
 
-/// Drives the subscription screen.
+/// Drives the Subscription screen.
 ///
-/// It renders the price the database calculated. It does not compute a
-/// company's bill locally — the only arithmetic here is the "what would it cost
-/// at N people" preview, which runs over the same tier data the server used and
-/// is clearly labelled as a projection rather than a charge.
+/// Holds no commercial logic. Plans come from the database, local prices from
+/// StoreKit, and the entitlement from `company_commercial_state()`, which the
+/// server derives from Apple's verified data. A purchase is only "done" once
+/// the server has verified Apple's signed transaction and the refreshed state
+/// says so.
 @Observable
 final class SubscriptionViewModel {
     private(set) var state: LoadState<SubscriptionOverview> = .idle
-    private(set) var connectState: LoadState<ConnectAccountStatus> = .idle
-    /// The company's commercial position — trial window, Founding Member
-    /// number and monthly benefit, effective price. All decided server-side by
-    /// `company_commercial_state()`; this screen only renders it.
-    ///
-    /// Optional rather than a `LoadState`, because this screen is still useful
-    /// without it: an unreadable commercial state hides the badge and the
-    /// trial card and leaves the user arithmetic intact.
+    /// The company's position, decided server-side.
     private(set) var commercial: CommercialState?
-    /// Why the trial card and Founding Member badge are absent, when they are.
-    ///
-    /// This used to be a bare `try?`. When `company_commercial_state()` began
-    /// failing, the trial and Founding sections simply vanished with no error
-    /// anywhere — the screen looked finished and was silently wrong. The
-    /// failure is now carried so the screen can say so.
+    /// Why the plan position is absent, when it is.
     private(set) var commercialError: String?
-    private(set) var isWorking: Bool = false
+    /// Apple's local prices and intro-offer eligibility, keyed by product id.
+    private(set) var storeProducts: [String: StorePlanProduct] = [:]
+    private(set) var storeUnavailable: Bool = false
+    private(set) var workingProductID: String?
+    private(set) var isRestoring: Bool = false
+    var period: BillingPeriod = .monthly
     var actionError: String?
-    /// A Stripe onboarding or dashboard link ready to open in the browser.
-    var pendingLink: URL?
+    var notice: String?
 
-    func load(gateway: DataGateway, session: TenantSession, showLoading: Bool = true) async {
+    var isWorking: Bool { workingProductID != nil || isRestoring }
+
+    func load(gateway: DataGateway, store: StoreBillingService, session: TenantSession, showLoading: Bool = true) async {
         if showLoading { state = .loading }
         do {
             state = .loaded(try await gateway.subscriptionOverview(session: session))
         } catch {
             state = .failed(DataError.wrap(error))
         }
-        await loadConnect(gateway: gateway, session: session)
+        await refreshCommercial(gateway: gateway, session: session)
+        if let period = commercial?.billingPeriod, showLoading { self.period = period }
+
+        do {
+            let products = try await store.products()
+            storeProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+            storeUnavailable = products.isEmpty
+        } catch {
+            storeProducts = [:]
+            storeUnavailable = true
+        }
+    }
+
+    func refreshCommercial(gateway: DataGateway, session: TenantSession) async {
         do {
             commercial = try await gateway.commercialState(session: session)
             commercialError = nil
@@ -48,43 +56,80 @@ final class SubscriptionViewModel {
         }
     }
 
-    func loadConnect(gateway: DataGateway, session: TenantSession) async {
-        guard session.can(.paymentsRead) || session.can(.saasBillingRead) else { return }
-        do {
-            connectState = .loaded(try await gateway.connectAccountStatus(session: session))
-        } catch {
-            connectState = .failed(DataError.wrap(error))
-        }
+    /// The price to show: Apple's localized price when StoreKit has it, the
+    /// server's price list otherwise.
+    func priceLabel(for plan: PlanOffer, period: BillingPeriod) -> String {
+        storeProducts[plan.productID(for: period)]?.displayPrice ?? PriceLabel.usd(plan.priceCents(for: period))
     }
 
-    func startOnboarding(gateway: DataGateway, session: TenantSession) async {
-        isWorking = true
+    /// The introductory free trial offered on this product to this Apple ID,
+    /// in days, or nil. Only Apple decides eligibility.
+    func freeTrialDays(for plan: PlanOffer, period: BillingPeriod) -> Int? {
+        guard let product = storeProducts[plan.productID(for: period)],
+              product.isEligibleForIntroOffer else { return nil }
+        return product.introFreeDays
+    }
+
+    func isCurrent(_ plan: PlanOffer) -> Bool {
+        guard let commercial, commercial.hasEntitlement else { return false }
+        return commercial.planID == plan.id && commercial.billingPeriod == period
+    }
+
+    func buy(_ plan: PlanOffer, gateway: DataGateway, store: StoreBillingService, session: TenantSession) async {
+        guard session.can(.saasBillingManage) else {
+            actionError = "Only the account owner can choose a plan."
+            return
+        }
+        let productID = plan.productID(for: period)
+        workingProductID = productID
         actionError = nil
+        notice = nil
+        defer { workingProductID = nil }
+
         do {
-            pendingLink = try await gateway.beginConnectOnboarding(
-                session: session,
-                businessType: .unspecified
-            )
+            switch try await store.purchase(productID: productID, appAccountToken: UUID(uuidString: session.companyID)) {
+            case .cancelled:
+                return
+            case .pending:
+                notice = "Apple is finishing this purchase. Your plan will appear here as soon as it's approved."
+            case .purchased(let purchase):
+                let result = try await gateway.linkStorePurchases(session: session, purchases: [purchase])
+                for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
+                if result.belongsToAnotherCompany {
+                    actionError = "This Apple ID's Harbour South subscription already belongs to another company."
+                } else if result.unverified {
+                    actionError = StoreBillingError.unverified.errorDescription
+                } else {
+                    notice = "You're on \(plan.displayName). Thanks for choosing Harbour South."
+                }
+            }
         } catch {
-            actionError = DataError.wrap(error).errorDescription
+            actionError = (error as? LocalizedError)?.errorDescription ?? DataError.wrap(error).errorDescription
         }
-        isWorking = false
+        await refreshCommercial(gateway: gateway, session: session)
     }
 
-    func openStripeDashboard(gateway: DataGateway, session: TenantSession) async {
-        isWorking = true
+    func restore(gateway: DataGateway, store: StoreBillingService, session: TenantSession) async {
+        isRestoring = true
         actionError = nil
+        notice = nil
+        defer { isRestoring = false }
         do {
-            pendingLink = try await gateway.connectDashboardLink(session: session)
+            let purchases = try await store.restore()
+            guard !purchases.isEmpty else {
+                notice = "No Harbour South subscription was found for this Apple ID."
+                return
+            }
+            let result = try await gateway.linkStorePurchases(session: session, purchases: purchases)
+            for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
+            if result.belongsToAnotherCompany {
+                actionError = "This Apple ID's Harbour South subscription already belongs to another company."
+            } else {
+                notice = result.linked ? "Purchases restored." : "No active Harbour South subscription was found for this Apple ID."
+            }
         } catch {
-            actionError = DataError.wrap(error).errorDescription
+            actionError = (error as? LocalizedError)?.errorDescription ?? DataError.wrap(error).errorDescription
         }
-        isWorking = false
-    }
-
-    /// "What would N people cost?" — a projection over the published tiers, so
-    /// an owner can see the effect of hiring before they hire.
-    func projection(_ overview: SubscriptionOverview, users: Int) -> SubscriptionQuote {
-        overview.pricing.quote(for: users)
+        await refreshCommercial(gateway: gateway, session: session)
     }
 }

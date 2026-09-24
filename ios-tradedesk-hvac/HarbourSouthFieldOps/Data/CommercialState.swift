@@ -3,91 +3,18 @@ import Foundation
 // =============================================================================
 // The Harbour South commercial model, as the app renders it.
 //
-// EVERY VALUE IN THIS FILE IS COMPUTED SERVER-SIDE.
+// EVERY DECISION IN THIS FILE IS MADE SERVER-SIDE.
 //
 // `CommercialState` is a decode of one call to `company_commercial_state()`.
-// Nothing here decides whether a company is a Founding Member, what its number
-// is, whether the benefit is active this month, what its subscription costs, or
-// what platform fee applies. The database decides all six and this type carries
-// the answers. The computed properties below only turn those answers into
-// sentences — they never re-derive the answer itself.
+// The database decides whether the company holds an Apple subscription
+// entitlement, which plan and period, whether a free Apple offer is running,
+// how many people the plan allows, whether Stripe can take payments and what
+// platform fee applies. The computed properties below only turn those answers
+// into sentences.
 //
-// That distinction is the whole security model for this feature: a client that
-// cannot compute eligibility cannot grant itself eligibility.
+// The commercial model is the same for every customer. There is no founding
+// programme, no allocation and no benefit for connecting Stripe.
 // =============================================================================
-
-/// Every customer-facing sentence about the Founding Member programme.
-///
-/// WHY THIS EXISTS AS ONE TYPE
-/// The wording used to be typed directly into each screen that showed it — the
-/// badge, the subscription card and the payments screen each owned their own
-/// copy. When the commercial rules changed, three places had to change, and a
-/// screen that was missed kept publishing the old promise. That is exactly how
-/// "100 of 100 places remain" survived a correction pass.
-///
-/// Now every screen reads from here, so the wording is correct everywhere or
-/// wrong everywhere — and `forbiddenFragments` turns "wrong everywhere" into a
-/// failing test rather than something a customer discovers.
-///
-/// COMMERCIAL PRIVACY RULES, which this copy exists to enforce:
-///   - never state the size of the allocation,
-///   - never state how many places are left or taken,
-///   - never state the company's own member number,
-///   - never say a member "can receive" the benefit, which sounds conditional
-///     on someone else's decision rather than on their own trading.
-///
-/// Nothing here is tied to the number 100, so widening the programme later is a
-/// server-side change with no customer-facing consequence.
-nonisolated enum FoundingCopy {
-    /// The product's own name, so the copy renames itself with the product.
-    static var programme: String { Brand.name }
-
-    static let badgeTitle = "Founding Member"
-
-    /// The rider that must accompany every statement of the benefit. Stating
-    /// the subscription is free without it would misrepresent the deal.
-    static func feeRider(_ feeLabel: String) -> String {
-        "The \(PlatformFeeCopy.phrase(feeLabel)) and standard Stripe processing fees still apply."
-    }
-
-    /// For a company that already holds Founding Member status.
-    static var benefitActive: String {
-        "You pay zero \(programme) subscription fees while you keep actively processing customer payments through \(programme)."
-    }
-
-    /// For a member whose month has no qualifying payment yet. Worded as
-    /// something to resume, never as something forfeited.
-    static var benefitPaused: String {
-        "Process a customer payment through \(programme) this month to resume your Founding Member benefit."
-    }
-
-    static let statusKept =
-        "Your Founding Member status is yours to keep — a quiet month never takes it away."
-
-    /// For a company that does not hold the status yet.
-    static func invitation(feeLabel: String) -> String {
-        "Founding members pay zero \(programme) subscription fees while actively processing customer payments through \(programme). \(feeRider(feeLabel))"
-    }
-
-    /// What a member is told the end of the trial means for them.
-    static var trialOutcome: String {
-        "When your trial ends you pay zero \(programme) subscription fees as a Founding Member, while you keep actively processing customer payments through \(programme)."
-    }
-
-    /// Wording that must never appear in customer-facing UI again.
-    ///
-    /// Asserted by `FoundingMemberCopyTests`, so a reintroduction fails the
-    /// test suite instead of reaching TestFlight.
-    static let forbiddenFragments: [String] = [
-        "places remain",
-        "places left",
-        "remaining places",
-        "100 places",
-        "of 100",
-        "can receive",
-        "Founding Member #"
-    ]
-}
 
 /// Every customer-facing name for Harbour South's own fee.
 ///
@@ -112,6 +39,11 @@ nonisolated enum PlatformFeeCopy {
     /// party to at all.
     static var zeroPhrase: String { phrase("0%") }
 
+    /// Stated wherever the platform fee is, so the two are never confused.
+    static func withStripeFees(_ feeLabel: String) -> String {
+        "Customer card payments carry the \(phrase(feeLabel)), plus Stripe's standard processing fees, which Stripe charges separately."
+    }
+
     /// Earlier names for the same fee. Asserted absent from customer-facing
     /// copy so the old wording cannot drift back in.
     static let retiredWording: [String] = [
@@ -121,15 +53,14 @@ nonisolated enum PlatformFeeCopy {
     ]
 }
 
-/// The two permanent payment models, plus the trial's "not chosen yet".
+/// The two permanent payment models, plus "not chosen yet".
 nonisolated enum PaymentModel: String, Codable, Hashable, Sendable {
-    /// In trial, or the end of the trial has been reached without a choice.
     case undecided
     /// MODEL A — the company's own connected Stripe account, with Harbour
     /// South's platform fee on payments processed through Harbour South.
     case harbourSouthPayments
     /// MODEL B — the company keeps its existing payment provider and supplies
-    /// its customer-facing payment link. No Harbour South transaction fee.
+    /// its customer-facing payment link. No Harbour South platform fee.
     case externalProvider
 
     var title: String {
@@ -141,65 +72,223 @@ nonisolated enum PaymentModel: String, Codable, Hashable, Sendable {
     }
 }
 
-/// Where the company's Stripe onboarding actually stands.
+// MARK: - Stripe
+
+/// Where the company's Stripe account actually stands, in five states a
+/// person can act on. Derived in ONE place (`classify`) from what Stripe
+/// reports, so every screen uses the same words.
 ///
-/// Derived from the same three booleans Stripe itself reports, in one place, so
-/// no screen invents a fourth interpretation of "connected".
+/// Stripe's own internal codes (`requirements.past_due`, `rejected.fraud`, …)
+/// are never shown to anybody; they only decide which of these applies.
 nonisolated enum StripeConnectionState: Hashable, Sendable {
-    /// No Stripe account for this company at all.
+    /// No Stripe account for this company.
     case notConnected
-    /// Account created, Stripe still wants information.
-    case onboarding
-    /// Charges enabled. The company can take a customer card payment.
+    /// Account exists; Stripe still needs details before payments can start.
+    case setupIncomplete
+    /// Charges enabled.
     case connected
-    /// Stripe is asking for something specific before it will continue.
-    case actionRequired([String])
-    /// Stripe has switched charges off.
-    case paymentsDisabled(String?)
+    /// Everything submitted; Stripe is checking it.
+    case underReview
+    /// Stripe has restricted or rejected the account.
+    case restricted
+
+    /// The one classification. `disabledReason` is Stripe's
+    /// `requirements.disabled_reason`.
+    static func classify(
+        connected: Bool,
+        chargesEnabled: Bool,
+        detailsSubmitted: Bool,
+        requirementsDue: [String],
+        disabledReason: String?
+    ) -> StripeConnectionState {
+        guard connected else { return .notConnected }
+        if let reason = disabledReason?.trimmingCharacters(in: .whitespaces), !reason.isEmpty {
+            if reason.hasPrefix("requirements.past_due") || reason.hasPrefix("action_required") {
+                return .setupIncomplete
+            }
+            if reason == "requirements.pending_verification" || reason == "under_review" {
+                return .underReview
+            }
+            return .restricted
+        }
+        if chargesEnabled { return .connected }
+        if !detailsSubmitted || !requirementsDue.isEmpty { return .setupIncomplete }
+        return .underReview
+    }
 
     var title: String {
         switch self {
-        case .notConnected: return "Not connected"
-        case .onboarding: return "Setup in progress"
+        case .notConnected: return "Set up Stripe"
+        case .setupIncomplete: return "Finish setting up Stripe"
         case .connected: return "Stripe connected"
-        case .actionRequired: return "Action required"
-        case .paymentsDisabled: return "Payments disabled"
+        case .underReview: return "Stripe is reviewing your account"
+        case .restricted: return "Stripe needs your attention"
         }
     }
 
-    /// The single action this state offers, in the words of the button.
-    var actionTitle: String? {
+    var message: String {
+        switch self {
+        case .notConnected:
+            return "Connect Stripe to receive online payments from your customers."
+        case .setupIncomplete:
+            return "Complete your Stripe setup to start accepting online payments."
+        case .connected:
+            return "You're ready to receive online payments."
+        case .underReview:
+            return "Stripe is checking the details you sent. Online payments start once it finishes — open Stripe to see if it needs anything else."
+        case .restricted:
+            return "Stripe has paused online payments on this account. Open Stripe to see what it needs from you."
+        }
+    }
+
+    /// The button. Every state has exactly one next step.
+    var actionTitle: String {
         switch self {
         case .notConnected: return "Connect Stripe"
-        case .onboarding: return "Continue Stripe setup"
+        case .setupIncomplete: return "Finish Stripe setup"
         case .connected: return "Manage Stripe"
-        case .actionRequired: return "Resolve issue"
-        case .paymentsDisabled: return "Resolve issue"
+        case .underReview, .restricted: return "Open Stripe"
+        }
+    }
+
+    /// Short form for a status pill or a menu row.
+    var shortLabel: String {
+        switch self {
+        case .notConnected: return "Not connected"
+        case .setupIncomplete: return "Setup incomplete"
+        case .connected: return "Connected"
+        case .underReview: return "In review"
+        case .restricted: return "Action needed"
         }
     }
 
     var tone: StatusTone {
         switch self {
         case .notConnected: return .neutral
-        case .onboarding: return .info
+        case .setupIncomplete: return .warning
         case .connected: return .success
-        case .actionRequired: return .warning
-        case .paymentsDisabled: return .danger
+        case .underReview: return .info
+        case .restricted: return .danger
         }
     }
 
     var isConnected: Bool { self == .connected }
+
+    /// Whether the action opens the Stripe dashboard (as opposed to Stripe's
+    /// hosted setup). An Express dashboard exists only once setup was submitted.
+    func actionOpensDashboard(detailsSubmitted: Bool) -> Bool {
+        switch self {
+        case .connected: return true
+        case .underReview, .restricted: return detailsSubmitted
+        case .notConnected, .setupIncomplete: return false
+        }
+    }
+}
+
+/// Stripe's requirement keys, as a person reads them.
+///
+/// `external_account` becomes "Bank account for payouts". Anything not
+/// recognised becomes "Other details" rather than a raw key.
+nonisolated enum StripeRequirementCopy {
+    static func friendly(_ keys: [String]) -> [String] {
+        var seen: [String] = []
+        for key in keys {
+            let label = label(for: key)
+            if !seen.contains(label) { seen.append(label) }
+        }
+        return seen
+    }
+
+    static func label(for key: String) -> String {
+        let k = key.lowercased()
+        if k.contains("external_account") { return "Bank account for payouts" }
+        if k.hasPrefix("tos_acceptance") { return "Accept Stripe's terms" }
+        if k.contains("verification.document") || k.contains("verification.additional_document") { return "Photo ID" }
+        if k.hasPrefix("business_profile") { return "Business details" }
+        if k.hasPrefix("business_type") { return "Business type" }
+        if k.hasPrefix("company") { return "Company details" }
+        if k.hasPrefix("individual") || k.hasPrefix("representative") || k.hasPrefix("person_") { return "Your personal details" }
+        if k.hasPrefix("owners") || k.hasPrefix("directors") || k.hasPrefix("executives") { return "Owner details" }
+        if k.hasPrefix("settings") { return "Account settings" }
+        return "Other details"
+    }
+}
+
+// MARK: - Apple subscription entitlement
+
+/// Where the company's Apple subscription stands, exactly as the server
+/// derived it (`subscription_entitlement_state` in migration 0013).
+nonisolated enum EntitlementState: String, Codable, Hashable, Sendable {
+    case none
+    case trial
+    case offer
+    case active
+    case cancelling
+    case gracePeriod
+    case billingRetry
+    case expired
+    case revoked
+
+    var isEntitled: Bool {
+        switch self {
+        case .trial, .offer, .active, .cancelling, .gracePeriod: return true
+        case .none, .billingRetry, .expired, .revoked: return false
+        }
+    }
+
+    var tone: StatusTone {
+        switch self {
+        case .active: return .success
+        case .trial, .offer: return .info
+        case .cancelling, .gracePeriod, .billingRetry: return .warning
+        case .expired, .revoked: return .danger
+        case .none: return .neutral
+        }
+    }
+
+    var pillText: String {
+        switch self {
+        case .none: return "No plan"
+        case .trial: return "Free trial"
+        case .offer: return "Free offer"
+        case .active: return "Active"
+        case .cancelling: return "Ending"
+        case .gracePeriod: return "Payment problem"
+        case .billingRetry: return "Paused"
+        case .expired: return "Ended"
+        case .revoked: return "Refunded"
+        }
+    }
 }
 
 /// One company's whole commercial position, exactly as the server reported it.
 nonisolated struct CommercialState: Hashable, Sendable {
     let paymentModel: PaymentModel
-    let subscriptionStatus: SubscriptionStatus
 
-    // Trial — server-authoritative window.
-    let trialEndsAt: Date?
-    let trialDaysRemaining: Int
-    let isTrialActive: Bool
+    // Apple subscription
+    let entitlementState: EntitlementState
+    let planID: PlanID?
+    let planName: String?
+    let billingPeriod: BillingPeriod?
+    /// What the plan costs per billing period, in cents.
+    let planPriceCents: Int
+    let userLimit: Int?
+    let includedUsers: Int
+    let activeUsers: Int
+    let openInvitations: Int
+    let canAddUser: Bool
+    let seatLimitsEnforced: Bool
+    let periodEndsAt: Date?
+    let willAutoRenew: Bool?
+    let renewsToPlanID: PlanID?
+    let renewsToPeriod: BillingPeriod?
+    /// Apple's offerType: 1 introductory, 2 promotional, 3 Offer Code, 4 win-back.
+    let offerType: Int?
+    let offerIdentifier: String?
+    let isFreeOffer: Bool
+    let freeOfferDaysRemaining: Int
+    let gracePeriodEndsAt: Date?
+    let billingStore: BillingStore
 
     // Stripe, as Stripe reports it.
     let stripeConnected: Bool
@@ -210,156 +299,187 @@ nonisolated struct CommercialState: Hashable, Sendable {
     let disabledReason: String?
     let stripeAccountID: String?
 
-    // Founding 100.
-    /// The company's assigned number, 1–100. `nil` means it holds no place.
-    let foundingMemberNumber: Int?
-    let foundingClaimedAt: Date?
-    let foundingPlacesClaimed: Int
-    let foundingPlacesRemaining: Int
-    /// False once all hundred places are gone — and the UI must then stop
-    /// promising Founding Member status to anyone who does not already hold it.
-    let foundingOfferOpen: Bool
-    /// Whether the $0/month benefit applies **this calendar month**. Requires
-    /// both a number and a qualifying payment; computed in the database.
-    let foundingBenefitActive: Bool
-    let qualifyingPaymentsThisMonth: Int
-    let lastQualifyingPaymentAt: Date?
-    let activityMonthStart: Date?
-
-    // Price, from the company's existing tier. No new pricing lives here.
-    let tierID: String
-    let tierName: String
-    /// What the company's tier costs at its current head count.
-    let subscriptionMonthlyCents: Int
-    /// What it actually pays right now — 0 while the Founding benefit is live.
-    let effectiveMonthlyCents: Int
     /// Harbour South's platform fee in basis points. 30 = 0.3%. Always 0 for
-    /// an external-provider company, because Harbour South is not a party to
-    /// that payment at all.
+    /// an external-provider company.
     let platformFeeBps: Int
-
     let externalPaymentURL: String?
     let businessEmail: String?
 
-    /// Whether this session may initiate or change Stripe/billing. Read from
-    /// the session's grants, not from the server payload — the server has
-    /// already refused the whole call to a role without billing read.
+    /// Whether this session may initiate or change Stripe/billing.
     let canManageBilling: Bool
 
-    // MARK: - Derived presentation
-    //
-    // Sentences only. Every one of these reads a server-supplied fact.
+    init(
+        paymentModel: PaymentModel = .undecided,
+        entitlementState: EntitlementState = .none,
+        planID: PlanID? = nil,
+        planName: String? = nil,
+        billingPeriod: BillingPeriod? = nil,
+        planPriceCents: Int = 0,
+        userLimit: Int? = 1,
+        includedUsers: Int = 1,
+        activeUsers: Int = 1,
+        openInvitations: Int = 0,
+        canAddUser: Bool = true,
+        seatLimitsEnforced: Bool = false,
+        periodEndsAt: Date? = nil,
+        willAutoRenew: Bool? = nil,
+        renewsToPlanID: PlanID? = nil,
+        renewsToPeriod: BillingPeriod? = nil,
+        offerType: Int? = nil,
+        offerIdentifier: String? = nil,
+        isFreeOffer: Bool = false,
+        freeOfferDaysRemaining: Int = 0,
+        gracePeriodEndsAt: Date? = nil,
+        billingStore: BillingStore = .none,
+        stripeConnected: Bool = false,
+        chargesEnabled: Bool = false,
+        payoutsEnabled: Bool = false,
+        detailsSubmitted: Bool = false,
+        requirementsDue: [String] = [],
+        disabledReason: String? = nil,
+        stripeAccountID: String? = nil,
+        platformFeeBps: Int = 30,
+        externalPaymentURL: String? = nil,
+        businessEmail: String? = nil,
+        canManageBilling: Bool = true
+    ) {
+        self.paymentModel = paymentModel
+        self.entitlementState = entitlementState
+        self.planID = planID
+        self.planName = planName
+        self.billingPeriod = billingPeriod
+        self.planPriceCents = planPriceCents
+        self.userLimit = userLimit
+        self.includedUsers = includedUsers
+        self.activeUsers = activeUsers
+        self.openInvitations = openInvitations
+        self.canAddUser = canAddUser
+        self.seatLimitsEnforced = seatLimitsEnforced
+        self.periodEndsAt = periodEndsAt
+        self.willAutoRenew = willAutoRenew
+        self.renewsToPlanID = renewsToPlanID
+        self.renewsToPeriod = renewsToPeriod
+        self.offerType = offerType
+        self.offerIdentifier = offerIdentifier
+        self.isFreeOffer = isFreeOffer
+        self.freeOfferDaysRemaining = freeOfferDaysRemaining
+        self.gracePeriodEndsAt = gracePeriodEndsAt
+        self.billingStore = billingStore
+        self.stripeConnected = stripeConnected
+        self.chargesEnabled = chargesEnabled
+        self.payoutsEnabled = payoutsEnabled
+        self.detailsSubmitted = detailsSubmitted
+        self.requirementsDue = requirementsDue
+        self.disabledReason = disabledReason
+        self.stripeAccountID = stripeAccountID
+        self.platformFeeBps = platformFeeBps
+        self.externalPaymentURL = externalPaymentURL
+        self.businessEmail = businessEmail
+        self.canManageBilling = canManageBilling
+    }
+
+    // MARK: - Derived presentation (sentences only)
+
+    var hasEntitlement: Bool { entitlementState.isEntitled }
 
     var stripeState: StripeConnectionState {
-        if !stripeConnected { return .notConnected }
-        if let disabledReason, !disabledReason.isEmpty {
-            return .paymentsDisabled(disabledReason)
-        }
-        if chargesEnabled { return .connected }
-        if !requirementsDue.isEmpty { return .actionRequired(requirementsDue) }
-        return .onboarding
+        StripeConnectionState.classify(
+            connected: stripeConnected,
+            chargesEnabled: chargesEnabled,
+            detailsSubmitted: detailsSubmitted,
+            requirementsDue: requirementsDue,
+            disabledReason: disabledReason
+        )
     }
 
-    /// True when the company holds a Founding Member place, whether or not the
-    /// benefit is active this month. The status is never taken away.
-    var isFoundingMember: Bool { foundingMemberNumber != nil }
-
-    /// The customer-facing name of the status.
-    ///
-    /// COMMERCIAL PRIVACY REQUIREMENT — this deliberately does NOT include the
-    /// allocation number. It used to read "Founding Member #27", which told the
-    /// customer their position and implied how full the programme was.
-    /// `foundingMemberNumber` remains authoritative server-side for internal
-    /// use; it is simply never rendered. Keeping the number out of the UI also
-    /// keeps the programme extensible — nothing has advertised a fixed size.
-    var foundingBadgeTitle: String? {
-        isFoundingMember ? FoundingCopy.badgeTitle : nil
-    }
+    /// What Stripe still needs, in plain words.
+    var stripeNeeds: [String] { StripeRequirementCopy.friendly(requirementsDue) }
 
     /// The fee as a person reads it: "0.3%".
-    ///
-    /// Presentation only — `platformFeeBps` is the server's figure and is not
-    /// altered. Trailing zeros are dropped, so 30 basis points reads "0.3%",
-    /// 25 reads "0.25%" and 100 reads "1%". Locale still governs the
-    /// separator, so a comma-decimal market sees "0,3%".
     var platformFeeLabel: String { platformFeeLabel(locale: .current) }
 
-    /// `platformFeeLabel` for an explicit locale, so the wording can be
-    /// asserted exactly regardless of the device's region.
     func platformFeeLabel(locale: Locale) -> String {
         guard platformFeeBps > 0 else { return "0%" }
         let percent = Decimal(platformFeeBps) / 100
         return percent.formatted(.number.precision(.fractionLength(0...2)).locale(locale)) + "%"
     }
 
-    var subscriptionPriceLabel: String { SubscriptionQuote.money(subscriptionMonthlyCents) }
-
-    /// What the company pays Harbour South each month, right now.
-    var effectivePriceLabel: String {
-        effectiveMonthlyCents == 0 ? "$0" : SubscriptionQuote.money(effectiveMonthlyCents)
+    /// "$39.99/month", or nil with no plan.
+    var planPriceLabel: String? {
+        guard hasEntitlement, let billingPeriod else { return nil }
+        return PriceLabel.usd(planPriceCents) + billingPeriod.perUnit
     }
 
-    /// The headline commercial position, for a badge or a settings row.
+    /// "5 of 5 people", "3 people · no limit".
+    var seatsLabel: String {
+        let people = activeUsers == 1 ? "person" : "people"
+        guard let userLimit else { return "\(activeUsers) \(people) · no limit" }
+        return "\(activeUsers) of \(userLimit) \(userLimit == 1 ? "person" : "people")"
+    }
+
+    var isOverPlan: Bool {
+        guard let userLimit else { return false }
+        return activeUsers > userLimit
+    }
+
+    /// The one-line position, for the account card and settings rows.
     var headline: String {
-        if isTrialActive {
-            return trialDaysRemaining == 1
-                ? "Free trial — 1 day left"
-                : "Free trial — \(trialDaysRemaining) days left"
-        }
-        if isFoundingMember {
-            return foundingBenefitActive
-                ? "Founding Member — zero subscription fees"
-                : "Founding Member — subscription applies"
-        }
-        switch paymentModel {
-        case .harbourSouthPayments:
-            return "Harbour South Payments — \(subscriptionPriceLabel)/month"
-        case .externalProvider:
-            return "\(tierName) — \(subscriptionPriceLabel)/month"
-        case .undecided:
-            return "\(tierName) — \(subscriptionPriceLabel)/month"
-        }
-    }
-
-    /// The Founding Member benefit explained positively, never as a penalty.
-    var foundingBenefitMessage: String? {
-        guard isFoundingMember else { return nil }
-        return foundingBenefitActive ? FoundingCopy.benefitActive : FoundingCopy.benefitPaused
-    }
-
-    /// What a company that holds no place can honestly be told about the offer.
-    ///
-    /// Nil once the offer is closed, so nothing promises a benefit that is no
-    /// longer available. The wording states the commercial deal in full — no
-    /// subscription fee, but the platform fee and Stripe's fees still apply —
-    /// and deliberately reveals nothing about the size of the allocation or how
-    /// much of it is left.
-    ///
-    /// For a non-member the server reports the offer open only while fewer than
-    /// a hundred places have ever been allocated. `foundingPlacesRemaining` is
-    /// checked as well so that, once the last place is gone, no screen can
-    /// present the programme to a company that does not hold a place — even if
-    /// one of the two figures were ever reported inconsistently.
-    var foundingInvitation: String? {
-        guard !isFoundingMember, foundingOfferOpen, foundingPlacesRemaining > 0 else { return nil }
-        return FoundingCopy.invitation(feeLabel: platformFeeLabel)
-    }
-
-    /// What the trial ends with, given the model the company is on.
-    var trialOutcomeMessage: String {
-        switch paymentModel {
-        case .harbourSouthPayments where isFoundingMember:
-            return FoundingCopy.trialOutcome
-        case .harbourSouthPayments:
-            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Customer card payments carry a \(PlatformFeeCopy.phrase(platformFeeLabel)), plus Stripe's standard processing fees."
-        case .externalProvider:
-            return "When your trial ends, your \(tierName) subscription of \(subscriptionPriceLabel)/month begins. Payments you take through your own provider carry a \(PlatformFeeCopy.zeroPhrase)."
-        case .undecided:
-            return "Choose how you take customer payments before your trial ends. Connect Stripe to use Harbour South Payments, or keep your own payment provider."
+        let name = planName ?? "Your plan"
+        switch entitlementState {
+        case .none:
+            return "No plan yet"
+        case .trial:
+            return freeOfferDaysRemaining == 1 ? "Free trial — 1 day left" : "Free trial — \(freeOfferDaysRemaining) days left"
+        case .offer:
+            return freeOfferDaysRemaining == 1 ? "Free offer — 1 day left" : "Free offer — \(freeOfferDaysRemaining) days left"
+        case .active:
+            if let periodEndsAt { return "\(name) · renews \(Formatters.shortDate(periodEndsAt))" }
+            return "\(name) · active"
+        case .cancelling:
+            if let periodEndsAt { return "\(name) · ends \(Formatters.shortDate(periodEndsAt))" }
+            return "\(name) · ending"
+        case .gracePeriod:
+            return "Payment problem — update your payment method"
+        case .billingRetry:
+            return "Subscription paused — Apple couldn't take payment"
+        case .expired:
+            return "Subscription ended"
+        case .revoked:
+            return "Subscription refunded"
         }
     }
 
-    /// Shown while no payment model has been chosen and the trial is nearly up.
+    /// The fuller explanation under the headline.
+    var detail: String? {
+        switch entitlementState {
+        case .none:
+            return "Choose a plan to get started. Every plan starts with a 14-day free trial for new subscribers."
+        case .trial, .offer:
+            guard let planName, let label = planPriceLabel, let periodEndsAt else { return nil }
+            if willAutoRenew == false {
+                return "Your free period ends \(Formatters.shortDate(periodEndsAt)) and will not renew."
+            }
+            return "Free until \(Formatters.shortDate(periodEndsAt)). Then \(planName) at \(label), billed by Apple unless you cancel."
+        case .active:
+            if let next = renewsToPlanID, next != planID,
+               let plan = PlanCatalog.standard.first(where: { $0.id == next }) {
+                return "Changes to \(plan.displayName) at your next renewal."
+            }
+            return planPriceLabel.map { "\($0), billed by Apple." }
+        case .cancelling:
+            return "You've turned off auto-renew. Your plan stays active until then."
+        case .gracePeriod:
+            if let gracePeriodEndsAt {
+                return "Apple couldn't take your last payment. Your plan keeps working until \(Formatters.shortDate(gracePeriodEndsAt)) — update your payment method in the App Store."
+            }
+            return "Apple couldn't take your last payment. Update your payment method in the App Store."
+        case .billingRetry:
+            return "Update your payment method in the App Store and Apple will try again."
+        case .expired, .revoked:
+            return "Choose a plan to keep adding people and working as a team."
+        }
+    }
+
     var needsPaymentModelChoice: Bool {
         paymentModel == .undecided && !stripeConnected
     }

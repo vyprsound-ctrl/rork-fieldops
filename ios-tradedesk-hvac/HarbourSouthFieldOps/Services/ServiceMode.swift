@@ -132,8 +132,8 @@ nonisolated enum IntegrationRegistry {
             id: "storeBilling",
             name: "Subscription billing",
             mode: .needsConfiguration,
-            plannedProvider: "Apple In-App Purchase",
-            detail: "Needs App Store Connect configuration. Seat counting and pricing are live and read from the database; the purchase itself is not, and no purchase is ever recorded as made. This is an iOS product — there is no Google Play billing path."
+            plannedProvider: "Apple auto-renewable subscriptions (StoreKit 2)",
+            detail: "StoreKit purchasing, Restore, Offer Codes and server-side verification of Apple's signed transactions are built. Needs App Store Connect configuration: the six subscription products, the 14-day introductory offer and the App Store Server Notifications URL. Until those exist no plan can be bought and no purchase is ever recorded as made. This is an iOS product — there is no Google Play billing path."
         ),
         IntegrationStatus(
             id: "recurring",

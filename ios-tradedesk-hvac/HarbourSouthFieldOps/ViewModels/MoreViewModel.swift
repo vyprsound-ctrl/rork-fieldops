@@ -4,8 +4,8 @@ import Observation
 @Observable
 final class MoreViewModel {
     private(set) var state: LoadState<MoreOverview> = .idle
-    /// The company's commercial position, for the Founding Member badge and the
-    /// trial line on the account card.
+    /// The company's commercial position, for the plan line on the account
+    /// card and the Subscription / Connect Stripe row details.
     ///
     /// Best-effort and optional on purpose: only a billing role can read it,
     /// and the More tab must work identically for every other role. A nil here
@@ -13,7 +13,7 @@ final class MoreViewModel {
     private(set) var commercial: CommercialState?
     /// Set when a billing role asked for the commercial state and the request
     /// failed. The More tab still renders — this only explains the missing
-    /// badge instead of leaving a silent gap where one should be.
+    /// plan line instead of leaving a silent gap where one should be.
     private(set) var commercialError: String?
 
     /// ISSUE #13 — unread field worker messages waiting for the office.

@@ -33,6 +33,15 @@ nonisolated enum Brand {
     /// Used when the asset is absent, so the mark is never an empty box.
     static let fallbackSymbolName = "point.topleft.down.to.point.bottomright.curvepath.fill"
 
+    /// Harbour South's published privacy policy, linked from the subscription
+    /// screen as Apple requires for auto-renewable subscriptions. `nil` until
+    /// the policy is published — set it here, then the link appears.
+    static let privacyPolicyURL: URL? = nil
+
+    /// Apple's standard licensed application end user licence agreement,
+    /// used as the Terms of Use unless a custom EULA is set in App Store Connect.
+    static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
+
     /// Whether a real logo asset is present in this build.
     static var hasLogoAsset: Bool { UIImage(named: logoAssetName) != nil }
 }

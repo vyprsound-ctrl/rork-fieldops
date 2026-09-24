@@ -177,25 +177,16 @@ struct MoreView: View {
                     .clipShape(.rect(cornerRadius: 6))
             }
 
-            // The Founding Member mark belongs on the owner's own account
-            // card. Compact, one line, and only where it is commercially
-            // relevant — it is deliberately not repeated on every screen.
-            // The allocation number is never shown; see FoundingMemberBadge.
-            if let commercial = viewModel.commercial, commercial.isFoundingMember {
-                FoundingMemberBadge(
-                    isBenefitActive: commercial.foundingBenefitActive,
-                    size: .compact
-                )
-            }
-
-            if let commercial = viewModel.commercial, commercial.isTrialActive {
+            // The Apple subscription position, one line, for the owner only.
+            if let commercial = viewModel.commercial {
                 HStack(spacing: 8) {
-                    Image(systemName: "clock.fill")
+                    Image(systemName: commercial.hasEntitlement ? "checkmark.seal.fill" : "sparkles")
                         .font(.caption)
-                        .foregroundStyle(commercial.trialDaysRemaining <= 3 ? Theme.amber : Theme.primary)
+                        .foregroundStyle(commercial.entitlementState.tone == .warning ? Theme.amber
+                                         : commercial.hasEntitlement ? Theme.primary : Theme.accent)
                     Text(commercial.headline)
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(commercial.trialDaysRemaining <= 3 ? Theme.amber : Theme.secondary)
+                        .foregroundStyle(commercial.entitlementState.tone == .warning ? Theme.amber : Theme.secondary)
                     Spacer(minLength: 0)
                 }
             }
@@ -293,10 +284,13 @@ struct MoreView: View {
         case .invoices: return overview.outstandingLabel
         case .payments: return overview.paymentCount.map(String.init)
         case .smsCredits: return overview.smsBalance.map(String.init)
-        case .subscription: return overview.subscriptionSummary
+        case .subscription:
+            if let commercial = viewModel.commercial {
+                return commercial.planName ?? commercial.entitlementState.pillText
+            }
+            return overview.subscriptionSummary
         case .payments_integration:
-            guard let state = viewModel.commercial?.stripeState else { return nil }
-            return state.isConnected ? "Connected" : state.title
+            return viewModel.commercial?.stripeState.shortLabel
         default: return nil
         }
     }

@@ -17,13 +17,11 @@ import { isStripeConfigured, StripeError, stripeRequest } from "../_shared/strip
 ///   onboard  — an Account Link the owner completes in a browser
 ///   dashboard— an Express login link to the merchant's own Stripe dashboard
 ///
-/// FOUNDING 100: whenever Stripe reports `charges_enabled`, this function asks
-/// the database to claim a Founding Member place. The claim is NOT made here —
-/// `claim_founding_member_slot()` re-checks eligibility against
-/// `stripe_connect_accounts.charges_enabled` itself, allocates the next free
-/// number under `FOR UPDATE SKIP LOCKED`, and is idempotent. This function
-/// cannot pick a number, cannot grant a place to a company Stripe has not
-/// confirmed, and cannot invent a 101st place.
+/// HARBOUR SOUTH PAYMENTS: whenever Stripe reports `charges_enabled`, the
+/// company's payment model becomes Harbour South Payments via
+/// `adopt_harbour_south_payments()`, which re-checks `charges_enabled` itself.
+/// Connecting Stripe grants nothing else: no subscription benefit, discount or
+/// allocation of any kind is attached to it.
 
 interface ConnectRequest {
   action?: "status" | "onboard" | "dashboard";
@@ -236,24 +234,14 @@ Deno.serve(async (req) => {
       }, { onConflict: "company_id" });
     }
 
-    // --- Founding 100 -----------------------------------------------------
+    // --- Harbour South Payments ----------------------------------------
     //
-    // Attempted only once the account row above has been refreshed from
-    // Stripe, so the eligibility test inside the function reads Stripe's
-    // current answer rather than a stale cached one. Never fatal: a company
-    // that can take payments must not be blocked from doing so because a
-    // marketing allocation failed.
-    let foundingNumber: number | null = null;
+    // Once Stripe itself says the account can take charges, record that the
+    // company takes customer payments through Harbour South. Never fatal, and
+    // it grants no subscription benefit of any kind.
     if (account?.charges_enabled) {
-      const { data: claimed, error: claimError } = await admin.rpc(
-        "claim_founding_member_slot",
-        { p_company: companyId },
-      );
-      if (claimError) {
-        console.error("[stripe-connect] founding slot claim failed", claimError.message);
-      } else if (typeof claimed === "number") {
-        foundingNumber = claimed;
-      }
+      const { error: adoptError } = await admin.rpc("adopt_harbour_south_payments", { p_company: companyId });
+      if (adoptError) console.error("[stripe-connect] payment model update failed", adoptError.message);
     }
 
     // --- onboard link -----------------------------------------------------
@@ -274,7 +262,6 @@ Deno.serve(async (req) => {
         payoutsEnabled: account?.payouts_enabled ?? false,
         detailsSubmitted: account?.details_submitted ?? false,
         requirementsDue: account?.requirements?.currently_due ?? [],
-        foundingMemberNumber: foundingNumber,
       });
     }
 
@@ -287,9 +274,6 @@ Deno.serve(async (req) => {
       detailsSubmitted: account?.details_submitted ?? existing?.details_submitted ?? false,
       requirementsDue: account?.requirements?.currently_due ?? [],
       disabledReason: account?.requirements?.disabled_reason ?? null,
-      // Informational. The app reads the authoritative founding state from
-      // `company_commercial_state()`, not from this response.
-      foundingMemberNumber: foundingNumber,
     });
   } catch (err) {
     if (err instanceof AuthError) return jsonResponse({ error: "Unauthorized" }, 401);

@@ -3,31 +3,48 @@ import Supabase
 
 // MARK: - Records
 
-nonisolated struct SubscriptionTierRecord: Decodable, Sendable {
+/// One active plan from `subscription_tiers` (migration 0013 columns).
+nonisolated struct PlanRecord: Decodable, Sendable {
     let id: String
     let displayName: String
-    let minUsers: Int
-    let maxUsers: Int
+    let tagline: String?
     let baseCents: Int
-    let additionalUserCents: Int
+    let annualCents: Int?
+    let includedUsers: Int?
+    let userLimit: Int?
+    let appleProductMonthly: String?
+    let appleProductAnnual: String?
     let sortOrder: Int
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case id, tagline
         case displayName = "display_name"
-        case minUsers = "min_users"
-        case maxUsers = "max_users"
         case baseCents = "base_cents"
-        case additionalUserCents = "additional_user_cents"
+        case annualCents = "annual_cents"
+        case includedUsers = "included_users"
+        case userLimit = "user_limit"
+        case appleProductMonthly = "apple_product_monthly"
+        case appleProductAnnual = "apple_product_annual"
         case sortOrder = "sort_order"
     }
 
-    static let columns = "id,display_name,min_users,max_users,base_cents,additional_user_cents,sort_order"
+    static let columns = "id,display_name,tagline,base_cents,annual_cents,included_users,user_limit,apple_product_monthly,apple_product_annual,sort_order"
 
-    var model: SubscriptionTier {
-        SubscriptionTier(
-            id: id, displayName: displayName, minUsers: minUsers, maxUsers: maxUsers,
-            baseCents: baseCents, additionalUserCents: additionalUserCents, sortOrder: sortOrder
+    /// Nil for a row this build does not recognise, or one missing its Apple
+    /// products — it is not offered rather than offered half-described.
+    var model: PlanOffer? {
+        guard let planID = PlanID(rawValue: id),
+              let annualCents, let appleProductMonthly, let appleProductAnnual else { return nil }
+        return PlanOffer(
+            id: planID,
+            displayName: displayName,
+            tagline: tagline ?? "",
+            monthlyCents: baseCents,
+            annualCents: annualCents,
+            includedUsers: includedUsers ?? userLimit ?? 1,
+            userLimit: userLimit,
+            monthlyProductID: appleProductMonthly,
+            annualProductID: appleProductAnnual
         )
     }
 }
@@ -45,49 +62,6 @@ nonisolated struct SmsBundleRecord: Decodable, Sendable {
     static let columns = "id,credits,price_cents,sort_order"
 
     var model: SmsBundle { SmsBundle(id: id, credits: credits, priceCents: priceCents) }
-}
-
-/// What `subscription_quote()` returns. The app renders these numbers; it never
-/// derives a subscription total of its own from a live company.
-private nonisolated struct SubscriptionQuoteRecord: Decodable, Sendable {
-    let activePaidUsers: Int
-    let tierID: String?
-    let tierName: String?
-    let baseCents: Int
-    let additionalUsers: Int
-    let additionalUserCents: Int
-    let monthlyPriceCents: Int
-    let maxUsers: Int
-    let isOverCapacity: Bool
-    let nextUserCents: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case activePaidUsers = "active_paid_users"
-        case tierID = "tier_id"
-        case tierName = "tier_name"
-        case baseCents = "base_cents"
-        case additionalUsers = "additional_users"
-        case additionalUserCents = "additional_user_cents"
-        case monthlyPriceCents = "monthly_price_cents"
-        case maxUsers = "max_users"
-        case isOverCapacity = "is_over_capacity"
-        case nextUserCents = "next_user_cents"
-    }
-
-    var model: SubscriptionQuote {
-        SubscriptionQuote(
-            activePaidUsers: activePaidUsers,
-            tierID: tierID ?? "",
-            tierName: tierName ?? "Current plan",
-            baseCents: baseCents,
-            additionalUsers: additionalUsers,
-            additionalUserCents: additionalUserCents,
-            monthlyPriceCents: monthlyPriceCents,
-            maxUsers: maxUsers,
-            isOverCapacity: isOverCapacity,
-            nextUserCents: nextUserCents
-        )
-    }
 }
 
 nonisolated struct SubscriptionRecord: Decodable, Sendable {
@@ -250,6 +224,20 @@ private nonisolated struct ConnectRequest: Encodable, Sendable {
     }
 }
 
+private nonisolated struct AppleLinkRequest: Encodable, Sendable {
+    let purchases: [SignedStorePurchase]
+}
+
+private nonisolated struct AppleLinkResponse: Decodable, Sendable {
+    struct Item: Decodable, Sendable {
+        let transactionId: String?
+        let outcome: String
+    }
+    let results: [Item]?
+    let linked: Bool?
+    let error: String?
+}
+
 /// The error envelope every Edge Function in this project returns on failure.
 nonisolated struct FunctionErrorBody: Decodable, Sendable {
     let error: String?
@@ -366,20 +354,36 @@ private nonisolated struct PaymentTermsPayload: Encodable, Sendable {
     let updated_at: String
 }
 
-/// What `company_commercial_state()` returns.
+/// What `company_commercial_state()` returns (migration 0013).
 ///
-/// Every field is an ANSWER, not an input. The function decides the trial
-/// window, Stripe readiness, the founding number, whether the benefit is live
-/// this month, the tier price and the applicable fee; this struct is the decode
-/// of that decision. There is no corresponding request type because the
-/// function takes no parameter from the app at all — it derives the company
-/// from the caller's own session inside the database.
+/// Every field is an ANSWER, not an input: the database decides the Apple
+/// entitlement, the plan, the seat limit, Stripe readiness and the fee. There
+/// is no request type because the function derives the company from the
+/// caller's own session.
 private nonisolated struct CommercialStateRecord: Decodable, Sendable {
     let paymentModel: String?
-    let subscriptionStatus: String?
-    let trialEndsAt: Date?
+    let hasEntitlement: Bool?
+    let entitlementState: String?
+    let tierID: String?
+    let tierName: String?
+    let billingPeriod: String?
+    let planPriceCents: Int?
+    let planUserLimit: Int?
+    let planIncludedUsers: Int?
+    let activeUsers: Int?
+    let openInvitations: Int?
+    let canAddUser: Bool?
+    let seatLimitsEnforced: Bool?
+    let periodEndsAt: Date?
+    let willAutoRenew: Bool?
+    let renewsToTierID: String?
+    let renewsToPeriod: String?
+    let offerType: Int?
+    let offerIdentifier: String?
+    let isFreeOffer: Bool?
     let trialDaysRemaining: Int?
-    let isTrialActive: Bool?
+    let gracePeriodEndsAt: Date?
+    let billingStore: String?
     let stripeConnected: Bool?
     let chargesEnabled: Bool?
     let payoutsEnabled: Bool?
@@ -387,29 +391,34 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
     let requirementsDue: [String]?
     let disabledReason: String?
     let stripeAccountID: String?
-    let foundingMemberNumber: Int?
-    let foundingClaimedAt: Date?
-    let foundingPlacesClaimed: Int?
-    let foundingPlacesRemaining: Int?
-    let foundingOfferOpen: Bool?
-    let foundingBenefitActive: Bool?
-    let qualifyingPaymentsThisMonth: Int?
-    let lastQualifyingPaymentAt: Date?
-    let activityMonthStart: Date?
-    let tierID: String?
-    let tierName: String?
-    let subscriptionMonthlyCents: Int?
-    let effectiveMonthlyCents: Int?
     let platformFeeBps: Int?
     let externalPaymentURL: String?
     let businessEmail: String?
 
     enum CodingKeys: String, CodingKey {
         case paymentModel = "payment_model"
-        case subscriptionStatus = "subscription_status"
-        case trialEndsAt = "trial_ends_at"
+        case hasEntitlement = "has_entitlement"
+        case entitlementState = "entitlement_state"
+        case tierID = "tier_id"
+        case tierName = "tier_name"
+        case billingPeriod = "billing_period"
+        case planPriceCents = "plan_price_cents"
+        case planUserLimit = "plan_user_limit"
+        case planIncludedUsers = "plan_included_users"
+        case activeUsers = "active_users"
+        case openInvitations = "open_invitations"
+        case canAddUser = "can_add_user"
+        case seatLimitsEnforced = "seat_limits_enforced"
+        case periodEndsAt = "period_ends_at"
+        case willAutoRenew = "will_auto_renew"
+        case renewsToTierID = "renews_to_tier_id"
+        case renewsToPeriod = "renews_to_period"
+        case offerType = "offer_type"
+        case offerIdentifier = "offer_identifier"
+        case isFreeOffer = "is_free_offer"
         case trialDaysRemaining = "trial_days_remaining"
-        case isTrialActive = "is_trial_active"
+        case gracePeriodEndsAt = "grace_period_ends_at"
+        case billingStore = "billing_store"
         case stripeConnected = "stripe_connected"
         case chargesEnabled = "charges_enabled"
         case payoutsEnabled = "payouts_enabled"
@@ -417,31 +426,37 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
         case requirementsDue = "requirements_due"
         case disabledReason = "disabled_reason"
         case stripeAccountID = "stripe_account_id"
-        case foundingMemberNumber = "founding_member_number"
-        case foundingClaimedAt = "founding_claimed_at"
-        case foundingPlacesClaimed = "founding_places_claimed"
-        case foundingPlacesRemaining = "founding_places_remaining"
-        case foundingOfferOpen = "founding_offer_open"
-        case foundingBenefitActive = "founding_benefit_active"
-        case qualifyingPaymentsThisMonth = "qualifying_payments_this_month"
-        case lastQualifyingPaymentAt = "last_qualifying_payment_at"
-        case activityMonthStart = "activity_month_start"
-        case tierID = "tier_id"
-        case tierName = "tier_name"
-        case subscriptionMonthlyCents = "subscription_monthly_cents"
-        case effectiveMonthlyCents = "effective_monthly_cents"
         case platformFeeBps = "platform_fee_bps"
         case externalPaymentURL = "external_payment_url"
         case businessEmail = "business_email"
     }
 
     func model(canManageBilling: Bool) -> CommercialState {
-        CommercialState(
+        let state = EntitlementState(rawValue: entitlementState ?? "") ?? .none
+        let entitled = state.isEntitled
+        return CommercialState(
             paymentModel: PaymentModel(rawValue: paymentModel ?? "") ?? .undecided,
-            subscriptionStatus: SubscriptionStatus(rawValue: subscriptionStatus ?? "") ?? .trialing,
-            trialEndsAt: trialEndsAt,
-            trialDaysRemaining: max(trialDaysRemaining ?? 0, 0),
-            isTrialActive: isTrialActive ?? false,
+            entitlementState: state,
+            planID: entitled ? tierID.flatMap(PlanID.init(rawValue:)) : nil,
+            planName: entitled ? tierName : nil,
+            billingPeriod: entitled ? billingPeriod.flatMap(BillingPeriod.init(rawValue:)) : nil,
+            planPriceCents: planPriceCents ?? 0,
+            userLimit: planUserLimit,
+            includedUsers: planIncludedUsers ?? 1,
+            activeUsers: activeUsers ?? 1,
+            openInvitations: openInvitations ?? 0,
+            canAddUser: canAddUser ?? true,
+            seatLimitsEnforced: seatLimitsEnforced ?? false,
+            periodEndsAt: periodEndsAt,
+            willAutoRenew: willAutoRenew,
+            renewsToPlanID: renewsToTierID.flatMap(PlanID.init(rawValue:)),
+            renewsToPeriod: renewsToPeriod.flatMap(BillingPeriod.init(rawValue:)),
+            offerType: offerType,
+            offerIdentifier: offerIdentifier,
+            isFreeOffer: isFreeOffer ?? false,
+            freeOfferDaysRemaining: max(trialDaysRemaining ?? 0, 0),
+            gracePeriodEndsAt: gracePeriodEndsAt,
+            billingStore: BillingStore(rawValue: billingStore ?? "") ?? .none,
             stripeConnected: stripeConnected ?? false,
             chargesEnabled: chargesEnabled ?? false,
             payoutsEnabled: payoutsEnabled ?? false,
@@ -449,19 +464,6 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
             requirementsDue: requirementsDue ?? [],
             disabledReason: disabledReason,
             stripeAccountID: stripeAccountID,
-            foundingMemberNumber: foundingMemberNumber,
-            foundingClaimedAt: foundingClaimedAt,
-            foundingPlacesClaimed: foundingPlacesClaimed ?? 0,
-            foundingPlacesRemaining: foundingPlacesRemaining ?? 0,
-            foundingOfferOpen: foundingOfferOpen ?? false,
-            foundingBenefitActive: foundingBenefitActive ?? false,
-            qualifyingPaymentsThisMonth: qualifyingPaymentsThisMonth ?? 0,
-            lastQualifyingPaymentAt: lastQualifyingPaymentAt,
-            activityMonthStart: activityMonthStart,
-            tierID: tierID ?? "",
-            tierName: tierName ?? "Current plan",
-            subscriptionMonthlyCents: subscriptionMonthlyCents ?? 0,
-            effectiveMonthlyCents: effectiveMonthlyCents ?? 0,
             platformFeeBps: platformFeeBps ?? 0,
             externalPaymentURL: externalPaymentURL,
             businessEmail: businessEmail,
@@ -492,9 +494,9 @@ private nonisolated struct BusinessEmailPayload: Encodable, Sendable {
 //
 // TWO MONEY FLOWS, NEVER MIXED:
 //
-//   FLOW A — the trade business pays Harbour South (subscription, SMS credits).
-//            Platform Stripe account. Handled by `stripe-subscription` and
-//            `sms-purchase`.
+//   FLOW A — the trade business pays Harbour South. The SUBSCRIPTION is billed
+//            by Apple only (`apple-subscription`, `app-store-notifications`).
+//            SMS credits use the platform Stripe account (`sms-purchase`).
 //   FLOW B — the trade business's customer pays the trade business (invoices).
 //            The company's OWN connected Stripe account. Handled by
 //            `invoice-payment` and reconciled by `stripe-webhook`.
@@ -510,84 +512,75 @@ extension SupabaseDataGateway {
     func subscriptionOverview(session: TenantSession) async throws -> SubscriptionOverview {
         try require(.saasBillingRead, session, query: "subscription.overview")
 
-        // The published price list. Readable by any signed-in user by policy —
-        // it is a price list, not a secret.
-        let tiers = try await fetch(
-            SubscriptionTierRecord.self,
+        // The published price list. Readable by any signed-in user by policy.
+        let rows = (try? await fetch(
+            PlanRecord.self,
             client.from("subscription_tiers")
-                .select(SubscriptionTierRecord.columns)
+                .select(PlanRecord.columns)
                 .eq("is_active", value: true)
                 .order("sort_order")
-        )
+        )) ?? []
+        let live = rows.compactMap(\.model)
+        let plans = live.count == PlanCatalog.standard.count ? live : PlanCatalog.standard
 
-        // The authoritative price, computed in the database from the live head
-        // count. The client does not add this up for a real company.
-        let quotes: [SubscriptionQuoteRecord] = await {
-            do {
-                let data = try await client.rpc("subscription_quote").execute().data
-                return try SupabaseCoding.decoder.decode([SubscriptionQuoteRecord].self, from: data)
-            } catch {
-                // Falls back to the local engine over the same tier data below.
-                return []
-            }
-        }()
-
-        let pricing = tiers.isEmpty
-            ? PlatformPricing.fallback
-            : PlatformPricing(tiers: tiers.map(\.model), maxUsers: tiers.map(\.maxUsers).max() ?? 100, isLive: true)
-
-        let subscription = try await fetch(
-            SubscriptionRecord.self,
-            client.from("company_subscriptions").select(SubscriptionRecord.columns).limit(1)
-        ).first
-
-        // Roster counts, so "why is my bill this?" has a visible answer rather
-        // than a number to take on trust.
         let users = try await fetch(
             TeamUserRecord.self,
             client.from("app_users").select(TeamUserRecord.columns)
         )
-        let active = users.filter { $0.status == .active }.count
-        let invited = users.filter { $0.status == .invited }.count
-        let suspended = users.filter { $0.status == .suspended }.count
-
-        // Prefer the database's own arithmetic; fall back to the local engine
-        // only if the RPC is unavailable, and only over the same tier data.
-        let quote = quotes.first?.model ?? pricing.quote(for: max(active, 1))
-
-        var alert: String?
-        if let subscription {
-            switch subscription.status {
-            case .pastDue:
-                alert = "The last payment failed. Update the card to keep the account active."
-            case .cancelled:
-                alert = "This subscription is cancelled and will not renew."
-            case .expired:
-                alert = "This subscription has expired."
-            case .trialing, .active:
-                alert = nil
-            }
-        }
-        if quote.isOverCapacity {
-            alert = "This company has more than \(quote.maxUsers) active people, which is beyond the supported maximum."
-        }
 
         record(
             "subscription.overview",
             session,
             allowed: true,
-            "Price derived in the database from \(active) active user(s); the app renders it and never recomputes it"
+            "Plans read from the database; the entitlement comes from company_commercial_state()"
         )
 
         return SubscriptionOverview(
-            subscription: subscription?.model,
-            quote: quote,
-            pricing: pricing,
+            plans: plans,
+            pricesAreLive: live.count == PlanCatalog.standard.count,
             canManage: session.can(.saasBillingManage),
-            activeUsers: active,
-            invitedUsers: invited,
-            suspendedUsers: suspended,
-            alert: alert
+            activeUsers: users.filter { $0.status == .active }.count,
+            invitedUsers: users.filter { $0.status == .invited }.count,
+            suspendedUsers: users.filter { $0.status == .suspended }.count
+        )
+    }
+
+    /// Hands Apple's signed purchases to `apple-subscription`, which verifies
+    /// each JWS against Apple's root certificate before recording anything.
+    func linkStorePurchases(session: TenantSession, purchases: [SignedStorePurchase]) async throws -> StoreLinkResult {
+        try require(.saasBillingManage, session, query: "subscription.link")
+        guard !purchases.isEmpty else {
+            return StoreLinkResult(linked: false, handledTransactionIDs: [], belongsToAnotherCompany: false, unverified: false)
+        }
+
+        let response: AppleLinkResponse
+        do {
+            response = try await client.functions.invoke(
+                "apple-subscription",
+                options: .init(body: AppleLinkRequest(purchases: purchases))
+            )
+        } catch {
+            throw Self.translateFunctionFailure(
+                error,
+                fallback: "Your purchase went through with Apple, but Harbour South couldn't confirm it yet. It will be picked up automatically — or tap Restore purchases."
+            )
+        }
+        if let error = response.error { throw DataError.rejected(error) }
+
+        let results = response.results ?? []
+        let handled: [UInt64] = results.compactMap { item in
+            let done = item.outcome.hasPrefix("applied") || item.outcome == "stale"
+                || item.outcome == "upgradedAway" || item.outcome == "unknownProduct"
+            return done ? item.transactionId.flatMap(UInt64.init) : nil
+        }
+
+        record("subscription.link", session, allowed: true, "Apple-signed purchase verified and recorded server-side")
+
+        return StoreLinkResult(
+            linked: response.linked ?? false,
+            handledTransactionIDs: handled,
+            belongsToAnotherCompany: results.contains { $0.outcome == "belongsToAnotherCompany" },
+            unverified: results.contains { $0.outcome == "unverified" }
         )
     }
 
@@ -612,7 +605,13 @@ extension SupabaseDataGateway {
                 readiness = .notConfigured
             } else if response.connected != true {
                 readiness = .notConnected
-            } else if response.disabledReason != nil {
+            } else if let reason = response.disabledReason,
+                      StripeConnectionState.classify(
+                          connected: true, chargesEnabled: false,
+                          detailsSubmitted: response.detailsSubmitted ?? false,
+                          requirementsDue: response.requirementsDue ?? [],
+                          disabledReason: reason
+                      ) != .setupIncomplete {
                 readiness = .restricted
             } else if response.chargesEnabled == true {
                 readiness = .ready
@@ -736,12 +735,9 @@ extension SupabaseDataGateway {
     /// a role that is not the owner cannot reach this data by any route,
     /// including a hand-crafted request.
     ///
-    /// Before reading, Stripe is refreshed when the company is already
-    /// connected. That matters for the Founding 100: `stripe-connect` claims a
-    /// place the moment Stripe reports `charges_enabled`, so an owner returning
-    /// from browser onboarding sees the right answer on first load rather than
-    /// after a manual retry. A failure to refresh is not fatal — the stored
-    /// state is still read and shown.
+    /// Before reading, Stripe is refreshed, so an owner returning from browser
+    /// onboarding sees Stripe's current answer on first load. A failure to
+    /// refresh is not fatal — the stored state is still read and shown.
     func commercialState(session: TenantSession) async throws -> CommercialState {
         try require(.saasBillingRead, session, query: "commercial.state")
 
@@ -767,7 +763,7 @@ extension SupabaseDataGateway {
             "commercial.state",
             session,
             allowed: true,
-            "Trial, Stripe readiness, Founding Member number, monthly benefit, price and fee all computed in the database; the app renders them and derives none of them"
+            "Apple entitlement, plan, seats, Stripe readiness and fee all computed in the database; the app renders them and derives none of them"
         )
 
         return row.model(canManageBilling: session.can(.saasBillingManage))
@@ -777,7 +773,7 @@ extension SupabaseDataGateway {
     ///
     /// `harbourSouthPayments` is refused by the database, not here: that model
     /// follows from Stripe reporting the connected account can take charges,
-    /// and is set server-side by the founding-claim path. Sending it returns
+    /// and is set server-side by `adopt_harbour_south_payments()`. Sending it returns
     /// TD422, which surfaces as a plain sentence.
     func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws {
         try require(.saasBillingManage, session, query: "commercial.paymentModel")

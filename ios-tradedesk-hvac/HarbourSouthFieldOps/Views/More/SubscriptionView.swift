@@ -1,21 +1,20 @@
+import StoreKit
 import SwiftUI
 
 /// The company's Harbour South subscription.
 ///
-/// The whole point of this screen is that the owner can see *why* the bill is
-/// what it is. A total on its own invites suspicion; the arithmetic, the head
-/// count and the tier they sit in do not.
+/// Three plans, one decision: "Starter = me", "Team = my small team",
+/// "Business = my business, 10+ people". Billed by Apple. The screen shows
+/// where the company stands (decided by the server from Apple's verified
+/// data), the three plans with a Monthly / Annual switch, and Restore.
 ///
-/// This is FLOW A money — the trade business paying Harbour South. The card
-/// payments their own customers make live on a different screen and a different
-/// Stripe account entirely, and the two are labelled so they cannot be
-/// confused.
+/// Customer card payments (Stripe) are a separate concept with their own
+/// screen, More → Connect Stripe. This screen links there and nothing more.
 struct SubscriptionView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.openURL) private var openURL
     @State private var viewModel = SubscriptionViewModel()
-    /// The "what if we hired someone" slider. A projection, never a charge.
-    @State private var projectedUsers: Int = 0
+    @State private var isRedeemingCode: Bool = false
 
     private var session: TenantSession? { env.activeSession }
 
@@ -31,9 +30,13 @@ struct SubscriptionView: View {
         .toolbar(.hidden, for: .tabBar)
         .task(id: session?.userID) { await reload() }
         .refreshable { await reload(showLoading: false) }
-        .onChange(of: viewModel.pendingLink) { _, link in
-            if let link { openURL(link); viewModel.pendingLink = nil }
+        .offerCodeRedemption(isPresented: $isRedeemingCode) { _ in
+            Task {
+                await env.syncStoreEntitlements()
+                await reload(showLoading: false)
+            }
         }
+        .sensoryFeedback(.success, trigger: viewModel.notice)
         .alert(
             "Something went wrong",
             isPresented: Binding(
@@ -51,7 +54,7 @@ struct SubscriptionView: View {
     private var content: some View {
         switch viewModel.state {
         case .idle, .loading:
-            LoadingStateView(message: "Loading subscription")
+            LoadingStateView(message: "Loading plans")
         case .failed(let error):
             ErrorStateView(error: error) { Task { await reload() } }
         case .loaded(let overview):
@@ -59,404 +62,129 @@ struct SubscriptionView: View {
         }
     }
 
-    /// ISSUE #3 — the order of this screen is the fix.
-    ///
-    /// THE DEFECT: Stripe was the LAST thing on the page, below the seat
-    /// arithmetic, the projection slider and the full tier table. An owner in a
-    /// free trial had to scroll past several screens of pricing detail to reach
-    /// the one action that lets their business get paid — and the Founding
-    /// Member offer, which depends on connecting Stripe, was nowhere near it.
-    ///
-    /// THE ORDER NOW, which is simply what an owner needs in the order they
-    /// need it:
-    ///   1. Anything urgent (payment failed, trial nearly up).
-    ///   2. Where you stand — trial, plan, what you actually pay.
-    ///   3. Taking customer payments — Connect Stripe.
-    ///   4. Founding Member — what it is, or what it is worth.
-    ///   5. The arithmetic, for whoever wants to check it.
-    ///
-    /// Nothing was deleted: every card that existed still exists, and the
-    /// pricing model, tiers and 0.3% platform fee are untouched.
     private func loaded(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            if let alert = overview.alert {
-                alertCard(alert)
+            if let notice = viewModel.notice {
+                noticeBanner(notice)
             }
 
             if let commercial = viewModel.commercial {
-                if commercial.isTrialActive {
-                    TrialStatusCard(
-                        daysRemaining: commercial.trialDaysRemaining,
-                        endsAt: commercial.trialEndsAt,
-                        outcome: commercial.trialOutcomeMessage
-                    )
-                }
+                SubscriptionStatusCard(commercial: commercial)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let problem = viewModel.commercialError {
-                // The trial card and Founding Member badge are missing. This
-                // used to be a silent gap — the request failed behind a `try?`
-                // and the sections simply were not drawn, so the screen looked
-                // complete and was quietly wrong.
-                commercialUnavailableCard(problem)
+                unavailableCard(problem)
             }
 
-            priceCard(overview)
+            plansSection(overview)
 
-            // Stripe now sits directly under the plan, not at the foot of the
-            // screen, because connecting it is the single most valuable thing
-            // an owner can do here.
+            peopleCard(overview)
+
+            storeActions(overview)
+
             paymentsLink()
 
-            foundingCard()
-
-            breakdownCard(overview)
-            seatCard(overview)
-            projectionCard(overview)
-            tierListCard(overview)
-
-            if !overview.pricing.isLive {
-                Text("These prices could not be read from the server and are the built-in defaults. Reconnect to confirm the current price list.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.amber)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            legalFooter(overview)
         }
         .padding(.top, 4)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.commercial)
     }
 
-    /// ISSUE #3 — the Founding 100, stated in full and stated positively.
-    ///
-    /// Every rule here comes from `CommercialState`, which the database
-    /// computes: whether the benefit is live this month and whether the offer
-    /// is still open at all. This view invents no rule and no new pricing tier
-    /// — it explains what the server has already decided.
-    ///
-    /// The wording itself comes from `FoundingCopy`, and the allocation size,
-    /// the number of places left and the company's own member number are
-    /// deliberately never rendered here.
-    ///
-    /// The monthly reminder is deliberately worded as something to keep, not
-    /// something about to be lost, and the reinstatement rule is stated plainly
-    /// so an inactive month never reads as a permanent forfeit.
-    @ViewBuilder
-    private func foundingCard() -> some View {
-        if let commercial = viewModel.commercial {
-            if commercial.isFoundingMember {
-                VStack(alignment: .leading, spacing: 10) {
-                    FoundingMemberBadge(
-                        isBenefitActive: commercial.foundingBenefitActive,
-                        feeLabel: commercial.platformFeeLabel
-                    )
+    // MARK: - Plans
 
-                    if let message = commercial.foundingBenefitMessage {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(commercial.foundingBenefitActive ? Theme.green : Theme.accentText)
-                            .fixedSize(horizontal: false, vertical: true)
+    private func plansSection(_ overview: SubscriptionOverview) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(viewModel.commercial?.hasEntitlement == true ? "Change plan" : "Choose your plan")
+                    .sectionLabelStyle()
+                Spacer()
+            }
+
+            PeriodSwitch(period: $viewModel.period, savingPercent: overview.plans.map(\.annualSavingPercent).max() ?? 20)
+
+            VStack(spacing: 12) {
+                ForEach(overview.plans) { plan in
+                    PlanCard(
+                        plan: plan,
+                        period: viewModel.period,
+                        priceLabel: viewModel.priceLabel(for: plan, period: viewModel.period),
+                        freeTrialDays: viewModel.commercial?.hasEntitlement == true
+                            ? nil : viewModel.freeTrialDays(for: plan, period: viewModel.period),
+                        isCurrent: viewModel.isCurrent(plan),
+                        isRecommended: !(viewModel.commercial?.hasEntitlement ?? false)
+                            && PlanCatalog.recommended(forActiveUsers: overview.activeUsers, in: overview.plans)?.id == plan.id,
+                        tooSmall: !plan.fits(activeUsers: overview.activeUsers),
+                        activeUsers: overview.activeUsers,
+                        isWorking: viewModel.workingProductID == plan.productID(for: viewModel.period),
+                        isDisabled: viewModel.isWorking || !overview.canManage,
+                        actionTitle: actionTitle(for: plan)
+                    ) {
+                        Task { await buy(plan) }
                     }
-
-                    if !commercial.foundingBenefitActive {
-                        Text(FoundingCopy.statusKept)
-                            .font(.caption)
-                            .foregroundStyle(Theme.meta)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Text(FoundingCopy.feeRider(commercial.platformFeeLabel))
-                        .font(.caption)
-                        .foregroundStyle(Theme.meta)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } else if let invitation = commercial.foundingInvitation {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Founding Member").sectionLabelStyle()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 9) {
-                            Image(systemName: "star.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(Theme.accent)
-                            Text("Founding Member benefit")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(Theme.ink)
-                            Spacer(minLength: 0)
-                        }
-
-                        Text(invitation)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text("Connect Stripe and take your first customer payment to qualify. Connecting alone doesn't qualify — a payment has to complete successfully.")
-                            .font(.caption)
-                            .foregroundStyle(Theme.meta)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardSurface()
                 }
             }
-        }
-    }
 
-    // MARK: - Cards
-
-    /// Says plainly that the trial and Founding Member position could not be
-    /// read, rather than leaving the owner to notice their absence.
-    private func commercialUnavailableCard(_ problem: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(.footnote)
-                .foregroundStyle(Theme.amber)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Trial and Founding Member status unavailable")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.ink)
-                Text(problem)
-                    .font(.caption)
-                    .foregroundStyle(Theme.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Your plan and pricing below are unaffected.")
+            if !overview.canManage {
+                Text("Only the account owner can choose or change the plan.")
                     .font(.caption)
                     .foregroundStyle(Theme.meta)
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.amber.opacity(0.10))
-        .clipShape(.rect(cornerRadius: Theme.cardRadius))
-    }
-
-    private func alertCard(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.footnote)
-                .foregroundStyle(Theme.amber)
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.amber.opacity(0.10))
-        .clipShape(.rect(cornerRadius: Theme.cardRadius))
-    }
-
-    private func priceCard(_ overview: SubscriptionOverview) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                // The headline is what the company ACTUALLY pays. For a
-                // Founding Member whose benefit is live that is $0, and
-                // showing the tier price instead would be wrong. The tier
-                // price is still stated underneath, so nothing is hidden.
-                Text(viewModel.commercial?.effectivePriceLabel ?? overview.quote.monthlyLabel)
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.ink)
-                    .monospacedDigit()
-                Text("/month")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.secondary)
-                Spacer()
-                if let subscription = overview.subscription {
-                    StatusPill(badge: StatusBadge(
-                        text: subscription.status.title,
-                        tone: tone(for: subscription.status)
-                    ))
-                }
-            }
-
-            Text("\(overview.quote.tierName) · \(overview.quote.activePaidUsers) active \(overview.quote.activePaidUsers == 1 ? "person" : "people")")
-                .font(.subheadline)
-                .foregroundStyle(Theme.secondary)
-
-            if let commercial = viewModel.commercial, commercial.foundingBenefitActive {
-                Text("Founding Member — your \(commercial.tierName) subscription of \(commercial.subscriptionPriceLabel)/month is $0 while you actively process customer payments through \(FoundingCopy.programme).")
+            if !overview.pricesAreLive || viewModel.storeUnavailable {
+                Text("Showing standard US prices. Your App Store price is confirmed by Apple before you pay.")
                     .font(.caption)
-                    .foregroundStyle(Theme.green)
+                    .foregroundStyle(Theme.meta)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
 
-            if let subscription = overview.subscription {
-                Divider()
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.caption)
-                        .foregroundStyle(Theme.meta)
-                    Text(subscription.status == .cancelled
-                         ? "Ends \(Formatters.shortDate(subscription.currentPeriodEnd))"
-                         : "Renews \(Formatters.shortDate(subscription.renewalDate))")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.secondary)
-                }
+    private func actionTitle(for plan: PlanOffer) -> String {
+        guard let commercial = viewModel.commercial, commercial.hasEntitlement, let current = commercial.planID else {
+            if let days = viewModel.freeTrialDays(for: plan, period: viewModel.period) {
+                return "Start \(days)-day free trial"
             }
+            return "Choose \(plan.displayName)"
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
+        if current == plan.id {
+            return commercial.billingPeriod == viewModel.period ? "Current plan" : "Switch to \(viewModel.period.title.lowercased())"
+        }
+        let order = PlanID.allCases
+        let isUpgrade = (order.firstIndex(of: plan.id) ?? 0) > (order.firstIndex(of: current) ?? 0)
+        return isUpgrade ? "Upgrade to \(plan.displayName)" : "Move to \(plan.displayName)"
     }
 
-    /// The arithmetic, spelled out. This is the answer to "why am I paying
-    /// this?" and it is deliberately the most prominent thing after the total.
-    private func breakdownCard(_ overview: SubscriptionOverview) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("How this is calculated")
-                .sectionLabelStyle()
+    // MARK: - People
 
-            VStack(spacing: 0) {
-                breakdownRow(
-                    "First user",
-                    detail: "Included in every plan",
-                    amount: SubscriptionQuote.money(overview.quote.baseCents)
-                )
-
-                if overview.quote.additionalUsers > 0 {
-                    Divider().padding(.leading, 14)
-                    breakdownRow(
-                        "\(overview.quote.additionalUsers) more \(overview.quote.additionalUsers == 1 ? "user" : "users")",
-                        detail: "\(SubscriptionQuote.money(overview.quote.additionalUserCents)) each on the \(overview.quote.tierName) rate",
-                        amount: SubscriptionQuote.money(overview.quote.additionalCents)
-                    )
-                }
-
-                Divider().padding(.leading, 14)
-                breakdownRow(
-                    "Total each month",
-                    detail: nil,
-                    amount: overview.quote.monthlyLabel,
-                    emphasised: true
-                )
-            }
-            .cardSurface()
-
-            // The rule that is most often got wrong, stated plainly.
-            Text("Every user after the first is charged at the same rate — the one for your total head count. It is not banded, so growing into a bigger tier lowers the rate on all of your users, not just the new one.")
-                .font(.caption)
-                .foregroundStyle(Theme.meta)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func breakdownRow(
-        _ title: String,
-        detail: String?,
-        amount: String,
-        emphasised: Bool = false
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(emphasised ? .subheadline.weight(.semibold) : .subheadline)
-                    .foregroundStyle(Theme.ink)
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(Theme.meta)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 8)
-            Text(amount)
-                .font(emphasised ? .subheadline.weight(.bold) : .subheadline)
-                .monospacedDigit()
-                .foregroundStyle(Theme.ink)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private func seatCard(_ overview: SubscriptionOverview) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("People")
-                .sectionLabelStyle()
-
-            VStack(spacing: 0) {
-                seatRow("Active — billed", value: overview.activeUsers, tone: Theme.ink)
-                Divider().padding(.leading, 14)
-                seatRow("Invited — not yet billed", value: overview.invitedUsers, tone: Theme.secondary)
-                Divider().padding(.leading, 14)
-                seatRow("Suspended — not billed", value: overview.suspendedUsers, tone: Theme.secondary)
-
-                if let next = overview.quote.nextUserCents {
-                    Divider().padding(.leading, 14)
-                    HStack {
-                        Text(next >= 0 ? "Adding one more person" : "Adding one more person saves")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.ink)
-                        Spacer()
-                        Text(SubscriptionQuote.money(abs(next)))
-                            .font(.subheadline.weight(.semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(next >= 0 ? Theme.ink : Theme.green)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                }
-            }
-            .cardSurface()
-
-            Text(overview.quote.isAtCapacity
-                 ? "This company is at the supported maximum of \(overview.quote.maxUsers) active people."
-                 : "Only active people are billed. Suspending somebody removes their seat from the next bill; inviting somebody does not add one until they accept.")
-                .font(.caption)
-                .foregroundStyle(overview.quote.isAtCapacity ? Theme.amber : Theme.meta)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func seatRow(_ title: String, value: Int, tone: Color) -> some View {
-        HStack {
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(tone)
-            Spacer()
-            Text("\(value)")
-                .font(.subheadline.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(tone)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    /// Lets an owner price a hire before making it.
-    private func projectionCard(_ overview: SubscriptionOverview) -> some View {
-        let users = projectedUsers == 0 ? overview.quote.activePaidUsers : projectedUsers
-        let projected = viewModel.projection(overview, users: users)
-
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Plan ahead")
-                .sectionLabelStyle()
-
+    private func peopleCard(_ overview: SubscriptionOverview) -> some View {
+        let commercial = viewModel.commercial
+        let limit = commercial?.userLimit
+        let active = commercial?.activeUsers ?? overview.activeUsers
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("People").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("\(users) \(users == 1 ? "person" : "people")")
-                        .font(.subheadline.weight(.semibold))
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(active)")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .monospacedDigit()
                         .foregroundStyle(Theme.ink)
-                    Spacer()
-                    Text("\(projected.monthlyLabel)/mo")
-                        .font(.subheadline.weight(.bold))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.primary)
-                }
-
-                Stepper(
-                    value: Binding(
-                        get: { users },
-                        set: { projectedUsers = $0 }
-                    ),
-                    in: 1...overview.pricing.maxUsers
-                ) {
-                    Text(projected.breakdownLine)
-                        .font(.footnote)
-                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text(limit.map { "of \($0) on your plan" } ?? (commercial?.hasEntitlement == true ? "active · no limit" : "active"))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.secondary)
+                    Spacer()
                 }
-
-                if users != overview.quote.activePaidUsers {
-                    Text("This is an estimate only. Your bill changes when someone is actually activated.")
+                if let limit, limit > 0 {
+                    SeatMeter(active: active, limit: limit)
+                }
+                if overview.invitedUsers > 0 || overview.suspendedUsers > 0 {
+                    Text("\(overview.invitedUsers) invited · \(overview.suspendedUsers) suspended — neither counts until active.")
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
+                }
+                if let commercial, commercial.isOverPlan {
+                    Text("You have more people than your plan includes. Everyone keeps working — move to a bigger plan to add anyone else.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.amber)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(14)
@@ -465,134 +193,396 @@ struct SubscriptionView: View {
         }
     }
 
-    private func tierListCard(_ overview: SubscriptionOverview) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Price list")
-                .sectionLabelStyle()
+    // MARK: - Store actions
 
-            VStack(spacing: 0) {
-                ForEach(Array(overview.pricing.tiers.enumerated()), id: \.element.id) { index, tier in
-                    let isCurrent = tier.id == overview.quote.tierID
-
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(tier.displayName)
-                                    .font(.subheadline.weight(isCurrent ? .bold : .regular))
-                                    .foregroundStyle(Theme.ink)
-                                if isCurrent {
-                                    Text("Current")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(Theme.primary)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Theme.primaryTint)
-                                        .clipShape(.rect(cornerRadius: 5))
-                                }
-                            }
-                            Text(tier.minUsers == tier.maxUsers
-                                 ? "\(tier.minUsers) user"
-                                 : "\(tier.minUsers)–\(tier.maxUsers) users")
-                                .font(.caption)
-                                .foregroundStyle(Theme.meta)
-                        }
-                        Spacer(minLength: 8)
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(SubscriptionQuote.money(tier.baseCents))
-                                .font(.subheadline)
-                                .monospacedDigit()
-                                .foregroundStyle(Theme.ink)
-                            if tier.additionalUserCents > 0 {
-                                Text("+ \(SubscriptionQuote.money(tier.additionalUserCents))/user")
-                                    .font(.caption)
-                                    .monospacedDigit()
-                                    .foregroundStyle(Theme.meta)
-                            }
-                        }
+    private func storeActions(_ overview: SubscriptionOverview) -> some View {
+        VStack(spacing: 10) {
+            if overview.canManage {
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await restore() }
+                    } label: {
+                        BrandOutlineLabel(
+                            title: viewModel.isRestoring ? "Restoring…" : "Restore purchases",
+                            symbol: "arrow.clockwise"
+                        )
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(isCurrent ? Theme.primaryTint.opacity(0.4) : Color.clear)
+                    .buttonStyle(PressableTileStyle())
+                    .disabled(viewModel.isWorking)
 
-                    if index < overview.pricing.tiers.count - 1 {
-                        Divider().padding(.leading, 14)
+                    Button {
+                        isRedeemingCode = true
+                    } label: {
+                        BrandOutlineLabel(title: "Redeem code", symbol: "ticket")
                     }
+                    .buttonStyle(PressableTileStyle())
+                    .disabled(viewModel.isWorking || !env.isProductionSession)
+                }
+
+                if viewModel.commercial?.billingStore == .apple {
+                    Button {
+                        if let url = URL(string: "https://apps.apple.com/account/subscriptions") { openURL(url) }
+                    } label: {
+                        BrandOutlineLabel(title: "Manage in the App Store", symbol: "apple.logo", tint: Theme.secondary)
+                    }
+                    .buttonStyle(PressableTileStyle())
                 }
             }
-            .cardSurface()
         }
     }
 
-    /// FLOW B, as a signpost and nothing more.
-    ///
-    /// This screen used to host a full inline Stripe card — status, Stripe's
-    /// outstanding requirements, the business-structure question and the
-    /// onboarding button — duplicating Settings → Integrations → Payments.
-    /// Two surfaces owning one integration gave an owner two places to act and
-    /// two chances to see them disagree. The controls now live in exactly one
-    /// place and this is the way through to it.
-    ///
-    /// Subscription is what the business pays Harbour South. Payments is what
-    /// the business's own customers pay them. Keeping the boundary sharp is the
-    /// entire point.
-    @ViewBuilder
+    // MARK: - Payments signpost
+
+    /// Stripe is a separate thing: what the business's own customers pay
+    /// them. It lives in More → Connect Stripe; this is only the way there.
     private func paymentsLink() -> some View {
-        if case .loaded(let connect) = viewModel.connectState, connect.canManage {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Taking customer payments")
-                    .sectionLabelStyle()
-
-                NavigationLink(value: AppRoute.more(.payments_integration)) {
-                    HStack(spacing: 12) {
-                        Image(systemName: connect.acceptsCards ? "checkmark.seal.fill" : "creditcard")
-                            .font(.title3)
-                            .foregroundStyle(connect.acceptsCards ? Theme.green : Theme.accent)
-                            .frame(width: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(connect.readiness.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(Theme.ink)
-                            Text(connect.acceptsCards
-                                 ? "Manage your Stripe account and payouts"
-                                 : "Set up Stripe so customers can pay by card")
-                                .font(.caption)
-                                .foregroundStyle(Theme.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Theme.meta)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardSurface()
-                    .contentShape(.rect)
+        NavigationLink(value: AppRoute.more(.payments_integration)) {
+            HStack(spacing: 12) {
+                Image(systemName: "creditcard")
+                    .font(.title3)
+                    .foregroundStyle(Theme.primary)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Taking customer payments?")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.ink)
+                    Text("That's Stripe, set up separately under Connect Stripe.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(PressableTileStyle())
-
-                Text("This is separate from your Harbour South subscription above. Customer payments go straight to your own Stripe account.")
-                    .font(.caption)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.meta)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+            .contentShape(.rect)
+        }
+        .buttonStyle(PressableTileStyle())
+    }
+
+    // MARK: - Legal
+
+    private func legalFooter(_ overview: SubscriptionOverview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Subscriptions are billed by Apple to your Apple ID and renew automatically at the end of each period unless cancelled at least 24 hours before it ends. A free trial, where offered, turns into the paid plan you chose when it ends unless you cancel first. Manage or cancel any time in Settings → Apple ID → Subscriptions.")
+            HStack(spacing: 14) {
+                if let terms = Brand.termsOfUseURL {
+                    Link("Terms of Use", destination: terms)
+                }
+                if let privacy = Brand.privacyPolicyURL {
+                    Link("Privacy Policy", destination: privacy)
+                }
+            }
+            .font(.caption.weight(.semibold))
+        }
+        .font(.caption2)
+        .foregroundStyle(Theme.meta)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: - Small cards
+
+    private func noticeBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.seal.fill").foregroundStyle(Theme.green)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(13)
+        .background(Theme.green.opacity(0.10))
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+    }
+
+    private func unavailableCard(_ problem: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.footnote)
+                .foregroundStyle(Theme.amber)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Your plan couldn't be loaded")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text(problem)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.amber.opacity(0.10))
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
     }
 
-    private func tone(for status: SubscriptionStatus) -> StatusTone {
-        switch status {
-        case .active: return .success
-        case .trialing: return .info
-        case .pastDue: return .warning
-        case .cancelled, .expired: return .danger
-        }
+    // MARK: - Actions
+
+    private func buy(_ plan: PlanOffer) async {
+        guard let session else { return }
+        await viewModel.buy(plan, gateway: env.gateway, store: env.storeBilling, session: session)
+    }
+
+    private func restore() async {
+        guard let session else { return }
+        await viewModel.restore(gateway: env.gateway, store: env.storeBilling, session: session)
     }
 
     private func reload(showLoading: Bool = true) async {
         guard let session else { return }
-        await viewModel.load(gateway: env.gateway, session: session, showLoading: showLoading)
+        await viewModel.load(gateway: env.gateway, store: env.storeBilling, session: session, showLoading: showLoading)
+    }
+}
+
+// MARK: - Components
+
+/// Where the company stands, in one card.
+private struct SubscriptionStatusCard: View {
+    let commercial: CommercialState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 44, height: 44)
+                    .background(tint.gradient)
+                    .clipShape(.rect(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(commercial.planName ?? "No plan yet")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Theme.ink)
+                    Text(commercial.headline)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.secondary)
+                }
+                Spacer(minLength: 0)
+                StatusPill(badge: StatusBadge(text: commercial.entitlementState.pillText, tone: commercial.entitlementState.tone))
+            }
+            if let detail = commercial.detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var symbol: String {
+        switch commercial.entitlementState {
+        case .trial, .offer: return "gift.fill"
+        case .active, .cancelling: return "checkmark.seal.fill"
+        case .gracePeriod, .billingRetry: return "exclamationmark.triangle.fill"
+        case .none, .expired, .revoked: return "sparkles"
+        }
+    }
+
+    private var tint: Color {
+        switch commercial.entitlementState.tone {
+        case .success: return Theme.green
+        case .info: return Theme.primary
+        case .warning: return Theme.amber
+        case .danger: return Theme.red
+        case .neutral: return Theme.accent
+        }
+    }
+}
+
+/// Monthly / Annual, with the saving stated on the switch itself.
+private struct PeriodSwitch: View {
+    @Binding var period: BillingPeriod
+    let savingPercent: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(BillingPeriod.allCases) { option in
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { period = option }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(option.title)
+                            .font(.subheadline.weight(.semibold))
+                        if option == .annual {
+                            Text("Save \(savingPercent)%")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(period == .annual ? Color.white.opacity(0.25) : Theme.accentTint)
+                                .foregroundStyle(period == .annual ? Color.white : Theme.accentText)
+                                .clipShape(.capsule)
+                        }
+                    }
+                    .foregroundStyle(period == option ? Color.white : Theme.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background {
+                        if period == option {
+                            RoundedRectangle(cornerRadius: 10).fill(Theme.primary)
+                        }
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(period == option ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Theme.surfaceAlt)
+        .clipShape(.rect(cornerRadius: 13))
+        .sensoryFeedback(.selection, trigger: period)
+    }
+}
+
+/// One plan: who it is for, the price, how many people, one button.
+private struct PlanCard: View {
+    let plan: PlanOffer
+    let period: BillingPeriod
+    let priceLabel: String
+    let freeTrialDays: Int?
+    let isCurrent: Bool
+    let isRecommended: Bool
+    let tooSmall: Bool
+    let activeUsers: Int
+    let isWorking: Bool
+    let isDisabled: Bool
+    let actionTitle: String
+    let action: () -> Void
+
+    private var symbol: String {
+        switch plan.id {
+        case .starter: return "person.fill"
+        case .team: return "person.2.fill"
+        case .business: return "person.3.fill"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.headline)
+                    .foregroundStyle(isCurrent ? Color.white : Theme.primary)
+                    .frame(width: 42, height: 42)
+                    .background(isCurrent ? AnyShapeStyle(Theme.primary.gradient) : AnyShapeStyle(Theme.primaryTint))
+                    .clipShape(.rect(cornerRadius: 11))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(plan.displayName)
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(Theme.ink)
+                        if isCurrent {
+                            tag("Current", fill: Theme.primaryTint, text: Theme.primary)
+                        } else if isRecommended {
+                            tag("Best fit", fill: Theme.accentTint, text: Theme.accentText)
+                        }
+                    }
+                    Text(plan.tagline)
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondary)
+                }
+
+                Spacer(minLength: 4)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(priceLabel)
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.ink)
+                        .contentTransition(.numericText())
+                    Text(period.perUnit)
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                }
+            }
+
+            HStack(spacing: 14) {
+                Label(plan.usersLabel, systemImage: "person.crop.circle.badge.checkmark")
+                if period == .annual {
+                    Label("Save \(PriceLabel.usd(plan.annualSavingCents))/yr", systemImage: "tag.fill")
+                        .foregroundStyle(Theme.green)
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Theme.secondary)
+
+            if tooSmall {
+                Text("You have \(activeUsers) active people — more than \(plan.displayName) includes.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.amber)
+            }
+
+            if !isCurrent {
+                Button(action: action) {
+                    BrandButtonLabel(
+                        title: actionTitle,
+                        role: isRecommended ? .accent : .primary,
+                        isEnabled: !isDisabled,
+                        isWorking: isWorking
+                    )
+                }
+                .buttonStyle(PressableTileStyle())
+                .disabled(isDisabled)
+
+                if let freeTrialDays {
+                    Text("Free for \(freeTrialDays) days, then \(priceLabel)\(period.perUnit). Cancel any time before the trial ends.")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.meta)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface)
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .stroke(isCurrent ? Theme.primary : (isRecommended ? Theme.accent.opacity(0.55) : Theme.border),
+                        lineWidth: isCurrent || isRecommended ? 1.5 : 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("plan-\(plan.id.rawValue)")
+    }
+
+    private func tag(_ text: String, fill: Color, text textColor: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(textColor)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(fill)
+            .clipShape(.capsule)
+    }
+}
+
+/// Seats used against the plan, as a bar that fills.
+private struct SeatMeter: View {
+    let active: Int
+    let limit: Int
+
+    private var fraction: Double { min(Double(active) / Double(max(limit, 1)), 1) }
+    private var tint: Color { active > limit ? Theme.amber : (active == limit ? Theme.accent : Theme.primary) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.surfaceAlt)
+                Capsule().fill(tint.gradient)
+                    .frame(width: max(proxy.size.width * fraction, 8))
+            }
+        }
+        .frame(height: 8)
+        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: fraction)
+        .accessibilityLabel("\(active) of \(limit) people")
     }
 }

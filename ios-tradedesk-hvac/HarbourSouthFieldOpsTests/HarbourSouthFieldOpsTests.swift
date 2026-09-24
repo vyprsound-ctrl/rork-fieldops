@@ -13,127 +13,256 @@ import Testing
 // exercised by the in-app scenario suite and, ultimately, on a real handset.
 // =============================================================================
 
-// MARK: - Subscription pricing
+// MARK: - Plans and Apple entitlement
 
-/// The pricing model is **non-progressive**: a company falls into exactly one
-/// tier chosen by its total head count, and every seat after the first is
-/// charged that tier's single rate. It is emphatically not "the first 10 at one
-/// rate, the next 20 at another".
-///
-/// The published examples are the specification, so they are asserted verbatim
-/// in cents. Comparing money as `Decimal`/cents rather than `Double` is the
-/// point: a binary float would make several of these pass by rounding.
-struct SubscriptionPricingTests {
-    private let pricing = PlatformPricing.fallback
+/// The three plans are the specification, asserted in cents.
+struct PlanCatalogTests {
+    private let plans = PlanCatalog.standard
+    private func plan(_ id: PlanID) -> PlanOffer { plans.first { $0.id == id }! }
 
-    @Test("One user is the base price and nothing else")
-    func soloUser() {
-        let quote = pricing.quote(for: 1)
-        #expect(quote.monthlyPriceCents == 1_999)
-        #expect(quote.additionalUsers == 0)
-        #expect(quote.tierID == "solo")
+    @Test("Exactly three plans: Starter, Team, Business")
+    func threePlans() {
+        #expect(plans.map(\.id) == [.starter, .team, .business])
+        #expect(plans.map(\.displayName) == ["Starter", "Team", "Business"])
     }
 
-    @Test(
-        "Published price points are exact",
-        arguments: [
-            (users: 1, cents: 1_999),     // $19.99
-            (users: 5, cents: 7_195),     // $71.95   = 19.99 + 4 × 12.99
-            (users: 10, cents: 13_690),   // $136.90  = 19.99 + 9 × 12.99
-            (users: 11, cents: 11_989),   // $119.89  = 19.99 + 10 × 9.99
-            (users: 15, cents: 15_985),   // $159.85  = 19.99 + 14 × 9.99
-            (users: 30, cents: 30_970),   // $309.70  = 19.99 + 29 × 9.99
-            (users: 31, cents: 25_969),   // $259.69  = 19.99 + 30 × 7.99
-            (users: 35, cents: 29_165),   // $291.65  = 19.99 + 34 × 7.99
-            (users: 100, cents: 81_100)   // $811.00  = 19.99 + 99 × 7.99
+    @Test("Monthly prices are 19.99, 39.99 and 69.99")
+    func monthlyPrices() {
+        #expect(plan(.starter).monthlyCents == 1999)
+        #expect(plan(.team).monthlyCents == 3999)
+        #expect(plan(.business).monthlyCents == 6999)
+    }
+
+    @Test("Annual prices are 191.99, 384.99 and 669.99")
+    func annualPrices() {
+        #expect(plan(.starter).annualCents == 19199)
+        #expect(plan(.team).annualCents == 38499)
+        #expect(plan(.business).annualCents == 66999)
+    }
+
+    @Test("Annual is about 20% below twelve monthly payments for every plan")
+    func annualSaving() {
+        for plan in plans {
+            #expect(plan.annualSavingPercent == 20, "\(plan.displayName) saves \(plan.annualSavingPercent)%")
+            #expect(plan.annualSavingCents == plan.monthlyCents * 12 - plan.annualCents)
+        }
+        #expect(plan(.team).annualSavingCents == 9489)
+    }
+
+    @Test("Starter is 1 user and Team is up to 5")
+    func userLimits() {
+        #expect(plan(.starter).userLimit == 1)
+        #expect(plan(.starter).usersLabel == "1 user")
+        #expect(plan(.team).userLimit == 5)
+        #expect(plan(.team).usersLabel == "Up to 5 users")
+    }
+
+    @Test("Business is 10+ with no cap — 12, 20, 30 and 200 people all fit")
+    func businessIsUncapped() {
+        let business = plan(.business)
+        #expect(business.userLimit == nil)
+        #expect(business.includedUsers == 10)
+        #expect(business.usersLabel == "10+ users")
+        for size in [10, 12, 20, 30, 200] {
+            #expect(business.fits(activeUsers: size))
+        }
+    }
+
+    @Test("The recommended plan is the smallest that fits the team")
+    func recommendation() {
+        #expect(PlanCatalog.recommended(forActiveUsers: 1)?.id == .starter)
+        #expect(PlanCatalog.recommended(forActiveUsers: 2)?.id == .team)
+        #expect(PlanCatalog.recommended(forActiveUsers: 5)?.id == .team)
+        #expect(PlanCatalog.recommended(forActiveUsers: 6)?.id == .business)
+        #expect(PlanCatalog.recommended(forActiveUsers: 30)?.id == .business)
+        #expect(PlanCatalog.recommended(forActiveUsers: 0)?.id == .starter)
+    }
+
+    @Test("Six App Store products, each resolving to its plan and period")
+    func productIDs() {
+        #expect(PlanCatalog.allProductIDs.count == 6)
+        #expect(Set(PlanCatalog.allProductIDs).count == 6)
+        for plan in plans {
+            for period in BillingPeriod.allCases {
+                let resolved = PlanCatalog.resolve(productID: plan.productID(for: period))
+                #expect(resolved?.plan == plan.id)
+                #expect(resolved?.period == period)
+            }
+        }
+        #expect(PlanCatalog.resolve(productID: "com.example.other") == nil)
+        #expect(plan(.team).monthlyProductID == "com.harboursouth.fieldservice.team.monthly")
+        #expect(plan(.business).annualProductID == "com.harboursouth.fieldservice.business.annual")
+    }
+
+    @Test("Customers see Starter, never the stored enum name")
+    func starterName() {
+        #expect(SubscriptionPlan.soloTrader.title == "Starter")
+        #expect(SubscriptionPlan(planID: .starter) == .soloTrader)
+        #expect(SubscriptionPlan.business.planID == .business)
+    }
+}
+
+/// What the app shows for each entitlement state the server derives.
+struct EntitlementPresentationTests {
+    private let end = Date(timeIntervalSinceNow: 60 * 60 * 24 * 10)
+
+    private func state(
+        _ entitlement: EntitlementState,
+        plan: PlanID? = .team,
+        period: BillingPeriod? = .monthly,
+        free: Bool = false,
+        days: Int = 0,
+        autoRenew: Bool? = true,
+        renewsTo: PlanID? = nil,
+        offerType: Int? = nil
+    ) -> CommercialState {
+        CommercialState(
+            entitlementState: entitlement,
+            planID: entitlement.isEntitled ? plan : nil,
+            planName: entitlement.isEntitled ? plan.map { p in PlanCatalog.standard.first { $0.id == p }!.displayName } : nil,
+            billingPeriod: entitlement.isEntitled ? period : nil,
+            planPriceCents: 3999,
+            userLimit: plan == .business ? nil : 5,
+            periodEndsAt: end,
+            willAutoRenew: autoRenew,
+            renewsToPlanID: renewsTo,
+            offerType: offerType,
+            isFreeOffer: free,
+            freeOfferDaysRemaining: days,
+            gracePeriodEndsAt: entitlement == .gracePeriod ? end : nil
+        )
+    }
+
+    @Test("Entitled states are exactly trial, offer, active, cancelling and grace period")
+    func entitledSet() {
+        let entitled: Set<EntitlementState> = [.trial, .offer, .active, .cancelling, .gracePeriod]
+        for value in [EntitlementState.none, .trial, .offer, .active, .cancelling, .gracePeriod, .billingRetry, .expired, .revoked] {
+            #expect(value.isEntitled == entitled.contains(value), "\(value)")
+        }
+    }
+
+    @Test("No plan: a clear invitation to choose one, mentioning the Apple trial")
+    func noPlan() {
+        let s = state(.none)
+        #expect(s.hasEntitlement == false)
+        #expect(s.headline == "No plan yet")
+        #expect(s.detail?.contains("14-day free trial") == true)
+        #expect(s.planPriceLabel == nil)
+    }
+
+    @Test("The 14-day trial states when Apple will start billing, and at what price")
+    func trial() {
+        let s = state(.trial, free: true, days: 14, offerType: 1)
+        #expect(s.headline == "Free trial — 14 days left")
+        #expect(s.detail?.contains("Then Team at $39.99/month, billed by Apple unless you cancel") == true)
+    }
+
+    @Test("A 30- or 90-day Offer Code is an entitlement and says the same thing")
+    func offerCode() {
+        let s = state(.offer, free: true, days: 90, offerType: 3)
+        #expect(s.hasEntitlement)
+        #expect(s.headline == "Free offer — 90 days left")
+        #expect(s.detail?.contains("billed by Apple unless you cancel") == true)
+    }
+
+    @Test("A trial the customer has cancelled says it will not renew")
+    func cancelledTrial() {
+        let s = state(.trial, free: true, days: 3, autoRenew: false, offerType: 1)
+        #expect(s.detail?.contains("will not renew") == true)
+    }
+
+    @Test("Active shows the renewal; a scheduled downgrade is announced")
+    func activeAndDowngrade() {
+        #expect(state(.active).headline.hasPrefix("Team · renews "))
+        #expect(state(.active, renewsTo: .starter).detail == "Changes to Starter at your next renewal.")
+    }
+
+    @Test("Cancelling keeps the plan until the end date")
+    func cancelling() {
+        let s = state(.cancelling, autoRenew: false)
+        #expect(s.hasEntitlement)
+        #expect(s.headline.hasPrefix("Team · ends "))
+    }
+
+    @Test("Billing problems say what to do next")
+    func billingProblems() {
+        let grace = state(.gracePeriod)
+        #expect(grace.hasEntitlement)
+        #expect(grace.detail?.contains("update your payment method in the App Store") == true)
+        let retry = state(.billingRetry)
+        #expect(retry.hasEntitlement == false)
+        #expect(retry.detail?.contains("Apple will try again") == true)
+    }
+
+    @Test("Expired and refunded are not entitled")
+    func ended() {
+        #expect(state(.expired).hasEntitlement == false)
+        #expect(state(.revoked).hasEntitlement == false)
+        #expect(state(.expired).headline == "Subscription ended")
+    }
+
+    @Test("Seats read plainly: 3 of 5 people, or no limit on Business")
+    func seats() {
+        let team = CommercialState(entitlementState: .active, planID: .team, userLimit: 5, activeUsers: 3)
+        #expect(team.seatsLabel == "3 of 5 people")
+        let business = CommercialState(entitlementState: .active, planID: .business, userLimit: nil, activeUsers: 30)
+        #expect(business.seatsLabel == "30 people · no limit")
+        #expect(business.isOverPlan == false)
+        let over = CommercialState(entitlementState: .active, planID: .starter, userLimit: 1, activeUsers: 3)
+        #expect(over.isOverPlan)
+    }
+
+    /// The retired programme must leave nothing a customer can read.
+    @Test("No commercial sentence mentions a founding programme or free-for-Stripe benefit")
+    func noFoundingWording() {
+        let states: [CommercialState] = [
+            state(.none), state(.trial, free: true, days: 14, offerType: 1), state(.offer, free: true, days: 30, offerType: 3),
+            state(.active), state(.cancelling, autoRenew: false), state(.gracePeriod), state(.billingRetry),
+            state(.expired), state(.revoked)
         ]
-    )
-    func publishedPricePoints(users: Int, cents: Int) {
-        #expect(pricing.quote(for: users).monthlyPriceCents == cents)
-    }
-
-    /// The boundary that proves the model is not progressive: adding an
-    /// eleventh person **reduces** the bill, because every seat reprices to the
-    /// cheaper tier rather than only the new one.
-    @Test("Crossing a tier boundary reprices every seat, not just the new one")
-    func boundaryRepricesDownward() {
-        let ten = pricing.quote(for: 10)
-        let eleven = pricing.quote(for: 11)
-
-        #expect(eleven.monthlyPriceCents < ten.monthlyPriceCents)
-        #expect(eleven.additionalUserCents == 999)
-        // A progressive model would charge 9 × 12.99 + 1 × 9.99 here. It does
-        // not, and this is the assertion that would catch someone "fixing" it.
-        #expect(eleven.monthlyPriceCents != 1_999 + (9 * 1_299) + 999)
-
-        // And the marginal cost shown to the owner is honest about that: the
-        // eleventh seat is negative, because the bill genuinely goes down.
-        #expect((ten.nextUserCents ?? 0) < 0)
-    }
-
-    @Test("Every additional seat is charged the same rate inside a tier")
-    func flatRateWithinTier() {
-        for users in 2...10 {
-            let quote = pricing.quote(for: users)
-            #expect(quote.additionalUserCents == 1_299)
-            #expect(quote.additionalUsers == users - 1)
-            #expect(quote.monthlyPriceCents == 1_999 + ((users - 1) * 1_299))
+        let banned = ["founding", "founder", "first 100", "zero subscription", "$0/month", "places remain", "member #"]
+        for s in states {
+            for sentence in [s.headline, s.detail ?? ""] {
+                for word in banned {
+                    #expect(sentence.localizedCaseInsensitiveContains(word) == false, "\"\(sentence)\" contains \"\(word)\"")
+                }
+            }
         }
     }
+}
 
-    @Test("The ceiling is 100 paid users")
-    func ceiling() {
-        let full = pricing.quote(for: 100)
-        #expect(full.isAtCapacity)
-        #expect(full.isOverCapacity == false)
-        // Nothing to quote for a 101st seat, so no marginal price is invented.
-        #expect(full.nextUserCents == nil)
+/// The development stack seeds one subscribed and one unsubscribed company.
+struct DevelopmentCommercialSeedTests {
+    @Test("Gulf Coast is on Team annual via Apple; Northline has no plan and no Stripe")
+    func seed() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let gulf = TenantSession(userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
+                                 displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac)
+        let north = TenantSession(userID: "usr_north_owner", companyID: "cmp_northline", role: .owner,
+                                  displayName: "Erin Vaught", email: "erin@northlineplumbing.com", trade: .plumbing)
+        let subscribed = try await gateway.commercialState(session: gulf)
+        let unsubscribed = try await gateway.commercialState(session: north)
+        #expect(subscribed.entitlementState == .active)
+        #expect(subscribed.planID == .team)
+        #expect(subscribed.billingPeriod == .annual)
+        #expect(subscribed.platformFeeBps == 30)
+        #expect(unsubscribed.hasEntitlement == false)
+        #expect(unsubscribed.stripeState == .notConnected)
+        #expect(unsubscribed.platformFeeBps == 30)
 
-        let over = pricing.quote(for: 101)
-        #expect(over.isOverCapacity)
+        let overview = try await gateway.subscriptionOverview(session: gulf)
+        #expect(overview.plans.map(\.id) == [.starter, .team, .business])
     }
 
-    @Test("A head count below one is treated as one rather than as free")
-    func zeroUsersFloorsToOne() {
-        #expect(pricing.quote(for: 0).monthlyPriceCents == 1_999)
-        #expect(pricing.quote(for: -5).monthlyPriceCents == 1_999)
-    }
-
-    @Test("Tiers cover 1...100 with no gap and no overlap")
-    func tiersAreContiguous() {
-        for users in 1...100 {
-            let matches = pricing.tiers.filter { $0.contains(users) }
-            #expect(matches.count == 1, "\(users) users matched \(matches.count) tiers")
+    @Test("The development store sells nothing and shows the standard prices")
+    func mockStore() async throws {
+        let store = MockStoreBillingService()
+        let products = try await store.products()
+        #expect(products.count == 6)
+        #expect(products.first { $0.id == "com.harboursouth.fieldservice.team.annual" }?.displayPrice.contains("384.99") == true)
+        await #expect(throws: StoreBillingError.self) {
+            _ = try await store.purchase(productID: "com.harboursouth.fieldservice.team.monthly", appAccountToken: nil)
         }
-    }
-
-    /// Asserts the SHAPE of the breakdown, not one locale's rendering of it.
-    ///
-    /// This previously hard-coded "$19.99 + 14 × $9.99" and passed only on a
-    /// runner set to a US locale; on a runner formatting USD as "US$ 19,99" it
-    /// failed while the app was behaving correctly. The arithmetic is the thing
-    /// worth protecting, so it is checked against the same formatter the app
-    /// uses — with the operands asserted independently, so a genuinely wrong
-    /// figure still fails.
-    @Test("The breakdown line states the arithmetic being charged")
-    func breakdownIsItemised() {
-        let solo = pricing.quote(for: 1)
-        #expect(solo.breakdownLine == SubscriptionQuote.money(1_999))
-        #expect(solo.breakdownLine.contains("×") == false)
-
-        let fifteen = pricing.quote(for: 15)
-        #expect(fifteen.breakdownLine == "\(SubscriptionQuote.money(1_999)) + 14 × \(SubscriptionQuote.money(999))")
-        #expect(fifteen.additionalUsers == 14)
-        #expect(fifteen.baseCents == 1_999)
-        #expect(fifteen.additionalUserCents == 999)
-    }
-
-    /// The fallback price list is only ever shown with a caveat, and it says so
-    /// in the type rather than relying on a screen to remember.
-    @Test("The built-in price list is marked as not live")
-    func fallbackIsLabelled() {
-        #expect(PlatformPricing.fallback.isLive == false)
-        #expect(PlatformPricing.fallback.maxUsers == 100)
     }
 }
 
@@ -787,164 +916,16 @@ struct JobListFilterTests {
     }
 }
 
-/// The Founding Member programme, as a customer is allowed to see it.
-///
-/// WHY THIS SUITE EXISTS
-/// The old wording — "Founding Members can receive $0/month … 100 of 100 places
-/// remain" — was removed once and came back, because the sentence was typed
-/// into several screens and only some were corrected. Every screen now reads
-/// `FoundingCopy`, and these tests assert the rules directly against it, so a
-/// reintroduction fails here rather than on a customer's phone.
-///
-/// The rules being protected are commercial, not cosmetic:
-///   - the allocation size is confidential, and the programme may grow,
-///   - a member's own number is internal,
-///   - the benefit is something they earn by trading, not something granted,
-///   - the subscription being free must never be stated without the fees that
-///     still apply.
-struct FoundingMemberCopyTests {
-
-    /// Every sentence the app can show a customer about the programme.
-    private var customerFacingCopy: [String] {
-        [
-            FoundingCopy.badgeTitle,
-            FoundingCopy.benefitActive,
-            FoundingCopy.benefitPaused,
-            FoundingCopy.statusKept,
-            FoundingCopy.trialOutcome,
-            FoundingCopy.invitation(feeLabel: "0.3%"),
-            FoundingCopy.feeRider("0.3%")
-        ]
-    }
-
-    @Test("No customer-facing sentence reveals the allocation, a member number, or 'can receive'")
-    func forbiddenWordingIsAbsent() {
-        for sentence in customerFacingCopy {
-            for fragment in FoundingCopy.forbiddenFragments {
-                #expect(
-                    sentence.localizedCaseInsensitiveContains(fragment) == false,
-                    "\"\(sentence)\" must not contain \"\(fragment)\""
-                )
-            }
-        }
-    }
-
-    /// The programme may be extended past 100, so nothing describing the STATUS
-    /// may be tied to that figure — or to any other count.
-    ///
-    /// The fee rider and the invitation are excluded because they must quote
-    /// the platform fee ("0.3%"); that is a rate, not a headcount, and
-    /// `forbiddenWordingIsAbsent` already proves neither leaks an allocation.
-    @Test("No sentence describing the status contains a figure")
-    func noDigitsAnywhere() {
-        let statusCopy = [
-            FoundingCopy.badgeTitle,
-            FoundingCopy.benefitActive,
-            FoundingCopy.benefitPaused,
-            FoundingCopy.statusKept,
-            FoundingCopy.trialOutcome
-        ]
-        for sentence in statusCopy {
-            #expect(
-                sentence.contains(where: \.isNumber) == false,
-                "\"\(sentence)\" must not contain a figure"
-            )
-        }
-    }
-
-    @Test("The benefit is stated as zero subscription fees, conditional on processing payments")
-    func benefitIsStatedCorrectly() {
-        let invitation = FoundingCopy.invitation(feeLabel: "0.3%")
-        #expect(invitation.localizedCaseInsensitiveContains("zero"))
-        #expect(invitation.localizedCaseInsensitiveContains("subscription fees"))
-        #expect(invitation.localizedCaseInsensitiveContains("actively processing customer payments"))
-    }
-
-    /// Saying the subscription is free without the rider would misstate the
-    /// commercial deal.
-    @Test("The invitation always carries the platform fee and Stripe's fees")
-    func invitationCarriesTheFeeRider() {
-        let invitation = FoundingCopy.invitation(feeLabel: "0.3%")
-        #expect(invitation.contains("0.3% Harbour South platform fee"))
-        #expect(invitation.localizedCaseInsensitiveContains("stripe processing fees"))
-    }
-
-    /// The fee shown must be the company's real fee, not a constant that would
-    /// silently lie if the rate ever differed.
-    @Test("The fee rider quotes the fee it is given")
-    func feeRiderUsesTheSuppliedRate() {
-        #expect(FoundingCopy.feeRider("0.45%").contains("0.45%"))
-        #expect(FoundingCopy.feeRider("0.45%").contains("0.3%") == false)
-    }
-
-    @Test("Every sentence names the product")
-    func copyNamesTheProduct() {
-        #expect(FoundingCopy.programme == Brand.name)
-        #expect(FoundingCopy.benefitActive.contains(Brand.name))
-        #expect(FoundingCopy.invitation(feeLabel: "0.3%").contains(Brand.name))
-        #expect(FoundingCopy.trialOutcome.contains(Brand.name))
-    }
-
-    /// An inactive month pauses the benefit; it never removes the status.
-    @Test("A quiet month is described as recoverable, never as a forfeit")
-    func statusIsNeverDescribedAsLost() {
-        #expect(FoundingCopy.benefitPaused.localizedCaseInsensitiveContains("resume"))
-        #expect(FoundingCopy.statusKept.localizedCaseInsensitiveContains("yours to keep"))
-        for word in ["forfeit", "lose", "lost", "revoked", "cancelled"] {
-            #expect(FoundingCopy.statusKept.localizedCaseInsensitiveContains(word) == false)
-            #expect(FoundingCopy.benefitPaused.localizedCaseInsensitiveContains(word) == false)
-        }
-    }
-
-    /// The fee is called the platform fee, and Stripe's fees are named as a
-    /// separate charge alongside it.
-    @Test("The fee rider names the 0.3% Harbour South platform fee and Stripe's fees separately")
-    func feeRiderUsesPlatformFeeWording() {
-        let rider = FoundingCopy.feeRider("0.3%")
-        #expect(rider == "The 0.3% Harbour South platform fee and standard Stripe processing fees still apply.")
-        for retired in PlatformFeeCopy.retiredWording {
-            #expect(rider.localizedCaseInsensitiveContains(retired) == false, "\"\(rider)\" still says \"\(retired)\"")
-        }
-    }
-}
-
 /// Harbour South's own fee is described as the "platform fee" — 0.3% for a
-/// Stripe-connected company, 0% for one on its own provider. These tests pin
-/// the WORDING only: the rate is the server's `platformFeeBps`, which the
-/// label must render without altering.
+/// Stripe-connected company, 0% for one on its own provider. The rate is the
+/// server's `platformFeeBps`, rendered without alteration.
 struct PlatformFeeWordingTests {
-
     private func state(bps: Int, model: PaymentModel) -> CommercialState {
         CommercialState(
             paymentModel: model,
-            subscriptionStatus: .active,
-            trialEndsAt: nil,
-            trialDaysRemaining: 0,
-            isTrialActive: false,
             stripeConnected: model == .harbourSouthPayments,
             chargesEnabled: model == .harbourSouthPayments,
-            payoutsEnabled: model == .harbourSouthPayments,
-            detailsSubmitted: model == .harbourSouthPayments,
-            requirementsDue: [],
-            disabledReason: nil,
-            stripeAccountID: nil,
-            foundingMemberNumber: nil,
-            foundingClaimedAt: nil,
-            foundingPlacesClaimed: 0,
-            foundingPlacesRemaining: 100,
-            foundingOfferOpen: true,
-            foundingBenefitActive: false,
-            qualifyingPaymentsThisMonth: 0,
-            lastQualifyingPaymentAt: nil,
-            activityMonthStart: nil,
-            tierID: "team",
-            tierName: "Team",
-            subscriptionMonthlyCents: 3298,
-            effectiveMonthlyCents: 3298,
-            platformFeeBps: bps,
-            externalPaymentURL: nil,
-            businessEmail: nil,
-            canManageBilling: true
+            platformFeeBps: bps
         )
     }
 
@@ -955,7 +936,6 @@ struct PlatformFeeWordingTests {
         #expect(state(bps: 30, model: .harbourSouthPayments).platformFeeLabel(locale: us) == "0.3%")
     }
 
-    /// Dropping the trailing zero must never round a real rate away.
     @Test("Other rates are rendered exactly, not rounded")
     func otherRatesAreExact() {
         #expect(state(bps: 25, model: .harbourSouthPayments).platformFeeLabel(locale: us) == "0.25%")
@@ -963,45 +943,28 @@ struct PlatformFeeWordingTests {
         #expect(state(bps: 0, model: .externalProvider).platformFeeLabel(locale: us) == "0%")
     }
 
-    /// The calculation is untouched: the label reads the server's figure and
-    /// the figure itself is carried through unchanged.
-    @Test("The fee figure the server reports is carried through unchanged")
+    @Test("The fee figure the server reports is carried through unchanged: 30 bps = 0.003")
     func feeFigureIsUnchanged() {
         let connected = state(bps: 30, model: .harbourSouthPayments)
         #expect(connected.platformFeeBps == 30)
         #expect(Decimal(connected.platformFeeBps) / 10_000 == Decimal(string: "0.003"))
     }
 
-    @Test("A Stripe-connected company is told the 0.3% Harbour South platform fee")
-    func connectedWording() {
+    @Test("The platform fee and Stripe's own fees are named separately")
+    func separateFromStripe() {
         #expect(PlatformFeeCopy.phrase("0.3%") == "0.3% Harbour South platform fee")
         #expect(PlatformFeeCopy.rowTitle == "Harbour South platform fee")
-
-        let outcome = state(bps: 30, model: .harbourSouthPayments).trialOutcomeMessage
-        #expect(outcome.contains("Harbour South platform fee"))
-        #expect(outcome.localizedCaseInsensitiveContains("Stripe's standard processing fees"))
-    }
-
-    @Test("A company on its own provider is told the 0% Harbour South platform fee")
-    func zeroWording() {
         #expect(PlatformFeeCopy.zeroPhrase == "0% Harbour South platform fee")
-        let outcome = state(bps: 0, model: .externalProvider).trialOutcomeMessage
-        #expect(outcome.contains("0% Harbour South platform fee"))
+        let sentence = PlatformFeeCopy.withStripeFees("0.3%")
+        #expect(sentence.contains("0.3% Harbour South platform fee"))
+        #expect(sentence.localizedCaseInsensitiveContains("Stripe's standard processing fees"))
     }
 
     @Test("No fee sentence uses the retired payment-fee or transaction-fee wording")
     func retiredWordingIsGone() {
-        let sentences = [
-            state(bps: 30, model: .harbourSouthPayments).trialOutcomeMessage,
-            state(bps: 0, model: .externalProvider).trialOutcomeMessage,
-            FoundingCopy.feeRider("0.3%"),
-            FoundingCopy.invitation(feeLabel: "0.3%"),
-            PlatformFeeCopy.zeroPhrase,
-            PlatformFeeCopy.rowTitle
-        ]
-        for sentence in sentences {
+        for sentence in [PlatformFeeCopy.withStripeFees("0.3%"), PlatformFeeCopy.zeroPhrase, PlatformFeeCopy.rowTitle] {
             for retired in PlatformFeeCopy.retiredWording {
-                #expect(sentence.localizedCaseInsensitiveContains(retired) == false, "\"\(sentence)\" still says \"\(retired)\"")
+                #expect(sentence.localizedCaseInsensitiveContains(retired) == false)
             }
         }
     }
@@ -1685,222 +1648,110 @@ struct PhotoFailureReportingTests {
     }
 }
 
-/// The state that drives the Founding wording, rather than the wording itself.
-///
-/// `CommercialState` decides WHICH sentence is shown; these assert it cannot
-/// offer the programme to somebody ineligible, or leak the member number
-/// through the badge title.
-struct FoundingMemberStateTests {
+// MARK: - Stripe status wording
 
-    private func state(number: Int?, offerOpen: Bool, benefitActive: Bool) -> CommercialState {
-        CommercialState(
-            paymentModel: .harbourSouthPayments,
-            subscriptionStatus: .active,
-            trialEndsAt: nil,
-            trialDaysRemaining: 0,
-            isTrialActive: false,
-            stripeConnected: true,
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            detailsSubmitted: true,
-            requirementsDue: [],
-            disabledReason: nil,
-            stripeAccountID: "acct_1",
-            foundingMemberNumber: number,
-            foundingClaimedAt: nil,
-            foundingPlacesClaimed: 27,
-            foundingPlacesRemaining: 73,
-            foundingOfferOpen: offerOpen,
-            foundingBenefitActive: benefitActive,
-            qualifyingPaymentsThisMonth: benefitActive ? 1 : 0,
-            lastQualifyingPaymentAt: nil,
-            activityMonthStart: nil,
-            tierID: "team",
-            tierName: "Team",
-            subscriptionMonthlyCents: 3298,
-            effectiveMonthlyCents: benefitActive ? 0 : 3298,
-            platformFeeBps: 30,
-            externalPaymentURL: nil,
-            businessEmail: nil,
-            canManageBilling: true
-        )
+/// Every Stripe state has plain words and one obvious next step, and Stripe's
+/// internal codes never reach the screen.
+struct StripeStatusWordingTests {
+    private func classify(
+        connected: Bool = true, charges: Bool = false, submitted: Bool = false,
+        due: [String] = [], reason: String? = nil
+    ) -> StripeConnectionState {
+        StripeConnectionState.classify(connected: connected, chargesEnabled: charges, detailsSubmitted: submitted,
+                                       requirementsDue: due, disabledReason: reason)
     }
 
-    /// The company holds place 27, and 73 places are left — neither figure may
-    /// reach the badge.
-    @Test("The badge never renders the member number")
-    func badgeTitleHidesTheNumber() {
-        let member = state(number: 27, offerOpen: true, benefitActive: true)
-        #expect(member.foundingBadgeTitle == "Founding Member")
-        #expect(member.foundingBadgeTitle?.contains("27") == false)
+    @Test("Not connected: Set up Stripe / Connect Stripe")
+    func notConnected() {
+        let s = classify(connected: false)
+        #expect(s == .notConnected)
+        #expect(s.title == "Set up Stripe")
+        #expect(s.message == "Connect Stripe to receive online payments from your customers.")
+        #expect(s.actionTitle == "Connect Stripe")
     }
 
-    @Test("A member is never shown the invitation meant for non-members")
-    func membersSeeNoInvitation() {
-        #expect(state(number: 27, offerOpen: true, benefitActive: true).foundingInvitation == nil)
+    @Test("Connected but unfinished: Finish setting up Stripe / Finish Stripe setup")
+    func setupIncomplete() {
+        let s = classify(due: ["external_account"])
+        #expect(s == .setupIncomplete)
+        #expect(s.title == "Finish setting up Stripe")
+        #expect(s.message == "Complete your Stripe setup to start accepting online payments.")
+        #expect(s.actionTitle == "Finish Stripe setup")
     }
 
-    /// Nothing may promise a benefit that is no longer available.
-    @Test("A closed offer is not advertised to anyone")
-    func closedOfferIsSilent() {
-        #expect(state(number: nil, offerOpen: false, benefitActive: false).foundingInvitation == nil)
-        #expect(state(number: nil, offerOpen: true, benefitActive: false).foundingInvitation != nil)
+    /// The live account's exact state: Stripe reports `requirements.past_due`
+    /// because onboarding was never finished. That is unfinished setup, not a
+    /// disabled account.
+    @Test("requirements.past_due is unfinished setup, not \"Payments disabled\"")
+    func pastDueIsSetup() {
+        let s = classify(due: ["external_account", "tos_acceptance.date"], reason: "requirements.past_due")
+        #expect(s == .setupIncomplete)
+        #expect(s.actionOpensDashboard(detailsSubmitted: false) == false)
     }
 
-    @Test("A non-member has no Founding status or benefit message")
-    func nonMemberHasNoStatus() {
-        let outsider = state(number: nil, offerOpen: true, benefitActive: false)
-        #expect(outsider.isFoundingMember == false)
-        #expect(outsider.foundingBadgeTitle == nil)
-        #expect(outsider.foundingBenefitMessage == nil)
+    @Test("Ready: Stripe connected / You're ready to receive online payments.")
+    func connected() {
+        let s = classify(charges: true, submitted: true)
+        #expect(s == .connected)
+        #expect(s.title == "Stripe connected")
+        #expect(s.message == "You're ready to receive online payments.")
+        #expect(s.actionOpensDashboard(detailsSubmitted: true))
     }
 
-    /// Status survives an inactive month; only the benefit pauses.
-    @Test("A member with no qualifying payment keeps the status")
-    func statusSurvivesAQuietMonth() {
-        let paused = state(number: 27, offerOpen: false, benefitActive: false)
-        #expect(paused.isFoundingMember)
-        #expect(paused.foundingBadgeTitle == "Founding Member")
-        #expect(paused.foundingBenefitMessage == FoundingCopy.benefitPaused)
+    @Test("Submitted and pending verification reads as a review, not as setup")
+    func underReview() {
+        #expect(classify(submitted: true) == .underReview)
+        #expect(classify(submitted: true, reason: "requirements.pending_verification") == .underReview)
+        #expect(classify(submitted: true).title == "Stripe is reviewing your account")
     }
 
-    /// The headline sits on the billing screen, so it is as customer-facing as
-    /// the card copy and must obey the same rules.
-    @Test("The headline states the benefit without leaking the allocation")
-    func headlineIsClean() {
-        let active = state(number: 27, offerOpen: true, benefitActive: true)
-        #expect(active.headline == "Founding Member — zero subscription fees")
-        for fragment in FoundingCopy.forbiddenFragments {
-            #expect(active.headline.localizedCaseInsensitiveContains(fragment) == false)
+    @Test("A genuine restriction or rejection gets its own message, never \"Set up Stripe\"")
+    func restricted() {
+        for reason in ["rejected.fraud", "rejected.terms_of_service", "platform_paused", "listed", "under_review_other", "other"] {
+            let s = classify(submitted: true, reason: reason)
+            #expect(s == .restricted, "\(reason)")
+            #expect(s.title == "Stripe needs your attention")
+            #expect(s.title != StripeConnectionState.notConnected.title)
+            #expect(s.actionTitle == "Open Stripe")
         }
     }
 
-    @Test("The trial outcome for a member carries the correct wording")
-    func trialOutcomeUsesSharedCopy() {
-        #expect(state(number: 27, offerOpen: true, benefitActive: true).trialOutcomeMessage == FoundingCopy.trialOutcome)
-    }
-}
-
-/// Who is shown Founding wording, around the end of the allocation.
-///
-/// The server decides membership and whether places remain (proved against the
-/// live database by `backend/tests/founding-member-suite.sql`); these tests
-/// prove the app shows the offer while places remain, and only to members once
-/// they are gone.
-struct FoundingAllocationBoundaryTests {
-
-    private func state(number: Int?, claimed: Int) -> CommercialState {
-        let remaining = max(0, 100 - claimed)
-        return CommercialState(
-            paymentModel: .harbourSouthPayments,
-            subscriptionStatus: .active,
-            trialEndsAt: nil,
-            trialDaysRemaining: 0,
-            isTrialActive: false,
-            stripeConnected: true,
-            chargesEnabled: true,
-            payoutsEnabled: true,
-            detailsSubmitted: true,
-            requirementsDue: [],
-            disabledReason: nil,
-            stripeAccountID: "acct_1",
-            foundingMemberNumber: number,
-            foundingClaimedAt: number == nil ? nil : Date(),
-            foundingPlacesClaimed: claimed,
-            foundingPlacesRemaining: remaining,
-            // Exactly as company_commercial_state() computes it.
-            foundingOfferOpen: remaining > 0 || number != nil,
-            foundingBenefitActive: number != nil,
-            qualifyingPaymentsThisMonth: number == nil ? 0 : 1,
-            lastQualifyingPaymentAt: nil,
-            activityMonthStart: nil,
-            tierID: "team",
-            tierName: "Team",
-            subscriptionMonthlyCents: 3298,
-            effectiveMonthlyCents: number == nil ? 3298 : 0,
-            platformFeeBps: 30,
-            externalPaymentURL: nil,
-            businessEmail: nil,
-            canManageBilling: true
-        )
-    }
-
-    /// Every piece of Founding wording a state can produce.
-    private func foundingWording(_ s: CommercialState) -> [String] {
-        [s.foundingBadgeTitle, s.foundingBenefitMessage, s.foundingInvitation]
-            .compactMap { $0 }
-            + (s.headline.contains("Founding") ? [s.headline] : [])
-            + (s.trialOutcomeMessage.contains("Founding") ? [s.trialOutcomeMessage] : [])
-    }
-
-    @Test("With 98 places allocated an eligible non-member sees the offer (they would be #99)")
-    func offerShownBeforePosition99() {
-        #expect(state(number: nil, claimed: 98).foundingInvitation != nil)
-    }
-
-    @Test("With 99 places allocated an eligible non-member still sees the offer (they would be #100)")
-    func offerShownBeforePosition100() {
-        #expect(state(number: nil, claimed: 99).foundingInvitation != nil)
-    }
-
-    @Test("With all 100 allocated a non-member (#101 onward) sees no Founding wording at all")
-    func nothingForPosition101() {
-        let outsider = state(number: nil, claimed: 100)
-        #expect(outsider.isFoundingMember == false)
-        #expect(outsider.foundingInvitation == nil)
-        #expect(foundingWording(outsider).isEmpty, "Saw: \(foundingWording(outsider))")
-    }
-
-    @Test("Members #1, #99 and #100 keep their status after all 100 are allocated")
-    func membersKeepStatus() {
-        for number in [1, 99, 100] {
-            let member = state(number: number, claimed: 100)
-            #expect(member.isFoundingMember)
-            #expect(member.foundingBadgeTitle == FoundingCopy.badgeTitle)
-            #expect(member.foundingBenefitMessage == FoundingCopy.benefitActive)
-            #expect(member.foundingInvitation == nil)
+    @Test("The retired wording is gone from every state")
+    func retiredWording() {
+        for s in [StripeConnectionState.notConnected, .setupIncomplete, .connected, .underReview, .restricted] {
+            for text in [s.title, s.message, s.actionTitle, s.shortLabel] {
+                #expect(text != "Payments disabled")
+                #expect(text != "Resolve issue")
+            }
         }
     }
 
-    /// Defence in depth: even if a payload ever said "open" with nothing left,
-    /// a non-member is not invited.
-    @Test("No places remaining means no invitation, whatever the open flag says")
-    func remainingIsAuthoritativeForTheInvitation() {
-        let inconsistent = CommercialState(
-            paymentModel: .undecided, subscriptionStatus: .active, trialEndsAt: nil,
-            trialDaysRemaining: 0, isTrialActive: false, stripeConnected: false,
-            chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false,
-            requirementsDue: [], disabledReason: nil, stripeAccountID: nil,
-            foundingMemberNumber: nil, foundingClaimedAt: nil,
-            foundingPlacesClaimed: 100, foundingPlacesRemaining: 0, foundingOfferOpen: true,
-            foundingBenefitActive: false, qualifyingPaymentsThisMonth: 0,
-            lastQualifyingPaymentAt: nil, activityMonthStart: nil, tierID: "team",
-            tierName: "Team", subscriptionMonthlyCents: 3298, effectiveMonthlyCents: 3298,
-            platformFeeBps: 30, externalPaymentURL: nil, businessEmail: nil, canManageBilling: true
-        )
-        #expect(inconsistent.foundingInvitation == nil)
+    @Test("No state ever shows a raw Stripe code")
+    func noRawCodes() {
+        for s in [StripeConnectionState.notConnected, .setupIncomplete, .connected, .underReview, .restricted] {
+            for text in [s.title, s.message, s.actionTitle, s.shortLabel] {
+                #expect(text.contains("requirements.") == false)
+                #expect(text.contains("_") == false)
+                #expect(text.contains("rejected.") == false)
+            }
+        }
     }
 
-    /// The development stack seeds one member and one non-member, so the UI
-    /// suite exercises both paths for real.
-    @Test("Development data: Gulf Coast holds a place, Northline is an eligible non-member")
-    func developmentSeedCoversBothPaths() async throws {
-        let gateway = MockDataGateway(latency: .zero)
-        let gulf = TenantSession(
-            userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
-            displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac
-        )
-        let north = TenantSession(
-            userID: "usr_north_owner", companyID: "cmp_northline", role: .owner,
-            displayName: "Erin Vaught", email: "erin@northlineplumbing.com", trade: .plumbing
-        )
-        let member = try await gateway.commercialState(session: gulf)
-        let outsider = try await gateway.commercialState(session: north)
-        #expect(member.isFoundingMember)
-        #expect(member.platformFeeBps == 30)
-        #expect(outsider.isFoundingMember == false)
-        #expect(outsider.foundingInvitation != nil)
-        #expect(outsider.stripeState == .notConnected)
-        #expect(outsider.platformFeeBps == 30)
+    @Test("Stripe's requirement keys become plain words")
+    func friendlyRequirements() {
+        let keys = ["external_account", "tos_acceptance.date", "tos_acceptance.ip",
+                    "individual.verification.document", "business_profile.url", "some.unknown_key"]
+        let friendly = StripeRequirementCopy.friendly(keys)
+        #expect(friendly == ["Bank account for payouts", "Accept Stripe's terms", "Photo ID", "Business details", "Other details"])
+        for label in friendly { #expect(label.contains("_") == false && label.contains(".") == false) }
+    }
+
+    @Test("The state on CommercialState is the same classification")
+    func commercialStateUsesClassifier() {
+        let live = CommercialState(stripeConnected: true, chargesEnabled: false, detailsSubmitted: false,
+                                   requirementsDue: ["external_account"], disabledReason: "requirements.past_due")
+        #expect(live.stripeState == .setupIncomplete)
+        #expect(live.stripeNeeds == ["Bank account for payouts"])
     }
 }
+

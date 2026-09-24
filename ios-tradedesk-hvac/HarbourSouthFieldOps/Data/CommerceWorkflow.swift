@@ -17,25 +17,31 @@ import Foundation
 
 // MARK: - Subscription and seats
 
-/// Where the company's SaaS subscription actually stands, plus the itemised
-/// price derived server-side.
+/// What the Subscription screen needs besides the commercial state: the live
+/// price list and the roster counts. The entitlement itself is
+/// `CommercialState`, decided by the server from Apple's verified data.
 nonisolated struct SubscriptionOverview: Hashable, Sendable {
-    let subscription: CompanySubscription?
-    /// The authoritative price for the current head count.
-    let quote: SubscriptionQuote
-    /// The full published price list, so an owner can see the tier they are in
-    /// and the ones around it.
-    let pricing: PlatformPricing
+    /// The three plans, from `subscription_tiers`.
+    let plans: [PlanOffer]
+    /// False when the price list could not be read and the built-in standard
+    /// plans are shown instead.
+    let pricesAreLive: Bool
     let canManage: Bool
-    /// Active people, broken out so "why is my bill this?" has a visible answer.
     let activeUsers: Int
     let invitedUsers: Int
     let suspendedUsers: Int
-    /// Set when the subscription is past due or payment has failed, so the UI
-    /// can say what is wrong instead of showing a healthy-looking price.
-    let alert: String?
+}
 
-    var isOverCapacity: Bool { quote.isOverCapacity }
+/// What the server made of Apple's signed purchases.
+nonisolated struct StoreLinkResult: Hashable, Sendable {
+    /// True when at least one purchase is now recorded against the company.
+    let linked: Bool
+    /// Transactions the server has dealt with and that can be finished.
+    let handledTransactionIDs: [UInt64]
+    /// The App Store subscription is already attached to another company.
+    let belongsToAnotherCompany: Bool
+    /// Apple's signature could not be verified.
+    let unverified: Bool
 }
 
 // MARK: - Stripe Connect
@@ -55,10 +61,10 @@ nonisolated enum ConnectReadiness: String, Codable, Hashable, Sendable {
     var title: String {
         switch self {
         case .notConfigured: return "Unavailable"
-        case .notConnected: return "Not connected"
-        case .pending: return "Action needed"
-        case .ready: return "Ready"
-        case .restricted: return "Restricted"
+        case .notConnected: return "Set up Stripe"
+        case .pending: return "Finish setting up Stripe"
+        case .ready: return "Stripe connected"
+        case .restricted: return "Stripe needs your attention"
         }
     }
 }
@@ -588,10 +594,7 @@ extension DataGateway {
     // MARK: The commercial model
     //
     // The development stack answers honestly that it has no commercial
-    // position. There is no Stripe account behind it, no trial clock and no
-    // Founding Member allocation — and inventing a plausible-looking one here
-    // would be the single most misleading thing this file could do, because
-    // Founding Member status is a real commercial commitment.
+    // position: no Apple subscription and no Stripe account stand behind it.
 
     func commercialState(session: TenantSession) async throws -> CommercialState {
         throw DataError.rejected("Your commercial plan is only available on a live company account.")
@@ -599,6 +602,10 @@ extension DataGateway {
 
     func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws {
         throw DataError.rejected("The payment model is only configurable on a live company account.")
+    }
+
+    func linkStorePurchases(session: TenantSession, purchases: [SignedStorePurchase]) async throws -> StoreLinkResult {
+        throw DataError.rejected("Plans can only be bought on a live company account.")
     }
 
     func businessEmailSettings(session: TenantSession) async throws -> BusinessEmailSettings {

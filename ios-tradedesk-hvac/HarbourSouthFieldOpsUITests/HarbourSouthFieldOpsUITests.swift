@@ -786,100 +786,53 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
 
     // MARK: - Commercial
 
-    /// COMMERCIAL PRIVACY — the customer must never be told their place in the
-    /// Founding allocation, nor how many places remain.
-    ///
-    /// THIS TEST IS ONLY MEANINGFUL IF THE CARD IS ACTUALLY ON SCREEN. The
-    /// development company is deliberately seeded as Founding Member number 27
-    /// with 73 places unclaimed, so every forbidden figure genuinely exists in
-    /// the state behind this screen and the UI has to be the thing suppressing
-    /// them. It first asserts the card rendered, so the screen cannot pass by
-    /// failing to load.
-    func testSubscriptionNeverRevealsFoundingAllocation() throws {
+    /// The three plans, the Monthly / Annual switch and the ~20% annual saving
+    /// are on screen, and nothing from the retired founding programme is.
+    func testSubscriptionShowsThreePlansAndNoFoundingWording() throws {
         signIn(as: "Tom Ellison")
         openMoreSection("Subscription & Users")
-
         require(app.navigationBars["Subscription"], "the Subscription screen")
 
-        // Guard against a vacuous pass: the Founding card must be present.
-        XCTAssertTrue(
-            app.staticTexts["Founding Member"].waitForExistence(timeout: 20),
-            "The Founding Member card must render, otherwise this test proves nothing"
-        )
-
-        // Walk the whole screen so lazily-realised text is actually inspected.
-        var seen = Set<String>()
-        for _ in 0..<12 {
-            for text in app.staticTexts.allElementsBoundByIndex {
-                let label = text.label
-                if !label.isEmpty { seen.insert(label) }
-            }
-            app.swipeUp()
+        require(app.staticTexts["Starter"], "the Starter plan")
+        let seen = collectTexts()
+        for expected in ["Starter", "Team", "Business", "Just me", "My small team", "Monthly", "Annual"] {
+            XCTAssertTrue(seen.contains(expected), "Expected \(expected). Saw: \(seen.sorted())")
         }
-
+        XCTAssertTrue(seen.contains("10+ users"), "Business must read 10+ users. Saw: \(seen.sorted())")
+        XCTAssertTrue(seen.contains { $0.contains("Save 20%") }, "The annual saving must be stated. Saw: \(seen.sorted())")
         for label in seen {
-            XCTAssertFalse(
-                label.contains("Founding Member #") || label.contains("#27"),
-                "The Founding Member allocation number must never be shown — found: \(label)"
-            )
-            XCTAssertFalse(
-                label.localizedCaseInsensitiveContains("places remain")
-                    || label.localizedCaseInsensitiveContains("places left")
-                    || label.localizedCaseInsensitiveContains("remaining places")
-                    || label.localizedCaseInsensitiveContains("of 100")
-                    || label.localizedCaseInsensitiveContains("100 places"),
-                "The Founding allocation size must never be shown — found: \(label)"
-            )
-            XCTAssertFalse(
-                label.localizedCaseInsensitiveContains("can receive"),
-                "The benefit must not be described as something the customer 'can receive' — found: \(label)"
-            )
-            // 73 places remain in the seeded state; that figure must not surface
-            // in any form, including bare.
-            XCTAssertFalse(
-                label.contains("73"),
-                "The number of unclaimed places must never be shown — found: \(label)"
-            )
+            XCTAssertFalse(label.localizedCaseInsensitiveContains("Founding"), "Founding wording must be gone — found: \(label)")
+            XCTAssertFalse(label.localizedCaseInsensitiveContains("zero subscription"), "No free-for-Stripe promise — found: \(label)")
         }
-
-        // And the correct commercial wording must be the thing shown instead.
-        let benefitStated = seen.contains { label in
-            label.localizedCaseInsensitiveContains("zero")
-                && label.localizedCaseInsensitiveContains("subscription fees")
-        }
-        XCTAssertTrue(
-            benefitStated,
-            "The Founding benefit must be stated as zero subscription fees. Saw: \(seen.sorted())"
-        )
-
-        // Locale-independent on purpose: the CI runner formats numbers in a
-        // comma-decimal locale, so a hard-coded "0.30%" would fail while the
-        // app was behaving perfectly. What must be true is that the rate is
-        // quoted as a percentage AND Stripe's own fees are disclosed alongside
-        // it — stating the subscription is free without that would misrepresent
-        // the commercial deal.
-        let feeRiderStated = seen.contains { label in
-            label.localizedCaseInsensitiveContains("Harbour South platform fee")
-                && label.localizedCaseInsensitiveContains("Stripe processing fees")
-                && label.contains("%")
-                && label.contains(where: \.isNumber)
-        }
-        XCTAssertTrue(
-            feeRiderStated,
-            "The platform fee and Stripe's fees must still be disclosed. Saw: \(seen.sorted())"
-        )
         assertNoRetiredFeeWording(seen)
     }
 
-    // MARK: - Founding Member visibility around the end of the allocation
-
-    /// Relaunches the app, optionally reporting all hundred Founding places as
-    /// allocated (a DEBUG-only development switch).
-    private func relaunch(allocationFull: Bool) {
-        app.terminate()
-        app.launchArguments = allocationFull ? ["-founding-allocation-full"] : []
-        app.launch()
+    /// Annual prices appear when the switch is flipped.
+    func testAnnualSwitchShowsAnnualPrices() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+        let annual = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Annual")).firstMatch
+        require(annual, "the Annual switch")
+        annual.tap()
+        require(app.staticTexts["/year"], "an annual price")
+        let seen = collectTexts()
+        XCTAssertTrue(seen.contains { $0.contains("384.99") }, "Team annual is $384.99. Saw: \(seen.sorted())")
     }
+
+    /// A company with no plan is invited to start Apple's 14-day free trial.
+    func testUnsubscribedCompanyIsOfferedTheFreeTrial() throws {
+        signIn(as: "Erin Vaught")
+        openMoreSection("Subscription & Users")
+        require(app.navigationBars["Subscription"], "the Subscription screen")
+        require(app.staticTexts["No plan yet"], "the no-plan status")
+        let trial = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "14-day free trial")).firstMatch
+        XCTAssertTrue(trial.waitForExistence(timeout: 20) || scrollTo(trial), "A plan must offer the 14-day free trial")
+        let restore = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Restore purchases")).firstMatch
+        XCTAssertTrue(scrollTo(restore), "Restore purchases must be offered")
+    }
+
+    // MARK: - Helpers for commercial screens
 
     /// Every visible text on the current screen, scrolled top to bottom.
     private func collectTexts(swipes: Int = 10) -> Set<String> {
@@ -909,85 +862,6 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
                 line: line
             )
         }
-    }
-
-    /// Northline holds no place, and places remain: the offer is shown.
-    func testEligibleNonMemberSeesOfferWhilePlacesRemain() throws {
-        signIn(as: "Erin Vaught")
-        openMoreSection("Subscription & Users")
-        require(app.navigationBars["Subscription"], "the Subscription screen")
-
-        XCTAssertTrue(
-            app.staticTexts["Founding Member benefit"].waitForExistence(timeout: 20)
-                || scrollTo(app.staticTexts["Founding Member benefit"]),
-            "An eligible non-member must be shown the Founding offer while places remain"
-        )
-
-        // And it never pretends they already hold the status.
-        let seen = collectTexts()
-        XCTAssertFalse(
-            seen.contains { $0.localizedCaseInsensitiveContains("yours to keep") },
-            "A non-member must not be told they hold Founding Member status"
-        )
-    }
-
-    /// All hundred places are gone: a company without one sees no Founding
-    /// wording anywhere it could otherwise appear.
-    func testNonMemberSeesNoFoundingWordingOnceAllocationIsFull() throws {
-        relaunch(allocationFull: true)
-        signIn(as: "Erin Vaught")
-
-        openTab("More")
-        let connect = app.buttons["more.section.payments_integration"]
-        require(connect, "the Connect Stripe row")
-        var seen = Set(app.staticTexts.allElementsBoundByIndex.map(\.label))
-        seen.formUnion(app.descendants(matching: .any).allElementsBoundByIndex.prefix(80).map(\.label))
-
-        // The Stripe screen.
-        _ = scrollTo(connect)
-        forceTap(connect)
-        require(app.navigationBars["Payments"], "the Stripe screen")
-        require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Connect Stripe")).firstMatch,
-                "the Connect Stripe action")
-        seen.formUnion(collectTexts())
-
-        // Back to More, then Subscription.
-        app.navigationBars["Payments"].buttons.firstMatch.tap()
-        require(app.navigationBars["More"], "the More menu")
-        openMoreSection("Subscription & Users")
-        require(app.navigationBars["Subscription"], "the Subscription screen")
-        // Wait for the plan to render so the check is not vacuous.
-        require(app.staticTexts["/month"], "the plan price")
-        seen.formUnion(collectTexts())
-
-        for label in seen {
-            XCTAssertFalse(
-                label.localizedCaseInsensitiveContains("Founding"),
-                "Company #101 onward must never see Founding Member wording — found: \(label)"
-            )
-        }
-    }
-
-    /// All hundred places are gone: an existing member still sees its status.
-    func testFoundingMemberKeepsStatusOnceAllocationIsFull() throws {
-        relaunch(allocationFull: true)
-        signIn(as: "Tom Ellison")
-
-        openTab("More")
-        let badge = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "Founding Member"))
-            .firstMatch
-        XCTAssertTrue(
-            badge.waitForExistence(timeout: 20),
-            "The member's badge must still show on the account card"
-        )
-
-        openMoreSection("Subscription & Users")
-        require(app.navigationBars["Subscription"], "the Subscription screen")
-        XCTAssertTrue(
-            app.staticTexts["Founding Member"].waitForExistence(timeout: 20),
-            "The member's Founding card must still render after place 100 is allocated"
-        )
     }
 
     // MARK: - Connect Stripe
@@ -1033,6 +907,14 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         require(app.navigationBars["Payments"], "the existing Stripe (Payments) screen")
         require(app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Connect Stripe")).firstMatch,
                 "the existing Connect Stripe action")
+
+        let seen = collectTexts()
+        XCTAssertTrue(seen.contains("Set up Stripe"), "Not connected reads Set up Stripe. Saw: \(seen.sorted())")
+        XCTAssertTrue(seen.contains("Connect Stripe to receive online payments from your customers."), "Saw: \(seen.sorted())")
+        for label in seen {
+            XCTAssertFalse(label == "Payments disabled" || label == "Resolve issue", "Retired wording: \(label)")
+            XCTAssertFalse(label.contains("requirements."), "Raw Stripe code shown: \(label)")
+        }
     }
 
     /// Subscription keeps its link, and it reaches the very same screen.
@@ -1041,7 +923,7 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         openMoreSection("Subscription & Users")
         require(app.navigationBars["Subscription"], "the Subscription screen")
 
-        let link = app.staticTexts["Manage your Stripe account and payouts"]
+        let link = app.staticTexts["Taking customer payments?"]
         require(link, "the Stripe link on Subscription")
         _ = scrollTo(link)
         forceTap(link)

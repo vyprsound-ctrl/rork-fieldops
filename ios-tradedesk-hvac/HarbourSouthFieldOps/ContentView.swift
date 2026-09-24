@@ -70,8 +70,12 @@ struct ContentView: View {
             }
         }
         .task {
+            env.startStoreListener()
             await env.restoreProductionSession()
             consumePendingDeepLink()
+        }
+        .task(id: env.productionSession?.userID) {
+            await env.syncStoreEntitlements()
         }
         .onChange(of: PushDeepLinkInbox.shared.pending) { _, _ in
             consumePendingDeepLink()

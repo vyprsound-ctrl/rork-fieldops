@@ -315,12 +315,11 @@ protocol DataGateway: Sendable {
 
     // MARK: The commercial model
     //
-    // Trial window, Stripe readiness, Founding Member number, monthly benefit,
-    // tier price and applicable platform fee. Every one of those is decided by
+    // Apple subscription entitlement, plan, user seats, Stripe readiness and
+    // the applicable platform fee. Every one of those is decided by
     // `company_commercial_state()` in the database; this call carries the
     // answers and the app renders them. There is deliberately no member here
-    // that lets a client assert eligibility, a founding number, a fee or a
-    // trial state.
+    // that lets a client assert an entitlement, a plan, a fee or a trial.
 
     /// The company's whole commercial position, in one server-authoritative
     /// read. Requires a SaaS billing grant, which only the owner holds.
@@ -331,6 +330,11 @@ protocol DataGateway: Sendable {
     /// from Stripe reporting the account can take charges, and is set
     /// server-side.
     func selectPaymentModel(session: TenantSession, model: PaymentModel) async throws
+
+    /// Hands Apple's SIGNED purchase data to the server, which verifies it
+    /// against Apple's root certificate and records the entitlement. The app
+    /// never records a subscription itself. Owner only.
+    func linkStorePurchases(session: TenantSession, purchases: [SignedStorePurchase]) async throws -> StoreLinkResult
 
     // MARK: Business email identity
 

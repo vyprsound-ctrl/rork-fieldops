@@ -49,7 +49,14 @@ final class AppEnvironment {
     private let productionGateway: DataGateway?
 
     let auth: AuthService
-    let storeBilling: StoreBillingService
+    /// Apple subscriptions. StoreKit for a production session, a stand-in that
+    /// sells nothing for the development stack.
+    private let developmentStoreBilling: StoreBillingService
+    private let productionStoreBilling: StoreBillingService?
+    /// Listens to `Transaction.updates` for the life of the app, so renewals,
+    /// Offer Code redemptions and Ask to Buy approvals reach the server even
+    /// when no purchase screen is open.
+    private var storeUpdatesTask: Task<Void, Never>?
     // NO `sms` OR `email` ADAPTER HERE, DELIBERATELY. Customer messaging is not
     // a client capability: `sendInvoice` calls the `send-invoice` Edge
     // Function, which holds the provider credentials and writes the real
@@ -161,7 +168,7 @@ final class AppEnvironment {
         self.developmentGateway = MockDataGateway(store: store)
         self.auth = MockAuthService(store: store)
         self.developmentPush = MockPushService()
-        self.storeBilling = MockStoreBillingService()
+        self.developmentStoreBilling = MockStoreBillingService()
         self.developmentLocation = MockLocationService()
         self.developmentRoutes = MockRouteService()
         self.developmentMaps = MockMapService()
@@ -181,6 +188,7 @@ final class AppEnvironment {
             // from the first launch of a configured build.
             self.productionRoutes = MapKitRouteService()
             self.productionMaps = MapKitMapService()
+            self.productionStoreBilling = StoreKitBillingService()
         } else {
             self.productionAuth = nil
             self.productionGateway = nil
@@ -188,6 +196,51 @@ final class AppEnvironment {
             self.productionPush = nil
             self.productionRoutes = nil
             self.productionMaps = nil
+            self.productionStoreBilling = nil
+        }
+    }
+
+    /// The subscription store matching whichever session is signed in.
+    var storeBilling: StoreBillingService {
+        guard productionSession != nil else { return developmentStoreBilling }
+        return productionStoreBilling ?? developmentStoreBilling
+    }
+
+    // MARK: - Apple subscription sync
+
+    /// Starts the `Transaction.updates` listener once. Safe to call repeatedly.
+    func startStoreListener() {
+        guard storeUpdatesTask == nil, let store = productionStoreBilling else { return }
+        storeUpdatesTask = Task { [weak self] in
+            for await purchase in store.transactionUpdates() {
+                await self?.linkStorePurchases([purchase])
+            }
+        }
+    }
+
+    /// Hands every current Apple subscription to the server. Called after a
+    /// production session starts and after an Offer Code is redeemed, so a
+    /// subscription bought or renewed while the app was closed is linked.
+    /// Only the owner can link; for anyone else this does nothing.
+    func syncStoreEntitlements() async {
+        guard let session = productionSession, session.can(.saasBillingManage),
+              let store = productionStoreBilling else { return }
+        let purchases = await store.currentPurchases()
+        guard !purchases.isEmpty else { return }
+        await linkStorePurchases(purchases)
+    }
+
+    private func linkStorePurchases(_ purchases: [SignedStorePurchase]) async {
+        guard let session = productionSession, session.can(.saasBillingManage),
+              let store = productionStoreBilling else { return }
+        do {
+            let result = try await gateway.linkStorePurchases(session: session, purchases: purchases)
+            for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
+        } catch {
+            // Not fatal: App Store Server Notifications and the next sync
+            // deliver the same facts. The transaction stays unfinished, so
+            // StoreKit redelivers it.
+            print("[store] subscription could not be linked yet: \(error.localizedDescription)")
         }
     }
 

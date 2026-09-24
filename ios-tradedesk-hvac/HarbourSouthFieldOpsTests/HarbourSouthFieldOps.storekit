@@ -1,0 +1,354 @@
+{
+  "identifier": "HSFO0013",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_askToBuyEnabled": false,
+    "_billingGracePeriodEnabled": false,
+    "_billingIssuesEnabled": false,
+    "_disableDialogs": true,
+    "_failTransactionsEnabled": false,
+    "_locale": "en_US",
+    "_renewalBillingIssuesEnabled": false,
+    "_storefront": "USA",
+    "_storeKitErrors": [],
+    "_timeRate": 0
+  },
+  "subscriptionGroups": [
+    {
+      "id": "HSFOPLAN",
+      "localizations": [],
+      "name": "Harbour South Plans",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30001",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "starter-monthly-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90001",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "starter-monthly-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "19.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "P0000001",
+          "introductoryOffer": {
+            "internalID": "I0000001",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "Just me.",
+              "displayName": "Starter (Monthly)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.starter.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Starter monthly",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30002",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "starter-annual-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90002",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "starter-annual-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "191.99",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "P0000002",
+          "introductoryOffer": {
+            "internalID": "I0000002",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "Just me.",
+              "displayName": "Starter (Annual)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.starter.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Starter annual",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30003",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "team-monthly-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90003",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "team-monthly-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "39.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "P0000003",
+          "introductoryOffer": {
+            "internalID": "I0000003",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "My small team.",
+              "displayName": "Team (Monthly)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.team.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Team monthly",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30004",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "team-annual-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90004",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "team-annual-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "384.99",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "P0000004",
+          "introductoryOffer": {
+            "internalID": "I0000004",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "My small team.",
+              "displayName": "Team (Annual)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.team.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Team annual",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30005",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "business-monthly-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90005",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "business-monthly-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "69.99",
+          "familyShareable": false,
+          "groupNumber": 3,
+          "internalID": "P0000005",
+          "introductoryOffer": {
+            "internalID": "I0000005",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "My business, 10+ people.",
+              "displayName": "Business (Monthly)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.business.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Business monthly",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C30006",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "business-annual-30day",
+              "subscriptionPeriod": "P1M",
+              "numberOfPeriods": 1
+            },
+            {
+              "eligibility": [
+                "new",
+                "existing",
+                "expired"
+              ],
+              "internalID": "C90006",
+              "isStackable": false,
+              "paymentMode": "free",
+              "referenceName": "business-annual-90day",
+              "subscriptionPeriod": "P3M",
+              "numberOfPeriods": 1
+            }
+          ],
+          "displayPrice": "669.99",
+          "familyShareable": false,
+          "groupNumber": 3,
+          "internalID": "P0000006",
+          "introductoryOffer": {
+            "internalID": "I0000006",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "My business, 10+ people.",
+              "displayName": "Business (Annual)",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.harboursouth.fieldservice.business.annual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Business annual",
+          "subscriptionGroupID": "HSFOPLAN",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
+}

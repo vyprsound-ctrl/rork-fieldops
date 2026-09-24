@@ -4022,17 +4022,8 @@ actor MockDataGateway: DataGateway {
 
     // MARK: - Subscription
 
-    /// The seeded company's subscription, seats and price list.
-    ///
-    /// The shared default refuses this, which meant the Subscription screen
-    /// never left its error state on the development stack — and because the
-    /// Founding Member card is drawn *inside* the loaded state, no automated
-    /// test could ever see it. That is the blind spot incorrect Founding copy
-    /// shipped through twice.
-    ///
-    /// The price is derived from the published tier table for the company's
-    /// real active head count, so the arithmetic on screen is the product's own
-    /// arithmetic rather than invented figures.
+    /// The seeded company's plans and roster counts, so the Subscription
+    /// screen renders its real layout on the development stack.
     func subscriptionOverview(session: TenantSession) async throws -> SubscriptionOverview {
         try await Task.sleep(for: latency)
         guard session.can(.saasBillingRead) else {
@@ -4041,34 +4032,22 @@ actor MockDataGateway: DataGateway {
         }
 
         let people = scoped(store.users, session, companyID: \.companyID)
-        let active = people.filter { $0.status == .active }.count
-        let pricing = PlatformPricing.fallback
-
-        record(
-            "subscription.overview",
-            session,
-            allowed: true,
-            "Development subscription — priced from the published tiers for \(active) active user(s)"
-        )
+        record("subscription.overview", session, allowed: true, "Development plans — the standard price list")
 
         return SubscriptionOverview(
-            subscription: store.subscriptions.first { $0.companyID == session.companyID },
-            quote: pricing.quote(for: max(active, 1)),
-            pricing: pricing,
+            plans: PlanCatalog.standard,
+            pricesAreLive: false,
             canManage: session.can(.saasBillingManage),
-            activeUsers: active,
+            activeUsers: people.filter { $0.status == .active }.count,
             invitedUsers: people.filter { $0.status == .invited }.count,
-            suspendedUsers: people.filter { $0.status == .suspended }.count,
-            alert: nil
+            suspendedUsers: people.filter { $0.status == .suspended }.count
         )
     }
 
     /// Stripe's view of the company's own account.
     ///
-    /// Reported as `ready` so the screens that depend on a connected account
-    /// render their real layout. Nothing here can move money: onboarding,
-    /// dashboard links and payment-model changes all still refuse on this
-    /// stack, because those are live commercial actions.
+    /// Reported as `ready` for Gulf Coast so the screens that depend on a
+    /// connected account render their real layout. Nothing here can move money.
     func connectAccountStatus(session: TenantSession) async throws -> ConnectAccountStatus {
         try await Task.sleep(for: latency)
         guard session.can(.paymentsRead) || session.can(.saasBillingRead) else {
@@ -4099,55 +4078,18 @@ actor MockDataGateway: DataGateway {
 
     // MARK: - Commercial position
 
-    /// Which seeded company holds a Founding place. Gulf Coast Air does;
-    /// Northline Plumbing does not.
-    private static func developmentFoundingMember(_ companyID: String) -> Bool {
-        companyID == "cmp_gulfcoast"
-    }
-
     /// Which seeded company has a connected Stripe account. Northline has not
-    /// connected, so the "Connect Stripe" path is the one it sees.
+    /// connected, so the "Set up Stripe" path is the one it sees.
     private static func developmentStripeConnected(_ companyID: String) -> Bool {
         companyID == "cmp_gulfcoast"
     }
 
-    /// DEBUG launch argument that reports all hundred Founding places as
-    /// allocated. Never true in a release build.
-    private static var developmentAllocationFull: Bool {
-        #if DEBUG
-        return ProcessInfo.processInfo.arguments.contains("-founding-allocation-full")
-        #else
-        return false
-        #endif
-    }
-
     /// The seeded company's commercial position.
     ///
-    /// WHY THIS EXISTS, given the default implementation refuses
-    /// The shared default throws, on the honest grounds that a development
-    /// account has no Stripe behind it and inventing a *live* commercial
-    /// position would misrepresent a real commitment. That reasoning still
-    /// holds for anything that moves money — `selectPaymentModel`, Stripe
-    /// onboarding and SMS purchases all still refuse here.
-    ///
-    /// But refusing this one read also meant the Subscription screen fell back
-    /// to "status unavailable" in every automated run, so the Founding Member
-    /// card was never drawn and no test could inspect its wording. That is
-    /// precisely how incorrect Founding copy reached two shipped builds.
-    ///
-    /// The seeded company is therefore given a Founding Member position — and
-    /// deliberately a fully populated one: number 27, with 73 of the allocation
-    /// unclaimed. The UI must render none of those figures. A test that proves
-    /// the number is absent is only worth anything if the number was actually
-    /// there to leak.
-    ///
-    /// The SECOND seeded company (Northline) holds no place and has not
-    /// connected Stripe, so the non-member path — the invitation while places
-    /// remain, and silence once they are gone — is exercised as well.
-    ///
-    /// Launching a DEBUG build with `-founding-allocation-full` reports all
-    /// hundred places as allocated, which is how the UI suite proves a
-    /// non-member then sees no Founding wording while a member keeps its status.
+    /// Gulf Coast holds an active Team plan (annual) with Stripe connected;
+    /// Northline has no plan and has not connected Stripe, so both the
+    /// subscribed and the choose-a-plan paths are exercised. Every company is
+    /// on the same commercial model — nothing here is a programme benefit.
     func commercialState(session: TenantSession) async throws -> CommercialState {
         try await Task.sleep(for: latency)
         guard session.can(.saasBillingRead) else {
@@ -4155,30 +4097,33 @@ actor MockDataGateway: DataGateway {
             throw DataError.notPermitted(.saasBillingRead)
         }
 
-        let subscription = store.subscriptions.first { $0.companyID == session.companyID }
-        let activeUsers = scoped(store.users, session, companyID: \.companyID)
-            .filter { $0.status == .active }
-            .count
-        let quote = PlatformPricing.fallback.quote(for: max(activeUsers, 1))
-
-        record(
-            "commercial.state",
-            session,
-            allowed: true,
-            "Development commercial position — seeded, not a live Stripe account"
-        )
-
-        let isMember = Self.developmentFoundingMember(session.companyID)
+        let people = scoped(store.users, session, companyID: \.companyID)
+        let active = people.filter { $0.status == .active }.count
+        let invited = people.filter { $0.status == .invited }.count
         let connected = Self.developmentStripeConnected(session.companyID)
-        let claimed = Self.developmentAllocationFull ? 100 : 27
-        let remaining = 100 - claimed
+        let subscribed = session.companyID == "cmp_gulfcoast"
+        let team = PlanCatalog.standard.first { $0.id == .team }
+
+        record("commercial.state", session, allowed: true, "Development commercial position — seeded, not a live Apple or Stripe account")
 
         return CommercialState(
             paymentModel: connected ? .harbourSouthPayments : .undecided,
-            subscriptionStatus: subscription?.status ?? .active,
-            trialEndsAt: nil,
-            trialDaysRemaining: 0,
-            isTrialActive: false,
+            entitlementState: subscribed ? .active : .none,
+            planID: subscribed ? .team : nil,
+            planName: subscribed ? team?.displayName : nil,
+            billingPeriod: subscribed ? .annual : nil,
+            planPriceCents: subscribed ? (team?.annualCents ?? 0) : 0,
+            userLimit: subscribed ? team?.userLimit : 1,
+            includedUsers: subscribed ? (team?.includedUsers ?? 5) : 1,
+            activeUsers: active,
+            openInvitations: invited,
+            canAddUser: true,
+            seatLimitsEnforced: false,
+            periodEndsAt: subscribed ? Date(timeIntervalSinceNow: 60 * 60 * 24 * 200) : nil,
+            willAutoRenew: subscribed ? true : nil,
+            renewsToPlanID: subscribed ? .team : nil,
+            renewsToPeriod: subscribed ? .annual : nil,
+            billingStore: subscribed ? .apple : .none,
             stripeConnected: connected,
             chargesEnabled: connected,
             payoutsEnabled: connected,
@@ -4186,26 +4131,8 @@ actor MockDataGateway: DataGateway {
             requirementsDue: [],
             disabledReason: nil,
             stripeAccountID: connected ? "acct_development" : nil,
-            foundingMemberNumber: isMember ? 27 : nil,
-            foundingClaimedAt: isMember ? Date(timeIntervalSinceNow: -60 * 60 * 24 * 45) : nil,
-            foundingPlacesClaimed: claimed,
-            foundingPlacesRemaining: remaining,
-            // Mirrors company_commercial_state(): open while a place remains,
-            // or to the company that already holds one.
-            foundingOfferOpen: remaining > 0 || isMember,
-            foundingBenefitActive: isMember,
-            qualifyingPaymentsThisMonth: isMember ? 3 : 0,
-            lastQualifyingPaymentAt: isMember ? Date(timeIntervalSinceNow: -60 * 60 * 36) : nil,
-            activityMonthStart: Calendar.current.dateInterval(of: .month, for: Date())?.start,
-            tierID: quote.tierID,
-            tierName: quote.tierName,
-            subscriptionMonthlyCents: quote.monthlyPriceCents,
-            // Zero only while a member's Founding benefit is live this month.
-            effectiveMonthlyCents: isMember ? 0 : quote.monthlyPriceCents,
             platformFeeBps: 30,
             externalPaymentURL: company(session)?.onlinePaymentLinkURL,
-            // The development company has no customer-facing email configured;
-            // `nil` is the honest answer and exercises the "not set" path.
             businessEmail: nil,
             canManageBilling: session.can(.saasBillingManage)
         )

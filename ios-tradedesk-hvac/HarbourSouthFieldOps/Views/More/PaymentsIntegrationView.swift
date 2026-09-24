@@ -17,10 +17,9 @@ import SwiftUI
 ///                           supplies its customer-facing link. No Harbour
 ///                           South transaction fee at all.
 ///
-/// NOTHING ON THIS SCREEN DECIDES ANYTHING COMMERCIAL. The Stripe state, the
-/// Founding Member number, whether the benefit is active this month, the tier
-/// price and the fee all arrive already decided from
-/// `company_commercial_state()`. Stripe onboarding is the existing Connect
+/// NOTHING ON THIS SCREEN DECIDES ANYTHING COMMERCIAL. The Stripe state and
+/// the platform fee arrive already decided from `company_commercial_state()`.
+/// The Harbour South subscription is a separate concept on its own screen. Stripe onboarding is the existing Connect
 /// flow — no API key is ever asked for, and no credential reaches this app.
 struct PaymentsIntegrationView: View {
     @Environment(AppEnvironment.self) private var env
@@ -92,21 +91,6 @@ struct PaymentsIntegrationView: View {
                 successBanner(confirmation)
             }
 
-            if commercial.isTrialActive {
-                TrialStatusCard(
-                    daysRemaining: commercial.trialDaysRemaining,
-                    endsAt: commercial.trialEndsAt,
-                    outcome: commercial.trialOutcomeMessage
-                )
-            }
-
-            if commercial.isFoundingMember {
-                FoundingMemberBadge(
-                    isBenefitActive: commercial.foundingBenefitActive,
-                    feeLabel: commercial.platformFeeLabel
-                )
-            }
-
             stripeSection(commercial)
             externalSection(commercial)
             boundaryCard
@@ -129,10 +113,11 @@ struct PaymentsIntegrationView: View {
                         .clipShape(.rect(cornerRadius: 9))
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Stripe")
+                        Text(commercial.stripeState.title)
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(Theme.ink)
-                        Text(commercial.stripeState.title)
+                            .accessibilityIdentifier("stripe-state-title")
+                        Text("Stripe")
                             .font(.caption)
                             .foregroundStyle(Theme.secondary)
                     }
@@ -140,47 +125,26 @@ struct PaymentsIntegrationView: View {
                     Spacer(minLength: 0)
 
                     StatusPill(badge: StatusBadge(
-                        text: commercial.stripeState.title,
+                        text: commercial.stripeState.shortLabel,
                         tone: commercial.stripeState.tone
                     ))
                 }
 
-                Text(explanation(for: commercial))
+                Text(commercial.stripeState.message)
                     .font(.footnote)
                     .foregroundStyle(Theme.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                // Only promised when a place actually remains, and never to a
-                // company that already holds one.
-                if let invitation = commercial.foundingInvitation {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "trophy.fill")
-                            .font(.caption)
-                            .foregroundStyle(Theme.accent)
-                            .padding(.top, 2)
-                        Text(invitation)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.accentText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(11)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.accentTint)
-                    .clipShape(.rect(cornerRadius: 10))
-                }
 
                 if commercial.stripeConnected {
                     connectedDetail(commercial)
                 }
 
-                if !commercial.requirementsDue.isEmpty {
+                if !commercial.stripeNeeds.isEmpty, !commercial.stripeState.isConnected {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Stripe still needs")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Theme.amber)
-                        Text(commercial.requirementsDue.prefix(5)
-                            .map { $0.replacingOccurrences(of: "_", with: " ") }
-                            .joined(separator: ", "))
+                        Text(commercial.stripeNeeds.prefix(5).joined(separator: " · "))
                             .font(.caption)
                             .foregroundStyle(Theme.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -200,7 +164,8 @@ struct PaymentsIntegrationView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if commercial.canManageBilling, let action = commercial.stripeState.actionTitle {
+                if commercial.canManageBilling {
+                    let action = commercial.stripeState.actionTitle
                     Button {
                         Task { await runStripeAction(commercial) }
                     } label: {
@@ -250,37 +215,11 @@ struct PaymentsIntegrationView: View {
             }
 
             Divider()
-            detailRow(
-                "Harbour South subscription",
-                subscriptionValue(commercial),
-                tone: commercial.foundingBenefitActive ? Theme.green : Theme.ink
-            )
-            Divider()
             detailRow(PlatformFeeCopy.rowTitle, commercial.platformFeeLabel, tone: Theme.ink)
-
-            if commercial.isFoundingMember {
-                Divider()
-                detailRow(
-                    "Monthly activity",
-                    commercial.foundingBenefitActive ? "Active" : "No payment yet this month",
-                    tone: commercial.foundingBenefitActive ? Theme.green : Theme.amber
-                )
-            }
         }
         .padding(.vertical, 2)
         .background(Theme.canvas)
         .clipShape(.rect(cornerRadius: 10))
-    }
-
-    /// The subscription line. A Founding Member whose month has no qualifying
-    /// payment is told that a subscription applies — the real commercial
-    /// position — rather than being shown $0 it is not entitled to.
-    private func subscriptionValue(_ commercial: CommercialState) -> String {
-        if commercial.foundingBenefitActive { return "$0/month" }
-        if commercial.isFoundingMember {
-            return "\(commercial.subscriptionPriceLabel)/month while inactive"
-        }
-        return "\(commercial.subscriptionPriceLabel)/month · \(commercial.tierName)"
     }
 
     private func detailRow(
@@ -345,12 +284,6 @@ struct PaymentsIntegrationView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(spacing: 0) {
-                    detailRow(
-                        "Harbour South subscription",
-                        "\(commercial.subscriptionPriceLabel)/month · \(commercial.tierName)",
-                        tone: Theme.ink
-                    )
-                    Divider()
                     detailRow(PlatformFeeCopy.rowTitle, "0%", tone: Theme.green)
                     Divider()
                     detailRow(
@@ -457,38 +390,23 @@ struct PaymentsIntegrationView: View {
 
     // MARK: - Copy and colour
 
-    private func explanation(for commercial: CommercialState) -> String {
-        switch commercial.stripeState {
-        case .notConnected:
-            return "Connect your Stripe account to let customers pay invoices through Harbour South. Money goes straight to you."
-        case .onboarding:
-            return "Stripe has your application and needs a little more before you can take payments. Picking up where you left off takes a minute."
-        case .connected:
-            return "You can take card payments on your invoices. Funds settle into your own Stripe account."
-        case .actionRequired:
-            return "Stripe needs something specific from you before payments can continue."
-        case .paymentsDisabled(let reason):
-            return reason ?? "Stripe has switched off payments on this account. Open Stripe for the details."
-        }
-    }
-
     private func symbol(for state: StripeConnectionState) -> String {
         switch state {
         case .notConnected: return "creditcard"
-        case .onboarding: return "hourglass"
+        case .setupIncomplete: return "list.bullet.clipboard"
         case .connected: return "checkmark.seal.fill"
-        case .actionRequired: return "exclamationmark.triangle.fill"
-        case .paymentsDisabled: return "xmark.octagon.fill"
+        case .underReview: return "hourglass"
+        case .restricted: return "exclamationmark.triangle.fill"
         }
     }
 
     private func tintColor(for state: StripeConnectionState) -> Color {
         switch state {
         case .notConnected: return Theme.primary
-        case .onboarding: return Theme.primary
+        case .setupIncomplete: return Theme.amber
         case .connected: return Theme.green
-        case .actionRequired: return Theme.amber
-        case .paymentsDisabled: return Theme.red
+        case .underReview: return Theme.primary
+        case .restricted: return Theme.red
         }
     }
 
@@ -496,10 +414,10 @@ struct PaymentsIntegrationView: View {
 
     private func runStripeAction(_ commercial: CommercialState) async {
         guard let session else { return }
-        // A healthy connected account opens its own dashboard; every other
-        // state resumes onboarding, which is the only thing that can move it
-        // forward.
-        if commercial.stripeState.isConnected {
+        // Connected (or submitted and under review / restricted) opens the
+        // account's own Stripe dashboard; otherwise Stripe's hosted setup is
+        // resumed, which is the only thing that can move it forward.
+        if commercial.stripeState.actionOpensDashboard(detailsSubmitted: commercial.detailsSubmitted) {
             await viewModel.openStripeDashboard(gateway: env.gateway, session: session)
         } else {
             await viewModel.startOnboarding(gateway: env.gateway, session: session)

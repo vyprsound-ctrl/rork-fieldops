@@ -1,142 +1,148 @@
 import Foundation
 
-/// Harbour South's own price list, as served by the database.
-///
-/// THE ONE RULE THAT MATTERS: this is **not** progressive bracket pricing. A
-/// company falls into exactly one tier, chosen by its *total* active paid-user
-/// count, and every user beyond the first is charged that tier's single
-/// additional-user rate.
-///
-///     5 users  → 19.99 + (4 × 12.99)
-///     15 users → 19.99 + (14 × 9.99)
-///     35 users → 19.99 + (34 × 7.99)
-///
-/// It is emphatically *not* "the first 10 at one rate, the next 20 at another".
-/// A company that grows from 10 to 11 people sees every additional seat reprice
-/// downward, not just the eleventh.
-///
-/// Nothing here is a hard-coded price. `SubscriptionTier` values arrive from the
-/// `subscription_tiers` table, so Harbour South can reprice with an UPDATE and
-/// no app release. `PlatformPricing.fallback` exists only so a screen can render
-/// something truthful when the table cannot be read, and it is labelled as such
-/// wherever it is used.
-nonisolated struct SubscriptionTier: Identifiable, Codable, Hashable, Sendable {
-    let id: String
+// =============================================================================
+// Harbour South's own plans.
+//
+// Three plans, the same for every customer:
+//
+//     Starter   $19.99/month   $191.99/year   1 user          "Just me"
+//     Team      $39.99/month   $384.99/year   up to 5 users   "My small team"
+//     Business  $69.99/month   $669.99/year   10+ users       "My business"
+//
+// Billed ONLY by Apple (auto-renewable subscriptions in one subscription
+// group). The 14-day free trial is Apple's introductory offer; longer
+// promotions are Apple Offer Codes. Nothing in this file charges anybody.
+//
+// The live price list comes from the `subscription_tiers` table and the
+// customer's local price from StoreKit; `PlanCatalog.standard` exists so a
+// screen can still explain the plans when neither can be read, and is labelled
+// as such wherever it is used.
+// =============================================================================
+
+/// The three plans. Raw values are the `subscription_tiers.id` values.
+nonisolated enum PlanID: String, CaseIterable, Codable, Hashable, Sendable, Identifiable {
+    case starter
+    case team
+    case business
+
+    var id: String { rawValue }
+}
+
+/// One plan as it can be bought.
+nonisolated struct PlanOffer: Identifiable, Hashable, Sendable {
+    let id: PlanID
     let displayName: String
-    let minUsers: Int
-    let maxUsers: Int
-    /// Price of the company's first user, in cents. Included in every tier.
-    let baseCents: Int
-    /// Flat rate for each user *after* the first, in cents.
-    let additionalUserCents: Int
-    let sortOrder: Int
+    /// Who the plan is for, in the owner's own words: "Just me".
+    let tagline: String
+    let monthlyCents: Int
+    let annualCents: Int
+    /// Users covered by the price.
+    let includedUsers: Int
+    /// Hard cap on active users. `nil` means the plan has no cap — Business is
+    /// a "10+" plan, never "maximum 10".
+    let userLimit: Int?
+    let monthlyProductID: String
+    let annualProductID: String
 
-    func contains(_ users: Int) -> Bool { users >= minUsers && users <= maxUsers }
+    func productID(for period: BillingPeriod) -> String {
+        period == .annual ? annualProductID : monthlyProductID
+    }
 
-    /// Total monthly price for a head count sitting in this tier.
-    func monthlyCents(for users: Int) -> Int {
-        baseCents + (max(users - 1, 0) * additionalUserCents)
+    func priceCents(for period: BillingPeriod) -> Int {
+        period == .annual ? annualCents : monthlyCents
+    }
+
+    /// "1 user", "Up to 5 users", "10+ users".
+    var usersLabel: String {
+        guard let userLimit else { return "\(includedUsers)+ users" }
+        return userLimit == 1 ? "1 user" : "Up to \(userLimit) users"
+    }
+
+    /// Whether a company of this size fits the plan today.
+    func fits(activeUsers: Int) -> Bool {
+        guard let userLimit else { return true }
+        return activeUsers <= userLimit
+    }
+
+    /// Percent saved by paying yearly instead of 12 monthly payments, rounded.
+    var annualSavingPercent: Int {
+        let twelveMonths = Decimal(monthlyCents * 12)
+        guard twelveMonths > 0 else { return 0 }
+        let saving = (twelveMonths - Decimal(annualCents)) / twelveMonths * 100
+        return NSDecimalNumber(decimal: Money.rounded(saving, scale: 0)).intValue
+    }
+
+    /// Money saved in a year by paying annually.
+    var annualSavingCents: Int { max(monthlyCents * 12 - annualCents, 0) }
+
+    /// What the annual price works out to per month, to the cent.
+    var annualPerMonthCents: Int {
+        NSDecimalNumber(decimal: Money.rounded(Decimal(annualCents) / 12 / 100, scale: 2) * 100).intValue
     }
 }
 
-/// The complete price list plus the supported ceiling.
-nonisolated struct PlatformPricing: Codable, Hashable, Sendable {
-    let tiers: [SubscriptionTier]
-    let maxUsers: Int
-    /// True when these values came from the database rather than the built-in
-    /// fallback. Screens say so rather than quietly showing stale prices.
-    let isLive: Bool
+nonisolated enum PlanCatalog {
+    static let productPrefix = "com.harboursouth.fieldservice"
 
-    /// Mirrors the seed data in migration 0003. Used only when the price list
-    /// cannot be read, and always rendered with a caveat.
-    static let fallback = PlatformPricing(
-        tiers: [
-            SubscriptionTier(id: "solo", displayName: "Solo", minUsers: 1, maxUsers: 1,
-                             baseCents: 1999, additionalUserCents: 0, sortOrder: 1),
-            SubscriptionTier(id: "team", displayName: "Team", minUsers: 2, maxUsers: 10,
-                             baseCents: 1999, additionalUserCents: 1299, sortOrder: 2),
-            SubscriptionTier(id: "growing", displayName: "Growing Business", minUsers: 11, maxUsers: 30,
-                             baseCents: 1999, additionalUserCents: 999, sortOrder: 3),
-            SubscriptionTier(id: "larger", displayName: "Larger Business", minUsers: 31, maxUsers: 100,
-                             baseCents: 1999, additionalUserCents: 799, sortOrder: 4),
-        ],
-        maxUsers: 100,
-        isLive: false
-    )
-
-    func tier(for users: Int) -> SubscriptionTier? {
-        let clamped = min(max(users, 1), maxUsers)
-        return tiers.first { $0.contains(clamped) } ?? tiers.last
-    }
-
-    /// The full derivation for a head count. The app never adds up a
-    /// subscription price anywhere else.
-    func quote(for users: Int) -> SubscriptionQuote {
-        let count = max(users, 1)
-        guard let band = tier(for: count) else {
-            return SubscriptionQuote(
-                activePaidUsers: count, tierID: "", tierName: "Unavailable",
-                baseCents: 0, additionalUsers: 0, additionalUserCents: 0,
-                monthlyPriceCents: 0, maxUsers: maxUsers,
-                isOverCapacity: count > maxUsers, nextUserCents: nil
-            )
-        }
-
-        let additional = max(count - 1, 0)
-        let total = band.monthlyCents(for: count)
-
-        // The marginal cost of the next seat, which may cross into a cheaper
-        // tier and reprice every existing seat with it. Showing the sticker
-        // rate here would be a lie at the boundary: going from 10 to 11 people
-        // actually *reduces* the bill.
-        let next: Int? = count >= maxUsers
-            ? nil
-            : (tier(for: count + 1)?.monthlyCents(for: count + 1)).map { $0 - total }
-
-        return SubscriptionQuote(
-            activePaidUsers: count,
-            tierID: band.id,
-            tierName: band.displayName,
-            baseCents: band.baseCents,
-            additionalUsers: additional,
-            additionalUserCents: band.additionalUserCents,
-            monthlyPriceCents: total,
-            maxUsers: maxUsers,
-            isOverCapacity: count > maxUsers,
-            nextUserCents: next
+    /// Mirrors migration 0013. Used only when the live price list cannot be
+    /// read, and always rendered with a caveat.
+    static let standard: [PlanOffer] = [
+        PlanOffer(
+            id: .starter, displayName: "Starter", tagline: "Just me",
+            monthlyCents: 1999, annualCents: 19199, includedUsers: 1, userLimit: 1,
+            monthlyProductID: "\(productPrefix).starter.monthly",
+            annualProductID: "\(productPrefix).starter.annual"
+        ),
+        PlanOffer(
+            id: .team, displayName: "Team", tagline: "My small team",
+            monthlyCents: 3999, annualCents: 38499, includedUsers: 5, userLimit: 5,
+            monthlyProductID: "\(productPrefix).team.monthly",
+            annualProductID: "\(productPrefix).team.annual"
+        ),
+        PlanOffer(
+            id: .business, displayName: "Business", tagline: "My business, 10+ people",
+            monthlyCents: 6999, annualCents: 66999, includedUsers: 10, userLimit: nil,
+            monthlyProductID: "\(productPrefix).business.monthly",
+            annualProductID: "\(productPrefix).business.annual"
         )
+    ]
+
+    /// Every App Store product id, for StoreKit.
+    static var allProductIDs: [String] {
+        standard.flatMap { [$0.monthlyProductID, $0.annualProductID] }
+    }
+
+    /// Which plan and period an App Store product id is.
+    static func resolve(productID: String, in plans: [PlanOffer] = standard) -> (plan: PlanID, period: BillingPeriod)? {
+        for plan in plans {
+            if plan.monthlyProductID == productID { return (plan.id, .monthly) }
+            if plan.annualProductID == productID { return (plan.id, .annual) }
+        }
+        return nil
+    }
+
+    /// The smallest plan a company of this size fits.
+    static func recommended(forActiveUsers users: Int, in plans: [PlanOffer] = standard) -> PlanOffer? {
+        plans.first { $0.fits(activeUsers: max(users, 1)) } ?? plans.last
     }
 }
 
-/// One company's price, fully itemised so an owner can see exactly why the bill
-/// is what it is rather than being shown a total to take on trust.
-nonisolated struct SubscriptionQuote: Codable, Hashable, Sendable {
-    let activePaidUsers: Int
-    let tierID: String
-    let tierName: String
-    let baseCents: Int
-    let additionalUsers: Int
-    let additionalUserCents: Int
-    let monthlyPriceCents: Int
-    let maxUsers: Int
-    let isOverCapacity: Bool
-    /// Marginal cost of adding one more person. `nil` at the ceiling.
-    let nextUserCents: Int?
+/// Dollar formatting for Harbour South's own US price list.
+///
+/// Pinned to en_US: these are US-dollar list prices, and formatting them in
+/// the device locale turned "$39.99" into "39,99 $US" on a comma-decimal
+/// phone. The price a customer actually pays is Apple's localized
+/// `displayPrice`, shown instead whenever StoreKit has it.
+nonisolated enum PriceLabel {
+    private static let locale = Locale(identifier: "en_US")
 
-    var additionalCents: Int { additionalUsers * additionalUserCents }
-    var isAtCapacity: Bool { activePaidUsers >= maxUsers }
-
-    /// "$19.99 + 14 × $9.99" — the arithmetic spelled out.
-    var breakdownLine: String {
-        guard additionalUsers > 0 else { return SubscriptionQuote.money(baseCents) }
-        return "\(SubscriptionQuote.money(baseCents)) + \(additionalUsers) × \(SubscriptionQuote.money(additionalUserCents))"
+    static func usd(_ cents: Int) -> String {
+        let value = Decimal(cents) / 100
+        return value.formatted(.currency(code: "USD").precision(.fractionLength(2)).locale(locale))
     }
 
-    var monthlyLabel: String { SubscriptionQuote.money(monthlyPriceCents) }
-
-    static func money(_ cents: Int) -> String {
-        let value = Decimal(cents) / 100
-        return value.formatted(.currency(code: "USD").precision(.fractionLength(2)))
+    static func usd3(_ value: Decimal) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(3)).locale(locale))
     }
 }
 
@@ -151,13 +157,13 @@ nonisolated struct SmsBundle: Identifiable, Codable, Hashable, Sendable {
     let credits: Int
     let priceCents: Int
 
-    var priceLabel: String { SubscriptionQuote.money(priceCents) }
+    var priceLabel: String { PriceLabel.usd(priceCents) }
 
     /// Cost per message, which is the only number that lets a buyer compare
     /// bundles honestly.
     var unitLabel: String {
         let unit = Decimal(priceCents) / Decimal(max(credits, 1)) / 100
-        return unit.formatted(.currency(code: "USD").precision(.fractionLength(3))) + " each"
+        return PriceLabel.usd3(unit) + " each"
     }
 
     var creditsLabel: String { credits.formatted(.number.grouping(.automatic)) }

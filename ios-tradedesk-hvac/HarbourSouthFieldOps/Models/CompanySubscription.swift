@@ -18,6 +18,9 @@ nonisolated enum SubscriptionStatus: String, Codable, Sendable {
     }
 }
 
+/// The database's plan enum. `soloTrader` is the stored name of Starter and is
+/// kept only because it is a Postgres enum value; customers only ever see
+/// "Starter".
 nonisolated enum SubscriptionPlan: String, Codable, Sendable {
     case soloTrader
     case team
@@ -25,18 +28,37 @@ nonisolated enum SubscriptionPlan: String, Codable, Sendable {
 
     var title: String {
         switch self {
-        case .soloTrader: return "Solo Trader"
+        case .soloTrader: return "Starter"
         case .team: return "Team"
         case .business: return "Business"
         }
     }
+
+    var planID: PlanID {
+        switch self {
+        case .soloTrader: return .starter
+        case .team: return .team
+        case .business: return .business
+        }
+    }
+
+    init(planID: PlanID) {
+        switch planID {
+        case .starter: self = .soloTrader
+        case .team: self = .team
+        case .business: self = .business
+        }
+    }
 }
 
-nonisolated enum BillingPeriod: String, Codable, Sendable {
+nonisolated enum BillingPeriod: String, Codable, Hashable, Sendable, CaseIterable, Identifiable {
     case monthly
     case annual
 
+    var id: String { rawValue }
     var title: String { self == .monthly ? "Monthly" : "Annual" }
+    /// "/month", "/year".
+    var perUnit: String { self == .monthly ? "/month" : "/year" }
 }
 
 nonisolated enum BillingStore: String, Codable, Sendable {
