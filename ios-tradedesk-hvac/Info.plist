@@ -29,11 +29,11 @@
 	</array>
 	<!--
 	  Harbour South's legal and privacy contact email, shown inside the in-app
-	  legal documents (Brand.legalContactEmail). Empty until Harbour South sets
-	  it; never an invented address. The legal documents themselves are in-app.
+	  legal documents (Brand.legalContactEmail). The legal documents themselves
+	  are in-app; there is no external privacy-policy URL.
 	-->
 	<key>HarbourSouthLegalContactEmail</key>
-	<string></string>
+	<string>noreply@harboursouth.us</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
