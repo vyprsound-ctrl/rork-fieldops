@@ -114,6 +114,15 @@ struct JobDetailView: View {
                 scheduleSection(job)
                 if let equipment = job.equipment { equipmentSection(equipment) }
                 billingSection(job)
+                CommunicationHistorySection(
+                    title: "Messages",
+                    customerID: job.customerID,
+                    customerName: job.customerName,
+                    jobID: job.id,
+                    context: .job,
+                    quickActions: jobQuickActions(job),
+                    hasPhone: job.contactPhone?.tidied.isEmpty == false
+                )
                 JobTimelineSection(entries: job.timeline)
                 JobNotesSection(notes: job.notes, canAdd: job.canAddNotes) { isAddingNote = true }
                 JobPhotosSection(photos: job.photos, canAdd: job.canAddPhotos) { isAddingPhoto = true }
@@ -125,6 +134,18 @@ struct JobDetailView: View {
             if !job.transitions.isEmpty { actionBar(job) }
         }
         .refreshable { await reload(showLoading: false) }
+    }
+
+    /// The operational texts for this job, in the order a visit happens.
+    /// Quote and invoice texts appear only for roles that can see them.
+    private func jobQuickActions(_ job: JobDetailProjection) -> [SmsMessageKind] {
+        var kinds: [SmsMessageKind] = [.appointmentConfirmation, .appointmentReminder, .engineerOnTheWay, .etaUpdate,
+                                       .engineerArrived, .jobUpdate, .jobCompleted]
+        if job.quoteID != nil, session?.can(.quotesRead) == true { kinds.append(.quoteSent) }
+        if session?.can(.invoicesRead) == true, job.status == .invoiced || job.status == .paid || job.status == .completed {
+            kinds += [.invoiceSent, .paymentReminder, .overdueReminder, .paymentReceived]
+        }
+        return kinds
     }
 
     // MARK: - Sections

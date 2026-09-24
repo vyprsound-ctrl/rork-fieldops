@@ -1,280 +1,343 @@
 import SwiftUI
 
-/// Sends one SMS to one customer.
+/// Sends (or schedules) one operational SMS to one customer.
 ///
-/// Nothing here fires automatically. A customer who receives six unprompted
-/// texts about one visit stops reading all of them, so every message is chosen
-/// by a person, previewed in full, and costs a visible credit.
-///
-/// The send itself is a server operation: this sheet has no Twilio credential,
-/// does not know the company's balance rules, and cannot decide that a message
-/// was delivered. It shows what the server reports.
+/// The server renders the chosen template with its own values, counts the
+/// segments, checks the subscription, the company's SMS status and the
+/// customer's opt-out, and only then spends credit — so this sheet shows the
+/// real recipient, the exact message and its credit cost before anything is
+/// sent. It holds no Twilio credential and cannot decide delivery.
 struct SendSmsSheet: View {
     let customerID: String
     let customerName: String
     var jobID: String?
+    var quoteID: String?
     var invoiceID: String?
-    /// Prefill context, so the drafted message reads like a person wrote it.
+    var context: SmsMessageContext = .customer
+    var initialKind: SmsMessageKind?
+    /// Kept for source compatibility with earlier call sites.
     var workerName: String?
     var whenLabel: String?
 
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
-    @State private var viewModel = SmsCreditsViewModel()
-    @State private var template: SmsTemplate = .jobConfirmation
-    /// Deliberately not called `body` — that name belongs to `View`.
-    @State private var messageText: String = ""
-    @State private var sent = false
+    @State private var viewModel: SmsComposerViewModel
+    @State private var finished: Bool = false
 
-    private var session: TenantSession? { env.activeSession }
-
-    /// The sender line the customer will actually read, taken from the company
-    /// record rather than from whichever screen opened this sheet.
-    private var companyName: String {
-        viewModel.state.value?.companyName.tidied ?? ""
+    init(customerID: String, customerName: String, jobID: String? = nil, quoteID: String? = nil,
+         invoiceID: String? = nil, context: SmsMessageContext = .customer, initialKind: SmsMessageKind? = nil,
+         workerName: String? = nil, whenLabel: String? = nil) {
+        self.customerID = customerID
+        self.customerName = customerName
+        self.jobID = jobID
+        self.quoteID = quoteID
+        self.invoiceID = invoiceID
+        self.context = context
+        self.initialKind = initialKind
+        self.workerName = workerName
+        self.whenLabel = whenLabel
+        let first = initialKind ?? SmsMessageKind.offered(for: context).first ?? .customMessage
+        _viewModel = State(initialValue: SmsComposerViewModel(kind: first))
     }
 
-    private var characterCount: Int { messageText.count }
-    /// A single SMS is 160 GSM-7 characters; beyond that the carrier bills more
-    /// segments. The sender should know before they send, not after.
-    private var segmentCount: Int { max(1, Int(ceil(Double(max(characterCount, 1)) / 160.0))) }
+    private var session: TenantSession? { env.activeSession }
+    private var kinds: [SmsMessageKind] { SmsMessageKind.offered(for: context) }
+
+    private var draft: SmsComposeDraft {
+        viewModel.draft(customerID: customerID, jobID: jobID, quoteID: quoteID, invoiceID: invoiceID, phone: nil)
+    }
+
+    private var blocker: String? {
+        if let setup = viewModel.setup, !setup.friendly.canSend {
+            switch setup.friendly {
+            case .notSetUp: return "SMS isn't set up yet. The owner can set it up in More → SMS & Messaging."
+            case .settingUp, .waitingApproval: return "Your SMS number is waiting for approval. You can send as soon as it's approved."
+            default: return setup.attention ?? "SMS isn't available right now."
+            }
+        }
+        return viewModel.preview?.blockerMessage
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if sent {
-                    confirmation
+                if finished, let outcome = viewModel.outcome {
+                    confirmation(outcome)
                 } else {
                     form
                 }
             }
             .background(Theme.canvas)
-            .navigationTitle(sent ? "Message sent" : "Send message")
+            .navigationTitle(finished ? "Done" : "Text \(customerName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(sent ? "Done" : "Cancel") { dismiss() }
-                }
-                if !sent {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Send") { Task { await send() } }
-                            .disabled(!canSend)
-                    }
+                    Button(finished ? "Close" : "Cancel") { dismiss() }
                 }
             }
         }
         .task {
-            await load()
-            // Re-drafted once the company name is known, so the first template
-            // the user sees carries the real sender rather than a placeholder.
-            if !sent { applyTemplate(template) }
+            guard let session else { return }
+            await viewModel.load(gateway: env.gateway, session: session)
+            await viewModel.refreshPreview(gateway: env.gateway, session: session, draft: draft)
         }
     }
 
-    private var canSend: Bool {
-        guard !viewModel.isWorking else { return false }
-        guard !messageText.tidied.isEmpty else { return false }
-        guard let overview = viewModel.state.value else { return false }
-        return overview.canSend && overview.balance > 0
-    }
-
-    // MARK: - Form
+    // MARK: Form
 
     private var form: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 18) {
                 recipientCard
-                templatePicker
-                messageEditor
-                balanceNotice
+                if let blocker { notice(blocker, tone: Theme.amber, symbol: "exclamationmark.bubble.fill") }
+                kindPicker
+                editor
+                if viewModel.kind.allowedVariables.contains(.eta) { etaField }
+                scheduleCard
+                previewCard
+                if let error = viewModel.error { notice(error, tone: Theme.red, symbol: "xmark.octagon.fill") }
+                sendButton
             }
             .padding(.horizontal, Theme.margin)
-            .padding(.vertical, 16)
+            .padding(.vertical, 14)
         }
     }
 
     private var recipientCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "person.crop.circle")
-                .font(.footnote)
-                .foregroundStyle(Theme.primary)
-                .frame(width: 32, height: 32)
-                .background(Theme.primaryTint)
-                .clipShape(.rect(cornerRadius: 8))
-
+        HStack(spacing: 12) {
+            Text(String(customerName.prefix(1)).uppercased())
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(Theme.primary.gradient)
+                .clipShape(.circle)
             VStack(alignment: .leading, spacing: 2) {
-                Text(customerName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.ink)
-                Text("Goes to the mobile number on their record")
-                    .font(.caption)
-                    .foregroundStyle(Theme.meta)
+                Text(customerName).font(.headline).foregroundStyle(Theme.ink)
+                Text(viewModel.preview.map { PhoneFormatting.pretty($0.recipient) } ?? "Their mobile number on file")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(Theme.secondary)
+                    .accessibilityIdentifier("sms.compose.recipient")
             }
-            Spacer(minLength: 4)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    private var templatePicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Message type")
-                .sectionLabelStyle()
-
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
-                spacing: 8
-            ) {
-                ForEach(SmsTemplate.allCases, id: \.rawValue) { option in
-                    Button {
-                        template = option
-                        applyTemplate(option)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: option.symbolName)
-                                .font(.caption)
-                            Text(option.title)
-                                .font(.caption.weight(.medium))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                        }
-                        .foregroundStyle(template == option ? Theme.primary : Theme.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .background(template == option ? Theme.primaryTint : Theme.surface)
-                        .clipShape(.rect(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(template == option ? Theme.primary.opacity(0.4) : Theme.border, lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+            Spacer()
+            if let number = viewModel.setup?.displayNumber {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("From").font(.caption2).foregroundStyle(Theme.meta)
+                    Text(number).font(.caption.monospacedDigit().weight(.semibold)).foregroundStyle(Theme.secondary)
                 }
             }
         }
+        .padding(14)
+        .cardSurface()
     }
 
-    private var messageEditor: some View {
+    private var kindPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Message")
-                .sectionLabelStyle()
+            Text("Message").sectionLabelStyle()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(kinds) { kind in
+                        Button {
+                            viewModel.kind = kind
+                            viewModel.applyTemplate()
+                            refreshPreview()
+                        } label: {
+                            Label(kind.title, systemImage: kind.symbolName)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(viewModel.kind == kind ? Color.white : Theme.primary)
+                                .padding(.horizontal, 12)
+                                .frame(height: 38)
+                                .background(viewModel.kind == kind ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.primaryTint))
+                                .clipShape(.capsule)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("sms.kind.\(kind.rawValue)")
+                    }
+                }
+            }
+            .contentMargins(.horizontal, 0)
+            .sensoryFeedback(.selection, trigger: viewModel.kind)
+        }
+    }
 
-            TextEditor(text: $messageText)
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextEditor(text: $viewModel.body)
                 .font(.body)
-                .foregroundStyle(Theme.ink)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 130)
+                .frame(minHeight: 120)
                 .padding(10)
+                .scrollContentBackground(.hidden)
                 .background(Theme.surface)
                 .clipShape(.rect(cornerRadius: Theme.cardRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cardRadius)
-                        .stroke(Theme.border, lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border, lineWidth: 1))
+                .accessibilityIdentifier("sms.compose.body")
+                .onChange(of: viewModel.body) { _, _ in debouncePreview() }
+            if !viewModel.kind.allowedVariables.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(viewModel.kind.allowedVariables) { variable in
+                            Button {
+                                viewModel.body += (viewModel.body.hasSuffix(" ") || viewModel.body.isEmpty ? "" : " ") + variable.token
+                            } label: {
+                                Text("+ \(variable.label)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.accentText)
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 30)
+                                    .background(Theme.accentTint)
+                                    .clipShape(.capsule)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            if let problem = viewModel.localProblem {
+                Text(problem).font(.caption).foregroundStyle(Theme.red)
+            }
+        }
+    }
 
+    private var etaField: some View {
+        HStack {
+            Image(systemName: "clock").foregroundStyle(Theme.primary)
+            TextField("Arrival time, e.g. around 2:30 PM", text: $viewModel.eta)
+                .onSubmit { refreshPreview() }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 48)
+        .cardSurface()
+    }
+
+    private var scheduleCard: some View {
+        VStack(spacing: 0) {
+            Toggle(isOn: $viewModel.schedules.animation(.snappy)) {
+                Label("Send later", systemImage: "calendar.badge.clock").font(.subheadline.weight(.semibold))
+            }
+            .tint(Theme.accent)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 50)
+            if viewModel.schedules {
+                Divider()
+                DatePicker("Send at", selection: $viewModel.scheduledFor,
+                           in: Date().addingTimeInterval(120)...Date().addingTimeInterval(90 * 86_400))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 50)
+            }
+        }
+        .cardSurface()
+    }
+
+    private var previewCard: some View {
+        let segments = viewModel.preview?.segments ?? max(viewModel.estimate.segments, 1)
+        let unicode = (viewModel.preview?.encoding ?? viewModel.estimate.encoding) == "UCS-2"
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("\(characterCount) characters")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.meta)
-                Spacer()
-                Text(segmentCount == 1 ? "1 credit" : "\(segmentCount) parts")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(segmentCount > 1 ? Theme.amber : Theme.meta)
+                Text("What they'll receive").sectionLabelStyle()
+                if viewModel.isPreviewing { ProgressView().controlSize(.mini) }
             }
-
-            if segmentCount > 1 {
-                Text("Longer messages are split by the carrier. Keep it under 160 characters to send as one.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.amber)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var balanceNotice: some View {
-        if let overview = viewModel.state.value {
-            if !overview.canSend {
-                notice("Your role does not include sending messages.", tone: Theme.amber)
-            } else if overview.balance <= 0 {
-                notice("You have no SMS credits. Buy a bundle before sending.", tone: Theme.amber)
-            } else {
-                notice("\(overview.balance) credit\(overview.balance == 1 ? "" : "s") remaining.", tone: Theme.meta)
-            }
-        }
-
-        if let error = viewModel.actionError {
-            notice(error, tone: Theme.red)
-        }
-    }
-
-    private func notice(_ text: String, tone: Color) -> some View {
-        Text(text)
-            .font(.footnote)
-            .foregroundStyle(tone)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Confirmation
-
-    private var confirmation: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(Theme.green)
-
-            Text("Message sent to \(customerName)")
-                .font(.headline)
+            Text(viewModel.preview?.body ?? SmsTemplateValidator.estimate(viewModel.body))
+                .font(.subheadline)
                 .foregroundStyle(Theme.ink)
-                .multilineTextAlignment(.center)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.primaryTint)
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 16, bottomLeadingRadius: 4, bottomTrailingRadius: 16, topTrailingRadius: 16))
+                .accessibilityIdentifier("sms.compose.preview")
+            HStack(spacing: 8) {
+                Label("\(segments) segment\(segments == 1 ? "" : "s")", systemImage: "square.stack.3d.up")
+                Text("·")
+                Text("\(segments) credit\(segments == 1 ? "" : "s")").fontWeight(.semibold)
+                    .accessibilityIdentifier("sms.compose.credits")
+                if unicode { Text("· emoji/special characters").foregroundStyle(Theme.amber) }
+                Spacer()
+                if let balance = viewModel.setup?.balance { Text("\(balance) left").foregroundStyle(Theme.meta) }
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(segments > 1 ? Theme.amber : Theme.secondary)
+            .contentTransition(.numericText())
+            .animation(.snappy, value: segments)
+        }
+    }
 
-            // Deliberately not "delivered". The carrier has it; the handset may
-            // not. Claiming delivery here would be a lie the app cannot back up.
-            Text("The carrier has accepted it. Delivery is confirmed separately and shows in your message history.")
+    private var sendButton: some View {
+        Button {
+            guard let session else { return }
+            Task {
+                if await viewModel.send(gateway: env.gateway, session: session, draft: draft) {
+                    withAnimation(.snappy) { finished = true }
+                }
+            }
+        } label: {
+            Group {
+                if viewModel.isSending { ProgressView().tint(.white) }
+                else { Label(viewModel.schedules ? "Schedule message" : "Send message", systemImage: viewModel.schedules ? "calendar.badge.plus" : "paperplane.fill").font(.headline) }
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, minHeight: 54)
+            .background(Theme.accent.gradient)
+            .clipShape(.rect(cornerRadius: Theme.buttonRadius))
+        }
+        .buttonStyle(PressableTileStyle())
+        .disabled(viewModel.isSending || blocker != nil || viewModel.localProblem != nil
+                  || viewModel.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .opacity(blocker != nil ? 0.5 : 1)
+        .sensoryFeedback(.success, trigger: finished)
+        .accessibilityIdentifier("sms.compose.send")
+    }
+
+    private func notice(_ text: String, tone: Color, symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(tone)
+            Text(text).font(.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(tone.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 12))
+    }
+
+    // MARK: Confirmation
+
+    private func confirmation(_ outcome: SmsDispatchOutcome) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: outcome.scheduled ? "calendar.badge.checkmark" : "checkmark.circle.fill")
+                .font(.system(size: 52))
+                .foregroundStyle(Theme.green)
+                .symbolEffect(.bounce, value: finished)
+            Text(outcome.scheduled ? "Scheduled for \(customerName)" : "Sent to \(customerName)")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Theme.ink)
+            Text(outcome.detail)
                 .font(.footnote)
                 .foregroundStyle(Theme.secondary)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let outcome = viewModel.lastOutcome {
-                Text("\(outcome.creditsCharged) credit used · \(outcome.balance) remaining")
-                    .font(.caption)
-                    .monospacedDigit()
+            if outcome.sent {
+                Text("\(outcome.creditsCharged) credit\(outcome.creditsCharged == 1 ? "" : "s") used\(outcome.balance.map { " · \($0) left" } ?? "")")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.meta)
             }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity)
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Actions
+    // MARK: Preview refresh
 
-    private func applyTemplate(_ option: SmsTemplate) {
-        let sender = companyName.tidied.isEmpty ? "We" : companyName.tidied
-        messageText = option.draftBody(company: sender, worker: workerName, when: whenLabel)
-    }
+    @State private var previewTask: Task<Void, Never>?
 
-    private func load() async {
+    private func refreshPreview() {
         guard let session else { return }
-        await viewModel.load(gateway: env.gateway, session: session)
+        previewTask?.cancel()
+        previewTask = Task { await viewModel.refreshPreview(gateway: env.gateway, session: session, draft: draft) }
     }
 
-    private func send() async {
+    private func debouncePreview() {
         guard let session else { return }
-        let draft = SmsSendDraft(
-            customerID: customerID,
-            jobID: jobID,
-            invoiceID: invoiceID,
-            template: template,
-            body: messageText.tidied
-        )
-        let ok = await viewModel.send(gateway: env.gateway, session: session, draft: draft)
-        if ok { withAnimation(.snappy) { sent = true } }
+        previewTask?.cancel()
+        previewTask = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            await viewModel.refreshPreview(gateway: env.gateway, session: session, draft: draft)
+        }
     }
 }

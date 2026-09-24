@@ -34,7 +34,7 @@ struct EngineerShellView: View {
             Tab("Office", systemImage: "bubble.left.and.bubble.right") {
                 OfficeMessagesView(viewModel: messages)
             }
-            .badge(messages.unreadCount)
+            .badge(max(messages.unreadCount, env.communications.unread.officeUnread))
             Tab("More", systemImage: "ellipsis") {
                 EngineerMoreView()
             }
@@ -43,6 +43,11 @@ struct EngineerShellView: View {
         .task(id: session?.userID) {
             guard let session else { return }
             await messages.load(gateway: env.gateway, session: session)
+        }
+        // A new office message refreshes the inbox wherever the engineer is.
+        .onChange(of: env.communications.unread.officeUnread) { _, _ in
+            guard let session else { return }
+            Task { await messages.load(gateway: env.gateway, session: session, showLoading: false) }
         }
     }
 }

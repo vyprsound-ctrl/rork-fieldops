@@ -36,6 +36,13 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
     /// simply no screen to open them from. Placed at the top level of More
     /// because an owner who has been messaged will not go hunting for it.
     case messages
+    /// Owner/Admin/Dispatcher: every customer SMS conversation, scheduled and
+    /// sent messages, templates, automations and SMS usage in one place.
+    case communications
+    /// Owner-only setup and status of the company's own SMS number.
+    case smsMessaging
+    /// The in-app Harbour South legal documents.
+    case legal
     case dataAccess
     case integrations
     case developmentTests
@@ -63,6 +70,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .paymentLink: return "My payment link"
         case .businessEmail: return "Set up your email"
         case .messages: return "Messages"
+        case .communications: return "Communications"
+        case .smsMessaging: return "SMS & Messaging"
+        case .legal: return "Legal"
         case .dataAccess: return "Role & data access"
         case .integrations: return "Integrations"
         case .developmentTests: return "Development tests"
@@ -109,6 +119,9 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .paymentLink: return "link"
         case .businessEmail: return "envelope.fill"
         case .messages: return "bubble.left.and.bubble.right.fill"
+        case .communications: return "tray.full.fill"
+        case .smsMessaging: return "antenna.radiowaves.left.and.right.circle.fill"
+        case .legal: return "building.columns.fill"
         case .dataAccess: return "lock.shield.fill"
         case .integrations: return "app.connected.to.app.below.fill"
         case .developmentTests: return "checklist"
@@ -155,6 +168,12 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         // `assignmentsManage` here keeps the menu honest — a role that would be
         // shown an empty inbox is not offered the row at all.
         case .messages: return .assignmentsManage
+        // Customer conversations: the roles that text customers and can see
+        // every customer (Owner, Admin, Dispatcher).
+        case .communications: return .smsCreditsConsume
+        // Visible to billing (owner); the screen itself refuses non-owners.
+        case .smsMessaging: return .saasBillingRead
+        case .legal: return nil
         case .dataAccess: return nil
         case .integrations: return nil
         case .developmentTests: return nil
@@ -166,7 +185,7 @@ nonisolated enum MoreSection: String, Hashable, CaseIterable, Identifiable, Send
         case .dispatch, .workerLocations, .fieldWorkers, .quotes, .invoices, .payments, .reports,
              .recurring, .subscription, .smsCredits, .paymentTerms, .notifications, .dataAccess,
              .integrations, .settings, .paymentLink, .companyProfile, .developmentTests,
-             .payments_integration, .businessEmail, .messages: return true
+             .payments_integration, .businessEmail, .messages, .communications, .smsMessaging, .legal: return true
         }
     }
 }
@@ -178,6 +197,8 @@ nonisolated enum AppRoute: Hashable, Sendable {
     case customer(String)
     /// One field worker ↔ office conversation, by thread id.
     case message(String)
+    /// One customer SMS conversation, by conversation id.
+    case smsConversation(String)
     case more(MoreSection)
 
     /// ISSUE #11 — the invoice list, opened on a specific filter.
@@ -205,6 +226,7 @@ extension AppRoute: Identifiable {
         case .invoice(let value): return "invoice-\(value)"
         case .customer(let value): return "customer-\(value)"
         case .message(let value): return "message-\(value)"
+        case .smsConversation(let value): return "sms-\(value)"
         case .more(let section): return "more-\(section.rawValue)"
         case .invoiceList(let filter): return "invoiceList-\(filter.rawValue)"
         case .jobList(let filter): return "jobList-\(filter.rawValue)"

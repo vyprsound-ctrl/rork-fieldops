@@ -104,6 +104,7 @@ struct DeleteAccountView: View {
                           ? "Nobody else can use the workspace after it's closed."
                           : "The \(context.otherActiveMembers) other \(context.otherActiveMembers == 1 ? "person" : "people") in your company lose access to the workspace.")
                     point("archivebox", "Business and financial records (customers, jobs, quotes, invoices, payments, photos and messages) are kept but can no longer be opened in the app. They're retained, not deleted, so financial records stay intact.")
+                    point("message.badge", "Customer texting stops immediately. Your SMS number is kept for the retention period, then released.")
                     point("creditcard", "Your Stripe account is your company's own and isn't touched. Manage or close it with Stripe.")
                     point("apple.logo", "If you pay for Harbour South through Apple, cancel the subscription in Settings → Apple ID → Subscriptions. Deleting your account doesn't cancel it.")
                     point("person.badge.key", "To keep the company running instead, make someone else an Owner first. Then deleting your account leaves the company as it is.")
@@ -175,30 +176,6 @@ struct DeleteAccountView: View {
             deleteError = DataError.wrap(error).errorDescription
         }
         isDeleting = false
-    }
-}
-
-/// Privacy Policy and Terms of Use, as Apple requires them to be reachable in
-/// the app. The privacy link comes from configuration; while no public policy
-/// is configured the row says so rather than linking anywhere.
-struct LegalLinksView: View {
-    var body: some View {
-        HStack(spacing: 16) {
-            if let privacy = Brand.privacyPolicyURL {
-                Link("Privacy Policy", destination: privacy)
-                    .accessibilityIdentifier("legal.privacy")
-            } else {
-                Text("Privacy Policy — coming soon")
-                    .foregroundStyle(Theme.meta)
-                    .accessibilityIdentifier("legal.privacy.unavailable")
-            }
-            if let terms = Brand.termsOfUseURL {
-                Link("Terms of Use", destination: terms)
-                    .accessibilityIdentifier("legal.terms")
-            }
-        }
-        .font(.caption.weight(.semibold))
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

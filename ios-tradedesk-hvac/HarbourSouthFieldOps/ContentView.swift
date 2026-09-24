@@ -106,6 +106,41 @@ struct ContentView: View {
         .onChange(of: PushDeepLinkInbox.shared.pending) { _, _ in
             consumePendingDeepLink()
         }
+        // GLOBAL MESSAGE ALERT: runs above both shells, so a new customer reply
+        // or office message is noticed on any screen, not just Messages.
+        .overlay(alignment: .top) {
+            if let banner = env.communications.banner, env.activeSession != nil {
+                MessageBannerView(banner: banner) {
+                    env.communications.openBanner()
+                } dismiss: {
+                    env.communications.banner = nil
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .padding(.top, 4)
+            }
+        }
+        .animation(.spring(duration: 0.4), value: env.communications.banner)
+        .task(id: env.activeSession?.userID) {
+            await pollCommunications()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .communicationsPushReceived)) { _ in
+            guard let session = env.activeSession, env.workspaceGate == .open else { return }
+            Task { await env.communications.refresh(gateway: env.gateway, session: session, announce: false, updateAppBadge: env.isProductionSession) }
+        }
+    }
+
+    /// Foreground polling for the global indicator. Push covers the background
+    /// and terminated app; this keeps badges honest while the app is open even
+    /// when notifications are off. Stops automatically on sign-out.
+    private func pollCommunications() async {
+        env.communications.reset()
+        while !Task.isCancelled {
+            if let session = env.activeSession, env.workspaceGate == .open, scenePhase == .active {
+                await env.communications.refresh(gateway: env.gateway, session: session, announce: true,
+                                                 updateAppBadge: env.isProductionSession)
+            }
+            try? await Task.sleep(for: .seconds(20))
+        }
     }
 
     /// A tap that arrived while the app was launching, or while the session was

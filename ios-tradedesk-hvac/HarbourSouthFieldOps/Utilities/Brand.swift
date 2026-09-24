@@ -33,31 +33,31 @@ nonisolated enum Brand {
     /// Used when the asset is absent, so the mark is never an empty box.
     static let fallbackSymbolName = "point.topleft.down.to.point.bottomright.curvepath.fill"
 
-    /// The Info.plist key holding Harbour South's published privacy policy URL.
-    static let privacyPolicyInfoKey = "HarbourSouthPrivacyPolicyURL"
+    /// Harbour South's legal documents (Privacy Policy, Terms of Service, SMS &
+    /// Messaging Terms, Account & Data Deletion) are IN-APP documents — see
+    /// `LegalDocument`. There is deliberately no external privacy-policy URL.
 
-    /// Harbour South's published privacy policy, linked from More, the
-    /// subscription screen and Delete Account as Apple requires.
-    ///
-    /// CONFIGURATION-DRIVEN: read from `HarbourSouthPrivacyPolicyURL` in
-    /// Info.plist. It is empty until the real policy is published — put the
-    /// public https URL there and every entry point opens it, with no code
-    /// change. Until then the entry points say the policy is not yet available
-    /// rather than linking to an invented address.
-    static var privacyPolicyURL: URL? {
-        privacyPolicyURL(from: Bundle.main.object(forInfoDictionaryKey: privacyPolicyInfoKey) as? String)
+    /// The Info.plist key for Harbour South's legal/privacy contact email.
+    static let legalContactInfoKey = "HarbourSouthLegalContactEmail"
+
+    /// CONFIGURATION-DRIVEN contact for privacy and legal requests. Empty until
+    /// Harbour South sets it; the documents then point to the support contact
+    /// on the App Store listing instead of an invented address.
+    static var legalContactEmail: String? {
+        legalContactEmail(from: Bundle.main.object(forInfoDictionaryKey: legalContactInfoKey) as? String)
     }
 
-    /// Only a real https address counts.
-    static func privacyPolicyURL(from raw: String?) -> URL? {
+    /// Only a plausible email address counts.
+    static func legalContactEmail(from raw: String?) -> String? {
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.lowercased().hasPrefix("https://"), let url = URL(string: trimmed), url.host != nil else { return nil }
-        return url
+        let parts = trimmed.split(separator: "@")
+        guard parts.count == 2, parts[1].contains("."), !trimmed.contains(" ") else { return nil }
+        return trimmed
     }
 
     /// Apple's standard licensed application end user licence agreement,
-    /// used as the Terms of Use unless a custom EULA is set in App Store Connect.
-    static let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
+    /// which governs App Store subscriptions (shown beside the plans).
+    static let appleEULAURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
 
     /// Whether a real logo asset is present in this build.
     static var hasLogoAsset: Bool { UIImage(named: logoAssetName) != nil }

@@ -526,13 +526,13 @@ struct SeatResolutionAndAccessTests {
         #expect(await gateway.user(id: "usr_north_owner")?.status == .active)
     }
 
-    @Test("Privacy policy is configuration-driven and never invented")
-    func privacyPolicyConfig() {
-        #expect(Brand.privacyPolicyURL(from: nil) == nil)
-        #expect(Brand.privacyPolicyURL(from: "") == nil)
-        #expect(Brand.privacyPolicyURL(from: "http://example.com/privacy") == nil)
-        #expect(Brand.privacyPolicyURL(from: " https://example.com/privacy ")?.absoluteString == "https://example.com/privacy")
-        #expect(Brand.termsOfUseURL?.absoluteString == "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
+    @Test("Legal contact is configuration-driven and never invented")
+    func legalContactConfig() {
+        #expect(Brand.legalContactEmail(from: nil) == nil)
+        #expect(Brand.legalContactEmail(from: "") == nil)
+        #expect(Brand.legalContactEmail(from: "not an email") == nil)
+        #expect(Brand.legalContactEmail(from: " legal@example.com ") == "legal@example.com")
+        #expect(Brand.appleEULAURL?.absoluteString == "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
     }
 }
 

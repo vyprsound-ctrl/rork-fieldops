@@ -77,6 +77,11 @@ struct InvoiceDetailView: View {
                 lineItems(invoice)
                 totals(invoice)
                 if let sharing = viewModel.sharing { sendSection(invoice, sharing) }
+                if invoice.status != .draft && invoice.status != .void {
+                    DocumentSmsCard(customerID: invoice.customerID, customerName: invoice.customerName, invoiceID: invoice.id,
+                                    kinds: invoice.status == .paid ? [.paymentReceived]
+                                        : [.invoiceSent, .paymentReminder, .overdueReminder, .paymentReceived])
+                }
                 if session?.can(.paymentsRead) == true { paymentsSection(invoice) }
                 references(invoice)
                 if !invoice.statusActions.isEmpty { statusActions(invoice) }

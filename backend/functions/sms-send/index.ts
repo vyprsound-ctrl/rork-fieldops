@@ -1,352 +1,206 @@
 import { AuthError, corsHeaders, createAdminClient, jsonResponse, requireAuth } from "../_shared/auth.ts";
+import {
+  deliverReservation,
+  firstRow,
+  outcomeMessage,
+  renderMessage,
+  type Reservation,
+  resolveRecipient,
+  UUID_PATTERN,
+} from "../_shared/sms.ts";
 
-/// Sends one customer SMS through Twilio, on the company's credit.
+/// Sends (or schedules, or previews) one customer SMS on the company's credit,
+/// from the company's OWN Twilio subaccount, Messaging Service and number.
 ///
-/// THE ORDER OF OPERATIONS IS THE WHOLE DESIGN:
+/// ORDER OF OPERATIONS:
+///   1. Authenticate. 2. Company from the session — the request has no company,
+///   account, service, number or SID field to tamper with. 3. Customer, job,
+///   quote and invoice read under the CALLER'S RLS and re-checked against that
+///   company. 4. Template rendered server-side with server-looked-up values;
+///   unknown or missing variables stop here. 5. ONE database transaction
+///   (`reserve_sms_send`) checks permission, subscription, messaging status,
+///   opt-out, segment count and balance under the company lock, then writes
+///   the message and the ledger debit. 6. Only then Twilio, through that
+///   company's subaccount. 7. The real outcome is recorded; a rejection
+///   refunds exactly once.
 ///
-///   1. Authenticate the caller.
-///   2. Derive the company from the authenticated identity — NEVER from the
-///      request body. There is no company field in the request to tamper with.
-///   3. Check `smsCreditsConsume` against the same role matrix the app uses.
-///   4. Resolve the customer WITH THE CALLER'S OWN JWT, so RLS proves the
-///      customer belongs to the caller's company. Company A physically cannot
-///      name a Company B customer here.
-///   5. Create the notification row (company-stamped by the database).
-///   6. Consume the credit ATOMICALLY. `consume_sms_credit` takes a
-///      per-company advisory lock, so two simultaneous sends against a balance
-///      of one produce exactly one message.
-///   7. Only then hand the message to Twilio.
-///   8. Record the real provider outcome. A Twilio rejection refunds the
-///      credit; a Twilio acceptance does NOT claim delivery — that only comes
-///      from the status callback.
-///
-/// If step 6 says there is not enough credit, step 7 never happens and the
-/// balance is untouched.
-///
-/// Twilio credentials exist only in this function's environment. The iOS app
-/// has never held one and cannot reach Twilio directly.
+/// action: "send" (default) · "schedule" · "preview" (renders + counts, charges nothing)
 
 interface SendSmsRequest {
+  action?: "send" | "schedule" | "preview";
   customerId?: string;
   jobId?: string;
   invoiceId?: string;
   quoteId?: string;
   template?: string;
   body?: string;
-  /// Optional explicit recipient. Validated against the customer's own contacts
-  /// so it cannot be used to send to an arbitrary number on someone's credit.
   phone?: string;
+  eta?: string;
+  scheduledFor?: string;
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PHONE_PATTERN = /^\+?[0-9][0-9()\s.-]{6,19}$/;
+const LEGACY_TEMPLATES: Record<string, string> = {
+  jobConfirmation: "appointment_confirmation",
+  appointmentReminder: "appointment_reminder",
+  engineerEnRoute: "engineer_on_the_way",
+  runningLate: "eta_update",
+  jobCompleted: "job_completed",
+  quoteReady: "quote_sent",
+  invoiceSent: "invoice_sent",
+  paymentReminder: "payment_reminder",
+  custom: "custom_message",
+  customerMessage: "custom_message",
+};
 
-const MAX_BODY = 640;
-
-interface ConsumeRow {
-  outcome: string;
-  credits_charged: number;
-  balance_after: number | null;
-}
-
-function normalisePhone(raw: string): string {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("+")) return "+" + trimmed.slice(1).replace(/[^0-9]/g, "");
-  const digits = trimmed.replace(/[^0-9]/g, "");
-  // The product is US-first; a bare 10-digit number is a US number.
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return `+${digits}`;
-}
-
-interface TwilioOutcome {
-  configured: boolean;
-  accepted: boolean;
-  sid: string | null;
-  status: string | null;
-  segments: number | null;
-  fromNumber: string | null;
-  detail: string;
-}
-
-async function sendThroughTwilio(to: string, body: string): Promise<TwilioOutcome> {
-  const sid = Deno.env.get("TWILIO_ACCOUNT_SID");
-  const token = Deno.env.get("TWILIO_AUTH_TOKEN");
-  const messagingService = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
-  const fromNumber = Deno.env.get("TWILIO_FROM_NUMBER");
-
-  if (!sid || !token || (!messagingService && !fromNumber)) {
-    return {
-      configured: false,
-      accepted: false,
-      sid: null,
-      status: null,
-      segments: null,
-      fromNumber: null,
-      detail: "SMS is not configured for this deployment.",
-    };
-  }
-
-  const form = new URLSearchParams();
-  form.set("To", to);
-  form.set("Body", body);
-  if (messagingService) form.set("MessagingServiceSid", messagingService);
-  else if (fromNumber) form.set("From", fromNumber);
-
-  const statusCallback = Deno.env.get("TWILIO_STATUS_CALLBACK_URL");
-  if (statusCallback) form.set("StatusCallback", statusCallback);
-
-  try {
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Basic ${btoa(`${sid}:${token}`)}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: form.toString(),
-      },
-    );
-
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      return {
-        configured: true,
-        accepted: false,
-        sid: null,
-        status: null,
-        segments: null,
-        fromNumber: null,
-        detail: String(payload?.message ?? `Twilio rejected the message (${response.status}).`),
-      };
-    }
-
-    return {
-      configured: true,
-      accepted: true,
-      sid: String(payload.sid),
-      // "queued" or "accepted" — emphatically NOT "delivered".
-      status: String(payload.status ?? "queued"),
-      segments: payload.num_segments ? Number(payload.num_segments) : null,
-      fromNumber: payload.from ? String(payload.from) : null,
-      detail: "Handed to the carrier. Delivery is confirmed separately.",
-    };
-  } catch (err) {
-    return {
-      configured: true,
-      accepted: false,
-      sid: null,
-      status: null,
-      segments: null,
-      fromNumber: null,
-      detail: err instanceof Error ? err.message : "Could not reach the SMS provider.",
-    };
-  }
+function optionalUuid(value: string | undefined): string | null {
+  return value && UUID_PATTERN.test(value) ? value : null;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
   try {
     const { supabase } = await requireAuth(req);
     const request = (await req.json().catch(() => ({}))) as SendSmsRequest;
+    const action = request.action ?? "send";
 
-    const body = (request.body ?? "").trim();
-    if (!body) return jsonResponse({ error: "The message is empty." }, 400);
-    if (body.length > MAX_BODY) {
-      return jsonResponse({ error: `Keep the message under ${MAX_BODY} characters.` }, 400);
-    }
     if (!request.customerId || !UUID_PATTERN.test(request.customerId)) {
-      return jsonResponse({ error: "A customer is required." }, 400);
+      return jsonResponse({ sent: false, reason: "invalidRequest", error: "A customer is required." }, 400);
+    }
+    const templateKey = LEGACY_TEMPLATES[request.template ?? ""] ?? request.template ?? "custom_message";
+    if (!/^[a-z_]{3,40}$/.test(templateKey)) {
+      return jsonResponse({ sent: false, reason: "unknownTemplate", error: "Unknown message type." }, 400);
     }
 
-    // --- 2. Company from the session, not the payload ---------------------
-    const { data: companyId, error: companyError } = await supabase.rpc("current_company_id");
-    if (companyError || !companyId) return jsonResponse({ error: "No company for this user." }, 403);
-
-    // --- 3. Permission ----------------------------------------------------
+    const { data: companyId } = await supabase.rpc("current_company_id");
+    if (!companyId) return jsonResponse({ sent: false, reason: "notPermitted", error: "No company for this user." }, 403);
     const { data: canSend } = await supabase.rpc("has_perm", { p: "smsCreditsConsume" });
     if (canSend !== true) {
-      return jsonResponse({ error: "You do not have permission to send messages." }, 403);
+      return jsonResponse({ sent: false, reason: "notPermitted", error: outcomeMessage("notPermitted") }, 403);
     }
 
-    // --- 4. The customer, read under the CALLER'S OWN RLS -----------------
-    //
-    // This is the cross-company gate. The row simply does not exist for a
-    // caller in another company, so a borrowed customer id returns "not found"
-    // rather than someone else's phone number.
-    const { data: customer, error: customerError } = await supabase
-      .from("customers")
-      .select("id,name,company_id")
-      .eq("id", request.customerId)
-      .maybeSingle();
-
-    if (customerError || !customer) {
-      return jsonResponse({ error: "That customer could not be found." }, 404);
+    // Tenancy under the caller's own RLS.
+    const { data: customer } = await supabase.from("customers").select("id, company_id")
+      .eq("id", request.customerId).maybeSingle();
+    if (!customer || customer.company_id !== companyId) {
+      return jsonResponse({ sent: false, reason: "unknownCustomer", error: outcomeMessage("unknownCustomer") }, 404);
     }
-    if (customer.company_id !== companyId) {
-      // Belt and braces: RLS should already have made this unreachable.
-      console.warn("[sms-send] refused a cross-company customer reference");
-      return jsonResponse({ error: "That customer could not be found." }, 404);
+    const jobId = optionalUuid(request.jobId);
+    let quoteId = optionalUuid(request.quoteId);
+    let invoiceId = optionalUuid(request.invoiceId);
+
+    // Quote / invoice messages sent from a job use THAT job's own quote or
+    // latest invoice, looked up under the caller's RLS (a role that can't read
+    // invoices simply finds none, and the render refuses).
+    const quoteKinds = ["quote_sent", "quote_reminder", "quote_accepted", "quote_declined"];
+    const invoiceKinds = ["invoice_sent", "payment_reminder", "overdue_reminder", "payment_received"];
+    if (jobId && !quoteId && quoteKinds.includes(templateKey)) {
+      const { data: job } = await supabase.from("jobs").select("quote_id, company_id").eq("id", jobId).maybeSingle();
+      if (job && job.company_id === companyId && job.quote_id) quoteId = job.quote_id;
     }
-
-    // Recipient must be one of that customer's own contacts.
-    const { data: contacts } = await supabase
-      .from("customer_contacts")
-      .select("phone,is_primary")
-      .eq("customer_id", customer.id)
-      .order("is_primary", { ascending: false });
-
-    const known = (contacts ?? [])
-      .map((c: { phone: string | null }) => (c.phone ?? "").trim())
-      .filter((p: string) => p.length > 0);
-
-    let recipient = request.phone?.trim() ?? known[0] ?? "";
-    if (request.phone) {
-      const wanted = normalisePhone(request.phone);
-      const matches = known.some((p: string) => normalisePhone(p) === wanted);
-      if (!matches) {
-        return jsonResponse({
-          error: "That number is not on the customer's record. Add it as a contact first.",
-        }, 400);
+    if (jobId && !invoiceId && invoiceKinds.includes(templateKey)) {
+      const { data: inv } = await supabase.from("invoices").select("id, company_id").eq("job_id", jobId)
+        .neq("status", "void").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (inv && inv.company_id === companyId) invoiceId = inv.id;
+    }
+    for (const [table, id, reason] of [["jobs", jobId, "unknownJob"], ["quotes", quoteId, "unknownQuote"],
+      ["invoices", invoiceId, "unknownInvoice"]] as const) {
+      if (!id) continue;
+      const { data: row } = await supabase.from(table).select("id, company_id, customer_id").eq("id", id).maybeSingle();
+      if (!row || row.company_id !== companyId || row.customer_id !== customer.id) {
+        return jsonResponse({ sent: false, reason, error: outcomeMessage(reason) }, 404);
       }
-      recipient = request.phone;
     }
 
-    if (!recipient || !PHONE_PATTERN.test(recipient)) {
-      return jsonResponse({ error: "This customer has no usable mobile number." }, 400);
+    const recipient = await resolveRecipient(supabase, companyId, customer.id, request.phone);
+    if (!recipient) {
+      return jsonResponse({ sent: false, reason: "invalidRecipient", error: outcomeMessage("invalidRecipient") }, 422);
     }
 
-    const toNumber = normalisePhone(recipient);
     const admin = createAdminClient();
-
-    // --- 5. The delivery record, company-stamped --------------------------
-    const { data: notification, error: notificationError } = await admin
-      .from("notifications")
-      .insert({
-        company_id: companyId,
-        channel: "sms",
-        status: "queued",
-        template: request.template ?? "customerMessage",
-        recipient: toNumber,
-        to_number: toNumber,
-        body,
-        customer_id: customer.id,
-        job_id: request.jobId && UUID_PATTERN.test(request.jobId) ? request.jobId : null,
-        invoice_id: request.invoiceId && UUID_PATTERN.test(request.invoiceId) ? request.invoiceId : null,
-      })
-      .select("id")
-      .single();
-
-    if (notificationError || !notification) {
-      console.error("[sms-send] could not create the delivery record", notificationError?.message);
-      return jsonResponse({ error: "Could not queue the message." }, 500);
-    }
-
-    // --- 6. Atomic credit consumption -------------------------------------
-    //
-    // Runs with the CALLER'S client so the function's own
-    // current_company_id()/has_perm() checks apply to the real user.
-    const { data: consumeData, error: consumeError } = await supabase.rpc("consume_sms_credit", {
-      p_notification: notification.id,
-      p_customer: customer.id,
-      p_job: request.jobId && UUID_PATTERN.test(request.jobId) ? request.jobId : null,
-      p_credits: null,
+    const rendered = await renderMessage(admin, {
+      companyId, templateKey, customerId: customer.id, jobId, quoteId, invoiceId, recipient,
+      eta: request.eta ?? null, body: typeof request.body === "string" ? request.body : null,
     });
-
-    if (consumeError) {
-      await admin.from("notifications").update({
-        status: "failed",
-        failure_reason: "Credit could not be reserved.",
-        updated_at: new Date().toISOString(),
-      }).eq("id", notification.id);
-      console.error("[sms-send] credit reservation failed", consumeError.message);
-      return jsonResponse({ error: "Could not reserve an SMS credit." }, 500);
+    if (!rendered.ok) {
+      return jsonResponse({ sent: false, reason: "templateInvalid", error: rendered.error, missing: rendered.missing ?? [] }, 422);
     }
 
-    const consumed = (Array.isArray(consumeData) ? consumeData[0] : consumeData) as ConsumeRow | null;
+    const { data: segData } = await supabase.rpc("sms_segment_info", { p_body: rendered.body });
+    const seg = firstRow<{ segments: number; encoding: string }>(segData);
+    const { data: readiness } = await supabase.rpc("sms_send_readiness", { p_to: recipient });
 
-    if (!consumed || consumed.outcome !== "consumed") {
-      await admin.from("notifications").update({
-        status: "failed",
-        failure_reason: consumed?.outcome ?? "Credit could not be reserved.",
-        updated_at: new Date().toISOString(),
-      }).eq("id", notification.id);
-
-      if (consumed?.outcome === "insufficientCredits") {
-        // NOT a send, NOT an error state — a clear business answer, with the
-        // balance left exactly where it was.
-        return jsonResponse({
-          sent: false,
-          reason: "insufficientCredits",
-          balance: consumed.balance_after ?? 0,
-          error: "You do not have enough SMS credit to send this message. Buy more credits to continue.",
-        }, 402);
-      }
-
+    if (action === "preview") {
       return jsonResponse({
-        sent: false,
-        reason: consumed?.outcome ?? "unknown",
-        error: "The message could not be sent.",
-      }, 400);
-    }
-
-    // --- 7. Twilio --------------------------------------------------------
-    const result = await sendThroughTwilio(toNumber, body);
-
-    // --- 8. Record the real outcome ---------------------------------------
-    if (!result.accepted) {
-      // The provider never took it, so the credit goes back. Idempotent, so a
-      // retry cannot refund twice.
-      const { data: refund } = await admin.rpc("refund_sms_credit", {
-        p_notification: notification.id,
-        p_reason: result.configured ? "provider rejected" : "provider not configured",
+        preview: true, body: rendered.body, recipient, segments: seg?.segments ?? 1, encoding: seg?.encoding ?? "GSM-7",
+        creditsNeeded: seg?.segments ?? 1, blocker: readiness ?? null,
+        blockerMessage: readiness ? outcomeMessage(String(readiness)) : null,
       });
-      const refunded = (Array.isArray(refund) ? refund[0] : refund) as
-        | { balance_after: number | null }
-        | null;
-
-      await admin.from("notifications").update({
-        status: "failed",
-        failure_reason: result.detail,
-        provider_error: result.detail,
-        updated_at: new Date().toISOString(),
-      }).eq("id", notification.id);
-
-      return jsonResponse({
-        sent: false,
-        configured: result.configured,
-        reason: result.configured ? "providerRejected" : "notConfigured",
-        balance: refunded?.balance_after ?? consumed.balance_after,
-        error: result.detail,
-      }, result.configured ? 502 : 503);
     }
 
-    await admin.from("notifications").update({
-      // "accepted" — the carrier has it. Delivery is a separate, later fact.
-      status: "sent",
-      provider_reference: result.sid,
-      provider_status: result.status,
-      from_number: result.fromNumber,
-      segments: result.segments,
-      sent_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", notification.id);
+    if (action === "schedule") {
+      const when = request.scheduledFor ? new Date(request.scheduledFor) : null;
+      if (!when || Number.isNaN(when.getTime())) {
+        return jsonResponse({ sent: false, reason: "invalidTime", error: "Pick a time for the message." }, 422);
+      }
+      const { data: scheduledId, error } = await supabase.rpc("schedule_sms", {
+        p_customer: customer.id, p_job: jobId, p_quote: quoteId, p_invoice: invoiceId, p_template: templateKey,
+        p_body: rendered.body, p_to: recipient, p_scheduled_for: when.toISOString(),
+      });
+      if (error) {
+        const code = String(error.message ?? "");
+        return jsonResponse({
+          sent: false, reason: "scheduleRefused",
+          error: ["optedOut", "notSetUp", "noSubscription", "companyClosed", "suspended"].includes(code)
+            ? outcomeMessage(code) : code || "The message couldn't be scheduled.",
+        }, 422);
+      }
+      return jsonResponse({ scheduled: true, scheduledId, scheduledFor: when.toISOString(), segments: seg?.segments ?? 1 });
+    }
 
+    const { data: reserveData, error: reserveError } = await supabase.rpc("reserve_sms_send", {
+      p_customer: customer.id, p_job: jobId, p_quote: quoteId, p_invoice: invoiceId,
+      p_to: recipient, p_body: rendered.body, p_template: templateKey,
+    });
+    if (reserveError) {
+      console.error("[sms-send] reservation failed", reserveError.code);
+      return jsonResponse({ sent: false, reason: "reserveFailed", error: "Could not reserve SMS credit. Nothing was sent." }, 500);
+    }
+    const reservation = firstRow<Reservation>(reserveData);
+    if (!reservation || reservation.outcome !== "reserved") {
+      const outcome = reservation?.outcome ?? "unknown";
+      return jsonResponse({
+        sent: false,
+        reason: outcome === "insufficientCredits" ? "insufficientCredits" : outcome,
+        balance: reservation?.balance_after ?? null,
+        segments: reservation?.segments ?? seg?.segments ?? null,
+        error: outcomeMessage(outcome, { needed: reservation?.segments ?? seg?.segments ?? undefined,
+          balance: reservation?.balance_after ?? undefined }),
+      }, outcome === "insufficientCredits" ? 402 : 422);
+    }
+
+    const delivery = await deliverReservation(admin, companyId, reservation, rendered.body);
+    if (!delivery.sent) {
+      return jsonResponse({
+        sent: false, reason: "providerRejected", balance: delivery.balance, error: delivery.detail,
+        messageId: reservation.notification_id,
+      }, 502);
+    }
     return jsonResponse({
       sent: true,
-      messageId: notification.id,
-      providerReference: result.sid,
-      status: result.status,
-      creditsCharged: consumed.credits_charged,
-      balance: consumed.balance_after,
-      detail: result.detail,
+      messageId: reservation.notification_id,
+      conversationId: reservation.conversation_id,
+      providerReference: delivery.providerReference,
+      status: "sent",
+      creditsCharged: reservation.credits_charged,
+      segments: reservation.segments,
+      balance: delivery.balance,
+      detail: delivery.detail,
     });
   } catch (err) {
     if (err instanceof AuthError) return jsonResponse({ error: "Unauthorized" }, 401);
-    console.error("[sms-send] unexpected failure", err instanceof Error ? err.message : err);
-    return jsonResponse({ error: "Internal server error" }, 500);
+    console.error("[sms-send] unexpected failure", err instanceof Error ? err.message : "unknown");
+    return jsonResponse({ sent: false, error: "Something went wrong. Nothing was sent and no credit was used." }, 500);
   }
 });

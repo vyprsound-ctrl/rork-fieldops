@@ -98,7 +98,7 @@ struct SmsCreditsView: View {
 
             Text(overview.isEmpty
                  ? "You have no credits, so messages cannot be sent. Buy a bundle to start again."
-                 : "One credit sends one message to one customer.")
+                 : "One credit sends one text segment (up to 160 characters, or 70 with emoji).")
                 .font(.footnote)
                 .foregroundStyle(overview.isEmpty ? Theme.amber : Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -134,7 +134,7 @@ struct SmsCreditsView: View {
                                     .font(.title3.weight(.bold))
                                     .monospacedDigit()
                                     .foregroundStyle(Theme.ink)
-                                Text("messages")
+                                Text("segments")
                                     .font(.caption)
                                     .foregroundStyle(Theme.meta)
                                 Divider().padding(.vertical, 2)
@@ -157,9 +157,9 @@ struct SmsCreditsView: View {
                 }
 
                 // The smallest bundle is 25. Stating it removes the worry that
-                // a small business is about to be pushed into a 500-message
+                // a small business is about to be pushed into a 500-credit
                 // minimum it will never use.
-                Text("Bundles start at 25 messages — there is no minimum order. Payment opens in your browser, and credits appear here once it completes.")
+                Text("Bundles start at 25 credits — there is no minimum order. Payment opens in your browser, and credits appear here once it completes.")
                     .font(.caption)
                     .foregroundStyle(Theme.meta)
                     .fixedSize(horizontal: false, vertical: true)

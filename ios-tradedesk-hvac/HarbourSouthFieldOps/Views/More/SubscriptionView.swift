@@ -309,7 +309,7 @@ struct SubscriptionView: View {
     private func legalFooter(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Subscriptions are billed by Apple to your Apple ID and renew automatically at the end of each period unless cancelled at least 24 hours before it ends. A free trial, where offered, turns into the paid plan you chose when it ends unless you cancel first. Manage or cancel any time in Settings → Apple ID → Subscriptions.")
-            LegalLinksView()
+            LegalLinksView(documents: [.privacyPolicy, .termsOfService], includeAppleEULA: true)
         }
         .font(.caption2)
         .foregroundStyle(Theme.meta)

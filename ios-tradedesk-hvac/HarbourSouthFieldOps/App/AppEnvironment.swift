@@ -114,6 +114,11 @@ final class AppEnvironment {
     /// handset never keeps reporting.
     let travelTracker = TravelTracker()
 
+    /// App-wide unread customer replies and office messages: tab badges, the
+    /// app icon badge and the in-app "New message" banner. Reset on sign-out
+    /// so one person's messages never show for the next.
+    let communications = CommunicationsMonitor()
+
     /// Positioning — fixtures for the development stack, Core Location for the
     /// production one. Paired with the gateway below so a real position is only
     /// ever taken when there is a real database to record it against.
@@ -417,6 +422,7 @@ final class AppEnvironment {
     }
 
     func signOut() {
+        communications.reset()
         session = nil
         signInError = nil
         pendingInvitationLink = nil
@@ -542,6 +548,7 @@ final class AppEnvironment {
 
     func signOutOfProduction() async {
         guard let productionAuth else { return }
+        communications.reset()
 
         // The device registration goes first, while the session that owns it is
         // still valid. Removing it afterwards would be a write with no

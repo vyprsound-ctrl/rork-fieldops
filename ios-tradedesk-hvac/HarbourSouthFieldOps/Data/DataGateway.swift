@@ -375,6 +375,50 @@ protocol DataGateway: Sendable {
     /// granted once Stripe confirms the money arrived — never here.
     func purchaseSmsCredits(session: TenantSession, bundleID: String?, credits: Int?) async throws -> URL
 
+    // MARK: Communications & company SMS
+    //
+    // Requirements with defaults in `CommunicationsWorkflow.swift` (the
+    // development simulation), overridden by the Supabase gateway. No member
+    // carries a company, Twilio account, Messaging Service, number SID or
+    // phone number the server would trust: all of that is resolved from the
+    // authenticated session server-side.
+
+    /// The company's SMS setup, in the six states an owner ever sees.
+    func messagingSetupStatus(session: TenantSession) async throws -> MessagingSetupStatus
+    /// Available local numbers. Owner only.
+    func searchSmsNumbers(session: TenantSession, areaCode: String, contains: String?) async throws -> [AvailableSmsNumber]
+    /// Submits the business's own details and chosen number. Owner only.
+    func startSmsSetup(session: TenantSession, details: SmsBusinessDetailsDraft, phoneNumber: String) async throws -> SmsSetupResult
+    /// Picks a replacement when the chosen number was taken. Owner only.
+    func chooseSmsNumber(session: TenantSession, phoneNumber: String) async throws -> SmsSetupResult
+    /// Re-checks registration progress, or resumes after a fixable failure.
+    func refreshSmsSetup(session: TenantSession, retry: Bool) async throws -> SmsSetupResult
+    /// Owner confirms turning SMS off and releasing the number.
+    func releaseSmsNumber(session: TenantSession) async throws -> MessagingSetupStatus
+
+    /// Unread customer replies and office messages for the global indicator.
+    func communicationsUnread(session: TenantSession) async throws -> CommunicationsUnread
+    func smsConversations(session: TenantSession) async throws -> [SmsConversationRow]
+    func smsConversation(session: TenantSession, conversationID: String) async throws -> SmsConversationDetail
+    func markSmsConversationRead(session: TenantSession, conversationID: String) async throws
+    /// Every SMS to and from one customer, oldest first.
+    func customerCommunications(session: TenantSession, customerID: String) async throws -> [SmsThreadMessage]
+    /// Every SMS about one job, oldest first.
+    func jobCommunications(session: TenantSession, jobID: String) async throws -> [SmsThreadMessage]
+    func scheduledMessages(session: TenantSession) async throws -> [ScheduledMessageRow]
+    func cancelScheduledMessage(session: TenantSession, id: String) async throws
+    func sentMessages(session: TenantSession) async throws -> [SentMessageRow]
+    func smsTemplates(session: TenantSession) async throws -> [SmsTemplateEntry]
+    func saveSmsTemplate(session: TenantSession, kind: SmsMessageKind, body: String) async throws
+    func resetSmsTemplate(session: TenantSession, kind: SmsMessageKind) async throws
+    func setSmsAutomation(session: TenantSession, kind: SmsMessageKind, enabled: Bool) async throws
+    func smsUsage(session: TenantSession) async throws -> SmsUsageSummary
+    /// Renders the message server-side and counts its segments. Charges nothing.
+    func previewSms(session: TenantSession, draft: SmsComposeDraft) async throws -> SmsPreview
+    /// Sends now, or schedules when `scheduledFor` is set. Credits are only
+    /// consumed once the message is rendered and its segment count known.
+    func dispatchSms(session: TenantSession, draft: SmsComposeDraft, scheduledFor: Date?) async throws -> SmsDispatchOutcome
+
     // Recurring service
     func recurringServices(session: TenantSession) async throws -> RecurringServiceBoard
     func saveRecurringService(session: TenantSession, draft: RecurringServiceDraft) async throws -> String

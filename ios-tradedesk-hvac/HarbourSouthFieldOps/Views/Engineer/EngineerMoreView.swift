@@ -78,6 +78,15 @@ struct EngineerMoreView: View {
                 }
                 .accessibilityIdentifier("engineer.deleteAccount")
 
+                NavigationLink {
+                    LegalView()
+                } label: {
+                    Label("Legal", systemImage: "building.columns")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .accessibilityIdentifier("engineer.legal")
+
                 LegalLinksView()
 
                 if env.isDevelopmentSession { SimulatedServicesBanner() }

@@ -101,7 +101,8 @@ struct CustomerDetailView: View {
         .sheet(isPresented: $isMessaging) {
             SendSmsSheet(
                 customerID: customerID,
-                customerName: viewModel.state.value?.name ?? "this customer"
+                customerName: viewModel.state.value?.name ?? "this customer",
+                context: .customer
             )
         }
         .sheet(item: $editingCustomer) { profile in
@@ -190,6 +191,14 @@ struct CustomerDetailView: View {
                 sitesSection(profile)
                 equipmentSection(profile)
                 jobsSection(profile)
+                CommunicationHistorySection(
+                    title: "Communications",
+                    customerID: customerID,
+                    customerName: profile.name,
+                    context: .customer,
+                    quickActions: [.customerFollowUp],
+                    hasPhone: profile.contacts.contains { ($0.phone?.tidied.isEmpty == false) }
+                )
                 if !profile.quotes.isEmpty {
                     documentsSection(title: "Quotes", documents: profile.quotes, kind: .quote)
                 }

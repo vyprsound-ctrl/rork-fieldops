@@ -887,6 +887,9 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         let confirm = app.buttons["deleteAccount.confirm"]
         require(confirm, "the delete button")
         XCTAssertTrue(confirm.label.contains("close workspace"), "The sole owner must be told the workspace closes. Saw: \(confirm.label)")
+        // The consequences list grew (SMS number retention), so the button can
+        // sit below the fold on smaller screens.
+        _ = scrollTo(confirm)
         forceTap(confirm)
         require(app.alerts["Close your company's workspace?"], "the second, explicit confirmation")
         app.alerts.buttons["Cancel"].tap()
@@ -1056,5 +1059,139 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
                 "A field worker must not see '\(forbidden)' in More"
             )
         }
+        XCTAssertFalse(app.staticTexts["Communications"].exists, "A field worker must not see the office inbox")
+        XCTAssertFalse(app.staticTexts["SMS & Messaging"].exists, "A field worker must not administer SMS")
+    }
+
+    // MARK: - Legal
+
+    /// More → Legal opens all four in-app documents. None says "coming soon".
+    func testMoreLegalOpensAllFourDocuments() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Legal")
+        require(app.navigationBars["Legal"], "the Legal screen")
+        for document in ["privacyPolicy", "termsOfService", "smsTerms", "accountDeletion"] {
+            let row = app.buttons["legal.row.\(document)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 10) || scrollTo(row), "Legal must list \(document)")
+            forceTap(row)
+            require(app.staticTexts["legal.document.title"], "the \(document) document")
+            XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'coming soon'")).firstMatch.exists)
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            require(app.navigationBars["Legal"], "back on Legal")
+        }
+    }
+
+    /// The old placeholder is gone everywhere it used to be.
+    func testNoComingSoonPrivacyPlaceholder() throws {
+        signIn(as: "Tom Ellison")
+        openTab("More")
+        _ = scrollTo(app.buttons["more.deleteAccount"])
+        XCTAssertFalse(app.staticTexts["legal.privacy.unavailable"].exists)
+        let privacy = app.buttons["legal.privacy"]
+        XCTAssertTrue(privacy.waitForExistence(timeout: 10) || scrollTo(privacy), "Privacy Policy must be reachable from More")
+        forceTap(privacy)
+        require(app.staticTexts["legal.document.title"], "the in-app Privacy Policy")
+    }
+
+    /// Delete Account keeps its legal access.
+    func testDeleteAccountOffersLegalDocuments() throws {
+        signIn(as: "Tom Ellison")
+        openTab("More")
+        let row = app.buttons["more.deleteAccount"]
+        _ = scrollTo(row)
+        forceTap(row)
+        require(app.navigationBars["Delete account"], "the Delete account screen")
+        let terms = app.buttons["legal.terms"]
+        XCTAssertTrue(terms.waitForExistence(timeout: 10) || scrollTo(terms), "Terms must be reachable from Delete account")
+    }
+
+    /// The sign-in screen offers the documents before anyone has an account.
+    func testSignInOffersLegalDocuments() throws {
+        let privacy = app.buttons["signin.legal.privacyPolicy"]
+        XCTAssertTrue(privacy.waitForExistence(timeout: 20), "Sign-in must link the Privacy Policy")
+        XCTAssertTrue(scrollTo(privacy, attempts: 15), "The Privacy Policy link must be tappable")
+        privacy.tap()
+        require(app.staticTexts["legal.document.title"], "the Privacy Policy sheet")
+    }
+
+    // MARK: - Communications and SMS
+
+    /// Owner reaches Communications and every tab of it.
+    func testOwnerCommunicationsHubHasAllSections() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Communications")
+        require(app.navigationBars["Communications"], "the Communications hub")
+        for tab in ["inbox", "scheduled", "sent", "templates", "automations", "usage"] {
+            let button = app.buttons["comms.tab.\(tab)"]
+            require(button, "the \(tab) tab")
+            forceTap(button)
+        }
+        forceTap(app.buttons["comms.tab.templates"])
+        let template = app.buttons["comms.template.appointment_confirmation"]
+        XCTAssertTrue(template.waitForExistence(timeout: 15), "Templates must list Appointment Confirmation")
+        forceTap(template)
+        require(app.textViews["template.editor"], "the template editor")
+    }
+
+    /// The automation list covers the whole operational set.
+    func testAutomationsListOperationalMessages() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("Communications")
+        forceTap(app.buttons["comms.tab.automations"])
+        for key in ["appointment_confirmation", "engineer_on_the_way"] {
+            let toggle = app.switches["comms.automation.\(key)"]
+            XCTAssertTrue(toggle.waitForExistence(timeout: 15) || scrollTo(toggle), "Automation \(key) must be listed")
+        }
+    }
+
+    /// SMS & Messaging shows a friendly status, never provider wording.
+    func testOwnerSeesSmsSetupStatus() throws {
+        signIn(as: "Tom Ellison")
+        openMoreSection("SMS & Messaging")
+        require(app.navigationBars["SMS & Messaging"], "the SMS & Messaging screen")
+        let title = app.staticTexts["sms.status.title"]
+        require(title, "the status title")
+        XCTAssertTrue(["SMS Not Set Up", "Setting Up SMS", "Waiting for Approval", "SMS Ready", "SMS Needs Attention", "SMS Suspended"]
+            .contains(title.label), "Unexpected status wording: \(title.label)")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS[c] 'twilio'")).firstMatch.exists,
+                       "The owner must not be shown provider internals")
+    }
+
+    /// A dispatcher texts customers but does not administer SMS.
+    func testDispatcherHasCommunicationsButNotSmsSetup() throws {
+        signIn(as: "Carla Bell")
+        openTab("More")
+        XCTAssertTrue(app.buttons["more.section.communications"].waitForExistence(timeout: 15), "Dispatcher must reach Communications")
+        XCTAssertFalse(app.buttons["more.section.smsMessaging"].exists, "Dispatcher must not administer SMS setup")
+    }
+
+    /// Accounts has no customer inbox.
+    func testAccountsHasNoCustomerInbox() throws {
+        signIn(as: "Joan Petrov")
+        openTab("More")
+        require(app.buttons["more.section.legal"], "Legal for accounts", timeout: 20)
+        XCTAssertFalse(app.buttons["more.section.communications"].exists, "Accounts must not see customer conversations")
+    }
+
+    /// A job offers Messages with the operational quick actions.
+    func testJobOffersMessageCustomer() throws {
+        signIn(as: "Tom Ellison")
+        openTab("Jobs")
+        let job = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "RTU maintenance")).firstMatch
+        XCTAssertTrue(job.waitForExistence(timeout: 20) || scrollTo(job), "Job J-1043 (RTU maintenance) must be listed")
+        _ = scrollTo(job)
+        forceTap(job)
+        let send = app.buttons["history.sendSms"]
+        XCTAssertTrue(send.waitForExistence(timeout: 15), "A job must offer Message Customer")
+        // The job's workflow bar is pinned to the bottom; lift the chip well
+        // clear of it so the tap can only land on Message Customer.
+        for _ in 0..<12 where !(send.isHittable && send.frame.maxY < app.frame.maxY * 0.6) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(send.isHittable, "Message Customer must be tappable")
+        send.tap()
+        require(app.textViews["sms.compose.body"], "the SMS composer")
+        XCTAssertTrue(app.staticTexts["sms.compose.credits"].waitForExistence(timeout: 10),
+                      "The composer must show the credit cost before sending")
     }
 }

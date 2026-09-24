@@ -42,6 +42,9 @@ struct SignInView: View {
                     #else
                     ProductionSignInView()
                     #endif
+
+                    LegalSheetLinks()
+                        .padding(.top, 8)
                 }
                 .padding(Theme.margin)
             }

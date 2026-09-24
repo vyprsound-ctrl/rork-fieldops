@@ -210,7 +210,13 @@ final class PushNotificationDelegate: NSObject, UNUserNotificationCenterDelegate
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .list]
+        // Let the global message indicator refresh immediately, whichever
+        // screen is open. The OS banner and sound are shown here, so the
+        // in-app banner is not repeated for the same message.
+        await MainActor.run {
+            NotificationCenter.default.post(name: .communicationsPushReceived, object: nil)
+        }
+        return [.banner, .sound, .badge, .list]
     }
 
     nonisolated func userNotificationCenter(

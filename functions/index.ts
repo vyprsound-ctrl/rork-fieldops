@@ -145,6 +145,96 @@ function formatDate(value: string | null, timeZone: string): string {
   }
 }
 
+// =============================================================================
+// Customer-facing quote page (linked from "Send Quote by SMS").
+//
+// The token is the only key. The data comes from `quote_public_view`, a
+// SECURITY DEFINER function granted to anon that returns ONLY what a customer
+// should see: the business's name and contact details, the quote number,
+// title, scope, lines and totals. No internal ids, staff, cost or margin data.
+// =============================================================================
+
+interface QuoteView {
+  ok: boolean;
+  company?: { name: string; phone: string | null; email: string | null; address: string | null };
+  quote?: {
+    number: string; title: string; scope: string; status: string; valid_until: string | null;
+    subtotal: number; tax: number; total: number; currency: string; customer: string | null;
+  };
+  lines?: Array<{ description: string; quantity: number; unit_price: number; line_total: number }>;
+}
+
+async function quotePage(token: string, env: Env): Promise<Response> {
+  const base = (env.EXPO_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  const anonKey = (env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
+  if (!base || !anonKey) return notFoundPage();
+  let data: QuoteView;
+  try {
+    const response = await fetch(`${base}/rest/v1/rpc/quote_public_view`, {
+      method: "POST",
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ p_token: token }),
+    });
+    if (!response.ok) return notFoundPage();
+    data = (await response.json()) as QuoteView;
+  } catch (err) {
+    console.error("[quote] could not resolve the quote", err instanceof Error ? err.message : err);
+    return notFoundPage();
+  }
+  if (!data?.ok || !data.quote || !data.company) return notFoundPage();
+
+  const q = data.quote;
+  const c = data.company;
+  const statusLabel: Record<string, string> = {
+    viewed: "Awaiting your decision", accepted: "Accepted", declined: "Declined", expired: "Expired",
+  };
+  const rows = (data.lines ?? []).map((l) =>
+    `<tr><td>${escapeHtml(l.description)}<div class="qty">${escapeHtml(String(Number(l.quantity)))} × ${
+      escapeHtml(money(l.unit_price, q.currency))}</div></td><td class="amt">${escapeHtml(money(l.line_total, q.currency))}</td></tr>`
+  ).join("");
+  const contact = [c.phone ? `Call ${c.phone}` : null, c.email].filter(Boolean).join(" · ");
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Quote ${escapeHtml(q.number)} from ${escapeHtml(c.name)}</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin:0; background:#f3f4f7; padding:20px 14px 40px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#15161a; }
+  .wrap { max-width:560px; margin:0 auto; }
+  .card { background:#fff; border-radius:18px; padding:22px 20px; margin-bottom:14px; box-shadow:0 1px 3px rgba(16,18,27,.08),0 12px 32px rgba(16,18,27,.05); }
+  .biz { display:flex; gap:12px; align-items:center; }
+  .mark { width:44px; height:44px; border-radius:11px; background:#14367A; color:#fff; font-weight:700; font-size:20px; display:grid; place-items:center; }
+  h1 { font-size:17px; margin:0; } .sub { color:#606374; font-size:13px; margin-top:2px; }
+  .num { color:#606374; font-size:14px; margin:0 0 4px; } .title { font-size:20px; font-weight:700; margin:0 0 10px; }
+  .pill { display:inline-block; background:#FDF1E7; color:#A4480C; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600; }
+  .scope { white-space:pre-wrap; color:#33364a; font-size:15px; line-height:1.55; margin:14px 0 0; }
+  table { width:100%; border-collapse:collapse; font-size:15px; } td { padding:10px 0; border-bottom:1px solid #eceef3; vertical-align:top; }
+  .qty { color:#8a8d9b; font-size:13px; margin-top:2px; } .amt { text-align:right; white-space:nowrap; padding-left:12px; }
+  .tot td { border:0; padding:4px 0; color:#606374; } .grand td { font-size:20px; font-weight:700; color:#15161a; padding-top:10px; }
+  .foot { color:#8a8d9b; font-size:12px; text-align:center; margin-top:18px; line-height:1.5; }
+</style></head>
+<body><div class="wrap">
+<div class="card"><div class="biz"><div class="mark">${escapeHtml((c.name.trim()[0] ?? "·").toUpperCase())}</div>
+<div><h1>${escapeHtml(c.name)}</h1>${c.address ? `<div class="sub">${escapeHtml(c.address)}</div>` : ""}</div></div></div>
+<div class="card">
+<p class="num">Quote ${escapeHtml(q.number)}${q.customer ? ` · for ${escapeHtml(q.customer)}` : ""}</p>
+<p class="title">${escapeHtml(q.title || "Your quote")}</p>
+<span class="pill">${escapeHtml(statusLabel[q.status] ?? "Quote")}</span>
+${q.valid_until ? `<span class="sub" style="margin-left:8px">Valid until ${escapeHtml(formatDate(q.valid_until, "UTC"))}</span>` : ""}
+${q.scope ? `<p class="scope">${escapeHtml(q.scope)}</p>` : ""}
+</div>
+<div class="card"><table>${rows}
+<tr class="tot"><td>Subtotal</td><td class="amt">${escapeHtml(money(q.subtotal, q.currency))}</td></tr>
+<tr class="tot"><td>Tax</td><td class="amt">${escapeHtml(money(q.tax, q.currency))}</td></tr>
+<tr class="grand"><td>Total</td><td class="amt">${escapeHtml(money(q.total, q.currency))}</td></tr></table></div>
+<div class="card" style="text-align:center"><p style="margin:0 0 4px;font-weight:600">Ready to go ahead, or have a question?</p>
+<p class="sub" style="margin:0">Reply to the text message you received${contact ? `, or ${escapeHtml(contact)}` : ""}.</p></div>
+<p class="foot">This quote was sent by ${escapeHtml(c.name)} using Harbour South FieldOps.</p>
+</div></body></html>`;
+  return new Response(html, { status: 200, headers: pageHeaders });
+}
+
 function notFoundPage(): Response {
   const html = `<!doctype html>
 <html lang="en"><head>
@@ -902,6 +992,15 @@ export default {
         return new Response("Method not allowed", { status: 405, headers: pageHeaders });
       }
       return stripeLandingPage(url.pathname.endsWith("refresh") ? "refresh" : "return");
+    }
+
+    if (url.pathname === "/q") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method not allowed", { status: 405, headers: pageHeaders });
+      }
+      const token = url.searchParams.get("t") ?? "";
+      if (!TOKEN_PATTERN.test(token)) return notFoundPage();
+      return quotePage(token, env);
     }
 
     if (url.pathname === "/i") {

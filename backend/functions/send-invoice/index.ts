@@ -1,4 +1,5 @@
-import { AuthError, corsHeaders, jsonResponse, requireAuth } from "../_shared/auth.ts";
+import { AuthError, corsHeaders, createAdminClient, jsonResponse, requireAuth } from "../_shared/auth.ts";
+import { deliverReservation, firstRow, normalisePhone, outcomeMessage, type Reservation } from "../_shared/sms.ts";
 
 /// Sends an invoice to the customer by email, SMS or both.
 ///
@@ -85,8 +86,6 @@ const PAGE_BASE_FALLBACK = "https://field-ops-backend.rork.app";
 
 const NOT_CONFIGURED_EMAIL =
   "Email provider not configured — nothing was delivered. Set RESEND_API_KEY and RESEND_FROM_EMAIL.";
-const NOT_CONFIGURED_SMS =
-  "SMS provider not configured — nothing was delivered. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER.";
 
 function money(value: string | number | null, currency: string): string {
   const amount = Number(value ?? 0);
@@ -189,39 +188,45 @@ async function sendEmail(
   }
 }
 
-async function sendSms(
+/// SMS for an invoice goes through the SAME path as every other customer SMS:
+/// one reservation (permission, subscription, the company's own messaging
+/// account, opt-out, segments, credit — under the company lock), then the
+/// company's own Twilio subaccount → Messaging Service → dedicated number.
+/// There is no global Harbour South sender any more.
+async function sendInvoiceSms(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  companyId: string,
+  customerId: string,
+  invoiceId: string,
   to: string,
   body: string,
-): Promise<{ status: "sent" | "failed"; configured: boolean; detail: string; reference?: string }> {
-  const sid = Deno.env.get("TWILIO_ACCOUNT_SID");
-  const authToken = Deno.env.get("TWILIO_AUTH_TOKEN");
-  const from = Deno.env.get("TWILIO_FROM_NUMBER");
-  if (!sid || !authToken || !from) {
-    return { status: "failed", configured: false, detail: NOT_CONFIGURED_SMS };
+): Promise<ChannelOutcome> {
+  const recipient = normalisePhone(to) ?? to;
+  const { data, error } = await supabase.rpc("reserve_sms_send", {
+    p_customer: customerId, p_job: null, p_quote: null, p_invoice: invoiceId,
+    p_to: recipient, p_body: body, p_template: "invoice_sent",
+  });
+  const reservation = firstRow<Reservation>(data);
+  if (error || !reservation) {
+    console.error("[send-invoice] sms reservation failed", error?.code);
+    return { channel: "sms", recipient, status: "failed", configured: true,
+      detail: "Couldn't record this text, so nothing was sent.", creditsCharged: 0, smsCreditBalance: null };
   }
-
-  try {
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${btoa(`${sid}:${authToken}`)}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ To: to, From: from, Body: body }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      return {
-        status: "failed",
-        configured: true,
-        detail: `SMS provider refused the message (${response.status}).`,
-      };
-    }
-    return { status: "sent", configured: true, detail: "Handed to the SMS provider.", reference: payload?.sid };
-  } catch (err) {
-    console.error("[send-invoice] sms transport failed", err instanceof Error ? err.message : err);
-    return { status: "failed", configured: true, detail: "Couldn't reach the SMS provider." };
+  if (reservation.outcome !== "reserved") {
+    return {
+      channel: "sms", recipient, status: "failed",
+      configured: !["notSetUp", "awaitingApproval", "noNumber"].includes(reservation.outcome),
+      detail: outcomeMessage(reservation.outcome, { needed: reservation.segments ?? undefined,
+        balance: reservation.balance_after ?? undefined }),
+      creditsCharged: 0, smsCreditBalance: reservation.balance_after,
+    };
   }
+  const delivery = await deliverReservation(createAdminClient(), companyId, reservation, body);
+  return {
+    channel: "sms", recipient, status: delivery.sent ? "sent" : "failed", configured: true,
+    detail: delivery.detail, creditsCharged: delivery.creditsCharged, smsCreditBalance: delivery.balance,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -392,12 +397,20 @@ Deno.serve(async (req) => {
       `using Harbour South FieldOps.</p>` +
       `</div>`;
 
-    const smsBody = `${companyName}: invoice ${invoice.number}, ${amount} due ${invoice.due_date}. View and pay: ${viewUrl}`;
+    const smsBody =
+      `${companyName}: invoice ${invoice.number}, ${amount} due ${invoice.due_date}. View and pay: ${viewUrl} Reply STOP to opt out.`;
 
     const outcomes: ChannelOutcome[] = [];
 
     for (const channel of channels) {
       const recipient = channel === "email" ? emailRecipient : phoneRecipient;
+
+      if (channel === "sms") {
+        outcomes.push(
+          await sendInvoiceSms(supabase, invoice.company_id, invoice.customer_id, invoice.id, phoneRecipient, smsBody),
+        );
+        continue;
+      }
 
       // Reserve first. For SMS this verifies and debits credit in the same
       // transaction that writes the notification row, under a per-company
@@ -439,9 +452,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const result = channel === "email"
-        ? await sendEmail(recipient, subject, html, text, sender)
-        : await sendSms(recipient, smsBody);
+      const result = await sendEmail(recipient, subject, html, text, sender);
 
       // Record the real outcome. A failed SMS gets its credit back here.
       const { data: settled, error: settleError } = await supabase.rpc("settle_notification", {
@@ -465,7 +476,7 @@ Deno.serve(async (req) => {
         configured: result.configured,
         detail: result.detail,
         creditsCharged: Math.max(0, reservation.credits_charged - refunded),
-        smsCreditBalance: channel === "sms" ? settlement?.balance_after ?? reservation.balance_after : null,
+        smsCreditBalance: null,
       });
     }
 

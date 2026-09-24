@@ -28,11 +28,11 @@
 		<string>location</string>
 	</array>
 	<!--
-	  Harbour South's published privacy policy. Empty until the real public
-	  https URL exists: put it here and every in-app Privacy Policy entry point
-	  opens it (Brand.privacyPolicyURL). Never an invented address.
+	  Harbour South's legal and privacy contact email, shown inside the in-app
+	  legal documents (Brand.legalContactEmail). Empty until Harbour South sets
+	  it; never an invented address. The legal documents themselves are in-app.
 	-->
-	<key>HarbourSouthPrivacyPolicyURL</key>
+	<key>HarbourSouthLegalContactEmail</key>
 	<string></string>
 	<key>CFBundleURLTypes</key>
 	<array>

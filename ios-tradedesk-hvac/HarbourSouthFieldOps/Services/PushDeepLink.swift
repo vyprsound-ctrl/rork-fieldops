@@ -23,6 +23,7 @@ nonisolated enum PushDeepLink {
         case .invoice(let id): return "\(scheme)://invoice/\(id)"
         case .customer(let id): return "\(scheme)://customer/\(id)"
         case .message(let id): return "\(scheme)://message/\(id)"
+        case .smsConversation(let id): return "\(scheme)://sms/\(id)"
         case .more: return nil
         // #11 — filtered list routes are in-app drill-downs from Reports, not
         // notification destinations. Nothing writes a push that means "open the
@@ -66,6 +67,10 @@ nonisolated enum PushDeepLink {
             // app rather than guessing at one.
             guard let identifier, !identifier.isEmpty else { return nil }
             return .message(identifier)
+        case "sms":
+            // Written by `sms_record_inbound()` for a customer reply.
+            guard let identifier, !identifier.isEmpty else { return .more(.communications) }
+            return .smsConversation(identifier)
         case "jobs":
             return .more(.dispatch)
         default:

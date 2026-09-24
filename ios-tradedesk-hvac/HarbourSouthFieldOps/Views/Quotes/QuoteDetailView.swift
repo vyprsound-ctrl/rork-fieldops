@@ -100,6 +100,11 @@ struct QuoteDetailView: View {
                     restrictedTotalsCard
                 }
                 historyCard(quote)
+                if quote.status != .draft {
+                    DocumentSmsCard(customerID: quote.customerID, customerName: quote.customerName, quoteID: quote.id,
+                                    kinds: quote.status == .accepted ? [.quoteAccepted]
+                                        : quote.status == .declined ? [.quoteDeclined] : [.quoteSent, .quoteReminder])
+                }
                 if quote.canConvert || quote.convertedJobNumber != nil { conversionCard(quote) }
                 if quote.canRaiseInvoice || quote.invoicedReference != nil { invoiceCard(quote) }
                 if !quote.statusActions.isEmpty { statusActions(quote) }

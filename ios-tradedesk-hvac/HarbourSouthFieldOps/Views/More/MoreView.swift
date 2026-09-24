@@ -25,14 +25,16 @@ struct MoreView: View {
         // Payments screen, surfaced at the top level so an owner does not have
         // to know it lives under Settings → Integrations. Gated on
         // `saasBillingRead`, so only the owner is offered it.
-        return [.dispatch, .messages, .payments_integration, .workerLocations, .fieldWorkers, .quotes, .invoices,
+        return [.communications, .dispatch, .messages, .smsMessaging, .payments_integration, .workerLocations, .fieldWorkers, .quotes, .invoices,
                 .payments, .recurring, .reports, .smsCredits, .subscription, .businessEmail,
-                .notifications, .settings, .dataAccess, .integrations]
+                .notifications, .settings, .dataAccess, .integrations, .legal]
             .filter { section in
                 // Job alerts need a real device registration against a real
                 // signed-in user, so the row is only offered where turning them
                 // on actually does something.
                 if section == .notifications, !env.isProductionSession { return false }
+                // Customer conversations need every-customer visibility too.
+                if section == .communications, !session.can(.customersReadAll) { return false }
                 guard let permission = section.requiredPermission else { return true }
                 return session.can(permission)
             }
@@ -156,7 +158,7 @@ struct MoreView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("more.deleteAccount")
 
-                    LegalLinksView()
+                    LegalLinksView(documents: [.privacyPolicy, .termsOfService, .smsTerms])
                         .padding(.horizontal, 4)
                 }
 
@@ -311,8 +313,11 @@ struct MoreView: View {
         // #13 — an unread count on the row itself, so a waiting message is
         // visible from the menu rather than only after opening it.
         case .messages:
-            let unread = viewModel.unreadMessageCount
+            let unread = max(viewModel.unreadMessageCount, env.communications.unread.officeUnread)
             return unread > 0 ? "\(unread) unread" : nil
+        case .communications:
+            let unread = env.communications.unread.customerUnread
+            return unread > 0 ? "\(unread) new" : nil
         case .fieldWorkers: return overview.workerCount.map(String.init)
         case .quotes: return overview.quoteCount.map(String.init)
         case .invoices: return overview.outstandingLabel
