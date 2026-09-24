@@ -795,9 +795,11 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
 
         require(app.staticTexts["Starter"], "the Starter plan")
         let seen = collectTexts()
-        for expected in ["Starter", "Team", "Business", "Just me", "My small team", "Monthly", "Annual"] {
+        for expected in ["Starter", "Team", "Business", "Just me", "My small team", "Annual"] {
             XCTAssertTrue(seen.contains(expected), "Expected \(expected). Saw: \(seen.sorted())")
         }
+        // A one-text button is exposed as a button, not as a static text.
+        XCTAssertTrue(app.buttons["Monthly"].exists || scrollTo(app.buttons["Monthly"]), "The Monthly switch must be on screen")
         XCTAssertTrue(seen.contains("10+ users"), "Business must read 10+ users. Saw: \(seen.sorted())")
         XCTAssertTrue(seen.contains { $0.contains("Save 20%") }, "The annual saving must be stated. Saw: \(seen.sorted())")
         for label in seen {

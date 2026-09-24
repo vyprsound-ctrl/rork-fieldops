@@ -20,11 +20,24 @@ final class SubscriptionViewModel {
     private(set) var storeUnavailable: Bool = false
     private(set) var workingProductID: String?
     private(set) var isRestoring: Bool = false
+    /// Apple's subscription ids this device's Apple ID holds.
+    private(set) var deviceSubscriptionIDs: Set<String> = []
     var period: BillingPeriod = .monthly
     var actionError: String?
     var notice: String?
 
     var isWorking: Bool { workingProductID != nil || isRestoring }
+
+    /// The company already has a live Apple subscription, but it is billed to
+    /// a different Apple ID (e.g. the previous owner's). Plan changes must be
+    /// made on that Apple ID; buying here would start a SECOND subscription.
+    var isBilledToAnotherAppleID: Bool {
+        guard let commercial, commercial.hasEntitlement, commercial.billingStore == .apple,
+              let original = commercial.appleOriginalTransactionID else { return false }
+        return !deviceSubscriptionIDs.contains(original)
+    }
+
+    static let billedElsewhereMessage = "Your company's plan is billed to the Apple ID of the person who subscribed. Change or cancel it from that Apple ID — everyone in your company keeps access in the meantime."
 
     func load(gateway: DataGateway, store: StoreBillingService, session: TenantSession, showLoading: Bool = true) async {
         if showLoading { state = .loading }
@@ -44,6 +57,7 @@ final class SubscriptionViewModel {
             storeProducts = [:]
             storeUnavailable = true
         }
+        deviceSubscriptionIDs = Set(await store.currentPurchases().map { String($0.originalTransactionID) })
     }
 
     func refreshCommercial(gateway: DataGateway, session: TenantSession) async {
@@ -78,6 +92,10 @@ final class SubscriptionViewModel {
     func buy(_ plan: PlanOffer, gateway: DataGateway, store: StoreBillingService, session: TenantSession) async {
         guard session.can(.saasBillingManage) else {
             actionError = "Only the account owner can choose a plan."
+            return
+        }
+        guard !isBilledToAnotherAppleID else {
+            actionError = Self.billedElsewhereMessage
             return
         }
         let productID = plan.productID(for: period)
@@ -120,6 +138,7 @@ final class SubscriptionViewModel {
                 notice = "No Harbour South subscription was found for this Apple ID."
                 return
             }
+            deviceSubscriptionIDs = Set(purchases.map { String($0.originalTransactionID) })
             let result = try await gateway.linkStorePurchases(session: session, purchases: purchases)
             for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
             if result.belongsToAnotherCompany {

@@ -25,6 +25,9 @@ nonisolated struct SignedStorePurchase: Hashable, Sendable, Encodable {
     let renewal: String?
     let transactionID: UInt64
     let productID: String
+    /// Apple's id for the whole subscription, stable across renewals. Lets the
+    /// app tell whether THIS Apple ID holds the company's subscription.
+    var originalTransactionID: UInt64 = 0
     enum CodingKeys: String, CodingKey { case transaction, renewal }
 }
 
@@ -131,7 +134,8 @@ actor StoreKitBillingService: StoreBillingService {
                 transaction: verification.jwsRepresentation,
                 renewal: renewal,
                 transactionID: transaction.id,
-                productID: transaction.productID
+                productID: transaction.productID,
+                originalTransactionID: transaction.originalID
             ))
         case .pending:
             return .pending
@@ -160,7 +164,8 @@ actor StoreKitBillingService: StoreBillingService {
                     transaction: status.transaction.jwsRepresentation,
                     renewal: status.renewalInfo.jwsRepresentation,
                     transactionID: transaction.id,
-                    productID: transaction.productID
+                    productID: transaction.productID,
+                    originalTransactionID: transaction.originalID
                 ))
             }
         }
@@ -173,7 +178,8 @@ actor StoreKitBillingService: StoreBillingService {
                 transaction: verification.jwsRepresentation,
                 renewal: nil,
                 transactionID: transaction.id,
-                productID: transaction.productID
+                productID: transaction.productID,
+                originalTransactionID: transaction.originalID
             ))
         }
         return purchases
@@ -190,7 +196,8 @@ actor StoreKitBillingService: StoreBillingService {
                         transaction: verification.jwsRepresentation,
                         renewal: nil,
                         transactionID: transaction.id,
-                        productID: transaction.productID
+                        productID: transaction.productID,
+                        originalTransactionID: transaction.originalID
                     ))
                 }
                 continuation.finish()

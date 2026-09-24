@@ -267,6 +267,72 @@ begin
   end loop;
 
   -- ---------------------------------------------------------------------------
+  -- Company ownership of the subscription
+  -- ---------------------------------------------------------------------------
+  -- v_cb is now on O3 (Business annual, 40 days left).
+  select * into v_state from public.company_commercial_state(v_cb);
+  r := r || format('The commercial read names the linked Apple subscription|%s|%s', v_state.apple_original_transaction_id = 'O3', v_state.apple_original_transaction_id);
+
+  -- A second owner subscribes on their own Apple ID while the company plan is
+  -- live and runs longer: the company keeps its plan; nothing is overwritten.
+  v_out := public.apple_apply_transaction(v_cb,
+    jsonb_build_object('transactionId','N1','originalTransactionId','O4','productId','com.harboursouth.fieldservice.starter.monthly',
+      'purchaseDate',v_ms_now + 50000,'expiresDate',v_ms_now + 20*v_day,'signedDate',v_ms_now + 50000),
+    jsonb_build_object('originalTransactionId','O4','autoRenewStatus',0,'autoRenewProductId','com.harboursouth.fieldservice.starter.monthly','signedDate',v_ms_now + 50000), 'app');
+  select * into v_state from public.company_commercial_state(v_cb);
+  r := r || format('A second Apple subscription never replaces a live, longer company plan|%s|out=%s tier=%s orig=%s renew=%s',
+    v_out = 'otherSubscription' and v_state.tier_id = 'business' and v_state.apple_original_transaction_id = 'O3' and v_state.will_auto_renew,
+    v_out, v_state.tier_id, v_state.apple_original_transaction_id, v_state.will_auto_renew);
+
+  -- A family-shared copy is not the purchaser's subscription.
+  v_out := public.apple_apply_transaction(v_cb,
+    jsonb_build_object('transactionId','F1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 51000,'expiresDate',v_ms_now + 40*v_day,'signedDate',v_ms_now + 51000,'inAppOwnershipType','FAMILY_SHARED'), null, 'app');
+  r := r || format('A family-shared transaction is not treated as a purchase|%s|%s', v_out = 'notPurchaser', v_out);
+
+  -- The company plan lapses in favour of a longer one bought by the new owner:
+  -- the company follows the subscription that actually entitles it.
+  v_out := public.apple_apply_transaction(v_cb,
+    jsonb_build_object('transactionId','N2','originalTransactionId','O5','productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 52000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 52000),
+    jsonb_build_object('originalTransactionId','O5','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.business.annual','signedDate',v_ms_now + 52000), 'app');
+  select * into v_state from public.company_commercial_state(v_cb);
+  r := r || format('A longer subscription for the same company takes over cleanly|%s|out=%s orig=%s',
+    v_out = 'applied:active' and v_state.apple_original_transaction_id = 'O5' and v_state.tier_id = 'business' and v_state.will_auto_renew,
+    v_out, v_state.apple_original_transaction_id);
+
+  -- A subscription a company has moved off still belongs to that company.
+  begin
+    v_out := public.apple_apply_transaction(v_c2,
+      jsonb_build_object('transactionId','R1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
+        'purchaseDate',v_ms_now + 53000,'expiresDate',v_ms_now + 40*v_day,'signedDate',v_ms_now + 53000), null, 'restore');
+    r := r || format('Restoring a superseded subscription into another company is refused|false|accepted %s', v_out);
+  exception when others then
+    r := r || format('Restoring a superseded subscription into another company is refused|%s|%s', sqlstate = 'TD409', sqlerrm);
+  end;
+
+  -- A purchase made for one company (appAccountToken) can never land in another.
+  begin
+    v_out := public.apple_apply_transaction(v_c2,
+      jsonb_build_object('transactionId','K1','originalTransactionId','O6','productId','com.harboursouth.fieldservice.team.monthly',
+        'purchaseDate',v_ms_now + 54000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 54000,'appAccountToken', upper(v_cb::text)), null, 'restore');
+    r := r || format('A purchase tagged for another company is refused|false|accepted %s', v_out);
+  exception when others then
+    r := r || format('A purchase tagged for another company is refused|%s|%s', sqlstate = 'TD409', sqlerrm);
+  end;
+  select count(*) into v_n from public.apple_transactions where transaction_id in ('K1','R1');
+  r := r || format('Refused purchases leave no ledger row|%s|n=%s', v_n = 0, v_n);
+
+  -- The subscription is the company's, not a person's.
+  select count(*) into v_n
+    from information_schema.key_column_usage k
+    join information_schema.referential_constraints rc on rc.constraint_name = k.constraint_name and rc.constraint_schema = k.constraint_schema
+    join information_schema.constraint_column_usage u on u.constraint_name = rc.unique_constraint_name and u.constraint_schema = rc.unique_constraint_schema
+   where k.table_schema = 'public' and k.table_name in ('company_subscriptions','apple_transactions')
+     and u.table_name in ('app_users','users');
+  r := r || format('No subscription table references a user|%s|n=%s', v_n = 0, v_n);
+
+  -- ---------------------------------------------------------------------------
   -- Only the server writes entitlement
   -- ---------------------------------------------------------------------------
   perform set_config('request.jwt.claims', json_build_object('sub', v_owner2::text, 'role', 'authenticated')::text, true);
@@ -393,6 +459,27 @@ begin
   exception when others then
     r := r || format('Business can still invite with 30 active people|false|%s', sqlerrm);
   end;
+
+  -- Removing people, including the Owner who bought the plan, leaves the
+  -- company's subscription exactly as it was.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  select * into v_state from public.company_commercial_state(v_cb);
+  v_s := v_state.apple_original_transaction_id;
+  v_joiner := gen_random_uuid();
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+    values ('00000000-0000-0000-0000-000000000000', v_joiner, 'authenticated', 'authenticated', 'newowner@subtest.invalid', 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+  insert into public.app_users (id, company_id, name, email, role, status) values (v_joiner, v_cb, 'New Owner', 'newowner@subtest.invalid', 'owner', 'active');
+  delete from public.invitations where company_id = v_cb;
+  delete from public.app_users where company_id = v_cb and email like 'big%' and email <= 'big2@';
+  delete from public.app_users where id = v_ownerb;
+  update public.app_users set status = 'suspended' where company_id = v_cb and email like 'big%';
+  select * into v_state from public.company_commercial_state(v_cb);
+  r := r || format('Deleting the purchasing Owner and suspending staff keeps the company plan|%s|entitled=%s tier=%s orig=%s',
+    v_state.has_entitlement and v_state.tier_id = 'business' and v_state.apple_original_transaction_id = v_s,
+    v_state.has_entitlement, v_state.tier_id, v_state.apple_original_transaction_id);
+  perform set_config('request.jwt.claims', json_build_object('sub', v_joiner::text, 'role', 'authenticated')::text, true);
+  select * into v_state from public.company_commercial_state(null);
+  r := r || format('The new Owner sees the same company plan|%s|tier=%s', v_state.has_entitlement and v_state.tier_id = 'business', v_state.tier_id);
 
   -- Tidy (the whole transaction is rolled back anyway).
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);

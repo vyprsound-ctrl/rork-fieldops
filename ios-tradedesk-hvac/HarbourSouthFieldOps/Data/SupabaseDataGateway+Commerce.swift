@@ -384,6 +384,7 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
     let trialDaysRemaining: Int?
     let gracePeriodEndsAt: Date?
     let billingStore: String?
+    let appleOriginalTransactionID: String?
     let stripeConnected: Bool?
     let chargesEnabled: Bool?
     let payoutsEnabled: Bool?
@@ -419,6 +420,7 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
         case trialDaysRemaining = "trial_days_remaining"
         case gracePeriodEndsAt = "grace_period_ends_at"
         case billingStore = "billing_store"
+        case appleOriginalTransactionID = "apple_original_transaction_id"
         case stripeConnected = "stripe_connected"
         case chargesEnabled = "charges_enabled"
         case payoutsEnabled = "payouts_enabled"
@@ -457,6 +459,7 @@ private nonisolated struct CommercialStateRecord: Decodable, Sendable {
             freeOfferDaysRemaining: max(trialDaysRemaining ?? 0, 0),
             gracePeriodEndsAt: gracePeriodEndsAt,
             billingStore: BillingStore(rawValue: billingStore ?? "") ?? .none,
+            appleOriginalTransactionID: appleOriginalTransactionID,
             stripeConnected: stripeConnected ?? false,
             chargesEnabled: chargesEnabled ?? false,
             payoutsEnabled: payoutsEnabled ?? false,
@@ -571,6 +574,7 @@ extension SupabaseDataGateway {
         let handled: [UInt64] = results.compactMap { item in
             let done = item.outcome.hasPrefix("applied") || item.outcome == "stale"
                 || item.outcome == "upgradedAway" || item.outcome == "unknownProduct"
+                || item.outcome == "otherSubscription" || item.outcome == "notPurchaser"
             return done ? item.transactionId.flatMap(UInt64.init) : nil
         }
 

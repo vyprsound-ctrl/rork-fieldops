@@ -289,6 +289,8 @@ nonisolated struct CommercialState: Hashable, Sendable {
     let freeOfferDaysRemaining: Int
     let gracePeriodEndsAt: Date?
     let billingStore: BillingStore
+    /// Apple's id for the subscription the company is linked to, if any.
+    let appleOriginalTransactionID: String?
 
     // Stripe, as Stripe reports it.
     let stripeConnected: Bool
@@ -331,6 +333,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
         freeOfferDaysRemaining: Int = 0,
         gracePeriodEndsAt: Date? = nil,
         billingStore: BillingStore = .none,
+        appleOriginalTransactionID: String? = nil,
         stripeConnected: Bool = false,
         chargesEnabled: Bool = false,
         payoutsEnabled: Bool = false,
@@ -365,6 +368,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
         self.freeOfferDaysRemaining = freeOfferDaysRemaining
         self.gracePeriodEndsAt = gracePeriodEndsAt
         self.billingStore = billingStore
+        self.appleOriginalTransactionID = appleOriginalTransactionID
         self.stripeConnected = stripeConnected
         self.chargesEnabled = chargesEnabled
         self.payoutsEnabled = payoutsEnabled

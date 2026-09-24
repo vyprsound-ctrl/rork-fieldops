@@ -115,7 +115,7 @@ struct SubscriptionView: View {
                         tooSmall: !plan.fits(activeUsers: overview.activeUsers),
                         activeUsers: overview.activeUsers,
                         isWorking: viewModel.workingProductID == plan.productID(for: viewModel.period),
-                        isDisabled: viewModel.isWorking || !overview.canManage,
+                        isDisabled: viewModel.isWorking || !overview.canManage || viewModel.isBilledToAnotherAppleID,
                         actionTitle: actionTitle(for: plan)
                     ) {
                         Task { await buy(plan) }
@@ -127,6 +127,12 @@ struct SubscriptionView: View {
                 Text("Only the account owner can choose or change the plan.")
                     .font(.caption)
                     .foregroundStyle(Theme.meta)
+            } else if viewModel.isBilledToAnotherAppleID {
+                Text(SubscriptionViewModel.billedElsewhereMessage)
+                    .font(.caption)
+                    .foregroundStyle(Theme.meta)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("subscription.billedElsewhere")
             }
             if !overview.pricesAreLive || viewModel.storeUnavailable {
                 Text("Showing standard US prices. Your App Store price is confirmed by Apple before you pay.")

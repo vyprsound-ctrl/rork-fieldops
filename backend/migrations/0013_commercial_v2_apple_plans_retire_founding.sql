@@ -549,6 +549,8 @@ declare
   v_state     text;
   v_status    text;
   v_new_tx    boolean;
+  v_token     text := lower(nullif(p_transaction->>'appAccountToken', ''));
+  v_switch    boolean := false;
 begin
   if not public.push_caller_is_service_role() then
     raise exception 'Apple entitlement is written by the server only.' using errcode = 'TD403';
@@ -566,15 +568,35 @@ begin
     v_period := 'annual';
   end if;
 
+  -- Only the purchaser's own transaction carries the company's subscription.
+  -- A family-shared copy is not a purchase (Family Sharing is off for every
+  -- plan, so this is defence in depth).
+  if coalesce(p_transaction->>'inAppOwnershipType', 'PURCHASED') <> 'PURCHASED' then
+    return 'notPurchaser';
+  end if;
+
   -- A free offer: Apple's introductory trial, or a free Offer Code / promo.
   v_free := v_offer is not null
             and (v_discount = 'FREE_TRIAL'
                  or (v_discount is null and coalesce(p_transaction->>'price', '') = '0'));
 
-  -- One Apple subscription belongs to one company.
+  -- The app sets appAccountToken to the company id at purchase. A purchase
+  -- made for one company can never be applied to another.
+  if v_token ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     and v_token::uuid <> p_company then
+    raise exception 'This App Store subscription was bought for another Harbour South company.'
+      using errcode = 'TD409';
+  end if;
+
+  -- One Apple subscription belongs to one company, for ever: checked against
+  -- the current link AND the ledger, so a subscription a company has since
+  -- replaced still cannot be attached to somebody else.
   if exists (
     select 1 from public.company_subscriptions s
      where s.apple_original_transaction_id = v_orig and s.company_id <> p_company
+  ) or exists (
+    select 1 from public.apple_transactions t
+     where t.original_transaction_id = v_orig and t.company_id is not null and t.company_id <> p_company
   ) then
     raise exception 'This App Store subscription already belongs to another Harbour South company.'
       using errcode = 'TD409';
@@ -590,7 +612,7 @@ begin
   on conflict (transaction_id) do update set
     revoked_at = coalesce(excluded.revoked_at, t.revoked_at),
     signed_at  = greatest(excluded.signed_at, t.signed_at),
-    company_id = excluded.company_id,
+    company_id = coalesce(t.company_id, excluded.company_id),
     updated_at = now();
 
   -- A transaction superseded by an immediate upgrade is history, not state.
@@ -604,13 +626,36 @@ begin
     returning * into v_sub;
   end if;
 
-  v_apply_tx := v_sub.apple_last_transaction_id is null
+  -- A DIFFERENT Apple subscription for the same company (e.g. a new owner
+  -- subscribed on their own Apple ID). The company row follows exactly one
+  -- subscription: the new one takes over only when the current one no longer
+  -- entitles the company, or the new one runs longer. Otherwise it is kept in
+  -- the ledger and nothing about the current subscription changes — in
+  -- particular, renewal info (cancellation, billing retry) from one
+  -- subscription is never written onto another.
+  if v_sub.apple_original_transaction_id is not null and v_sub.apple_original_transaction_id <> v_orig then
+    v_switch := v_revoked is null
+                and v_expires is not null
+                and (
+                  not public.subscription_state_is_entitled(public.subscription_entitlement_state(
+                    v_sub.store::text, v_sub.apple_expires_at, v_sub.apple_revoked_at, v_sub.apple_auto_renew,
+                    v_sub.apple_grace_period_expires_at, v_sub.apple_in_billing_retry,
+                    coalesce(v_sub.apple_is_free_offer, false), v_sub.apple_offer_type))
+                  or v_expires > coalesce(v_sub.apple_expires_at, '-infinity'::timestamptz)
+                );
+    if not v_switch then
+      return 'otherSubscription';
+    end if;
+  end if;
+
+  v_apply_tx := v_switch
+                or v_sub.apple_last_transaction_id is null
                 or v_sub.apple_last_transaction_id = v_tx_id
                 or v_sub.apple_purchase_at is null
                 or v_purchase >= v_sub.apple_purchase_at;
   v_apply_rn := p_renewal is not null
                 and coalesce(p_renewal->>'originalTransactionId', v_orig) = v_orig
-                and (v_sub.apple_renewal_signed_at is null or v_rn_signed >= v_sub.apple_renewal_signed_at);
+                and (v_switch or v_sub.apple_renewal_signed_at is null or v_rn_signed >= v_sub.apple_renewal_signed_at);
 
   if not v_apply_tx and not v_apply_rn then
     return 'stale';
@@ -646,13 +691,16 @@ begin
     renewal_date                  = case when v_apply_tx and v_expires is not null then v_expires else s.renewal_date end,
     apple_auto_renew              = case when v_apply_rn then (p_renewal->>'autoRenewStatus')::integer = 1
                                          when v_new_tx then null else s.apple_auto_renew end,
-    apple_auto_renew_product_id   = case when v_apply_rn then p_renewal->>'autoRenewProductId' else s.apple_auto_renew_product_id end,
+    apple_auto_renew_product_id   = case when v_apply_rn then p_renewal->>'autoRenewProductId'
+                                         when v_switch then null else s.apple_auto_renew_product_id end,
     apple_grace_period_expires_at = case when v_apply_rn then public.apple_ms(p_renewal->>'gracePeriodExpiresDate')
                                          when v_new_tx then null else s.apple_grace_period_expires_at end,
     apple_in_billing_retry        = case when v_apply_rn then coalesce((p_renewal->>'isInBillingRetryPeriod')::boolean, false)
                                          when v_new_tx then false else s.apple_in_billing_retry end,
-    apple_expiration_intent       = case when v_apply_rn then nullif(p_renewal->>'expirationIntent', '')::integer else s.apple_expiration_intent end,
-    apple_renewal_signed_at       = case when v_apply_rn then v_rn_signed else s.apple_renewal_signed_at end,
+    apple_expiration_intent       = case when v_apply_rn then nullif(p_renewal->>'expirationIntent', '')::integer
+                                         when v_switch then null else s.apple_expiration_intent end,
+    apple_renewal_signed_at       = case when v_apply_rn then v_rn_signed
+                                         when v_switch then null else s.apple_renewal_signed_at end,
     apple_synced_at               = now(),
     updated_at                    = now()
   where s.company_id = p_company
@@ -770,7 +818,8 @@ returns table (
   grace_period_ends_at       timestamptz,
   billing_store              text,
   apple_environment          text,
-  seat_limits_enforced       boolean
+  seat_limits_enforced       boolean,
+  apple_original_transaction_id text
 )
 language plpgsql stable security definer
 set search_path = public
@@ -855,6 +904,9 @@ begin
   offer_identifier     := v_sub.apple_offer_identifier;
   billing_store        := coalesce(v_sub.store::text, 'none');
   apple_environment    := v_sub.apple_environment;
+  -- Lets the owner's app tell whether THIS Apple ID holds the company's
+  -- subscription, so a second owner is never sold a second subscription.
+  apple_original_transaction_id := v_sub.apple_original_transaction_id;
 
   select t.id, case when t.apple_product_annual = v_sub.apple_auto_renew_product_id then 'annual' else 'monthly' end
     into renews_to_tier_id, renews_to_period

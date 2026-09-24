@@ -52,7 +52,7 @@
           ],
           "displayPrice": "19.99",
           "familyShareable": false,
-          "groupNumber": 1,
+          "groupNumber": 3,
           "internalID": "P0000001",
           "introductoryOffer": {
             "internalID": "I0000001",
@@ -106,7 +106,7 @@
           ],
           "displayPrice": "191.99",
           "familyShareable": false,
-          "groupNumber": 1,
+          "groupNumber": 3,
           "internalID": "P0000002",
           "introductoryOffer": {
             "internalID": "I0000002",
@@ -268,7 +268,7 @@
           ],
           "displayPrice": "69.99",
           "familyShareable": false,
-          "groupNumber": 3,
+          "groupNumber": 1,
           "internalID": "P0000005",
           "introductoryOffer": {
             "internalID": "I0000005",
@@ -322,7 +322,7 @@
           ],
           "displayPrice": "669.99",
           "familyShareable": false,
-          "groupNumber": 3,
+          "groupNumber": 1,
           "internalID": "P0000006",
           "introductoryOffer": {
             "internalID": "I0000006",
