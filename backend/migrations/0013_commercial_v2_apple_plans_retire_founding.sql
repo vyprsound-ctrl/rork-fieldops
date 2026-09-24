@@ -23,7 +23,19 @@
 --      waiting for any notification.
 --   5. The plan controls how many ACTIVE people a company can have. Existing
 --      users are never suspended automatically; adding or reactivating somebody
---      beyond the plan is refused.
+--      beyond the plan is refused. The seat rule is ON from this migration.
+--   6. Only Apple PRODUCTION purchases create a real entitlement. Sandbox
+--      purchases (TestFlight, App Review, sandbox Apple IDs) are recorded as
+--      test transactions and applied only to companies on the server-only
+--      test-company allowlist (apple_sandbox_companies), and never over a
+--      Production subscription. Any other environment (Xcode, missing, unknown)
+--      is refused. Test and Production purchase ids are separate identities.
+--   7. No active subscription = no working workspace. Every company member can
+--      read exactly two facts (company_workspace_access): whether the company
+--      has an active subscription, and its state. Nothing else.
+--   8. A plan change to a plan with fewer seats than the company's active users
+--      is refused (subscription_plan_change_check) until the owner deactivates
+--      enough people. Nobody is chosen, suspended or deleted automatically.
 --
 -- WHAT IS RETIRED, AND WHAT IS DELIBERATELY KEPT
 --
@@ -158,8 +170,8 @@ comment on column public.subscription_tiers.included_users is
 insert into public.platform_settings (key, value, description) values
   ('unsubscribed_user_limit', '1'::jsonb,
    'Active users a company may have while it holds no Apple subscription entitlement. Existing users are never suspended by this; it only stops more being added.'),
-  ('seat_limits_enforced', 'false'::jsonb,
-   'Master switch for the plan user limits. Off until the Apple subscription products are live, so no company is blocked from adding people before it is able to buy a plan. Turn on in the same release that ships StoreKit purchasing.')
+  ('seat_limits_enforced', 'true'::jsonb,
+   'Master switch for the plan user limits. ON: shipped in the same release as StoreKit purchasing. Setting it to false lifts every seat rule (adding, reactivating and the downgrade check) at once.')
 on conflict (key) do nothing;
 
 create or replace function public.seat_limits_enforced()
@@ -195,8 +207,10 @@ alter table public.company_subscriptions
   add column if not exists apple_renewal_signed_at       timestamptz,
   add column if not exists apple_synced_at               timestamptz;
 
-create unique index if not exists company_subscriptions_apple_original_idx
-  on public.company_subscriptions (apple_original_transaction_id)
+-- Unique per Apple ENVIRONMENT: a Sandbox id and a Production id are separate
+-- identities even if the numbers ever coincide.
+create unique index if not exists company_subscriptions_apple_env_original_idx
+  on public.company_subscriptions (apple_environment, apple_original_transaction_id)
   where apple_original_transaction_id is not null;
 
 -- No Harbour South trial clock. A company with no Apple subscription is
@@ -222,7 +236,7 @@ comment on column public.company_subscriptions.trial_ends_at is
 -- 4. Apple ledgers. Service role only: no policies for app users.
 -- ---------------------------------------------------------------------------
 create table if not exists public.apple_transactions (
-  transaction_id          text primary key,
+  transaction_id          text not null,
   original_transaction_id text not null,
   company_id              uuid references public.companies(id) on delete set null,
   product_id              text not null,
@@ -232,13 +246,15 @@ create table if not exists public.apple_transactions (
   offer_type              integer,
   offer_identifier        text,
   offer_discount_type     text,
-  environment             text,
+  environment             text not null check (environment in ('Production', 'Sandbox')),
   signed_at               timestamptz,
   source                  text not null,
   created_at              timestamptz not null default now(),
-  updated_at              timestamptz not null default now()
+  updated_at              timestamptz not null default now(),
+  -- Test and Production purchases are separate identities.
+  primary key (environment, transaction_id)
 );
-create index if not exists apple_transactions_original_idx on public.apple_transactions (original_transaction_id);
+create index if not exists apple_transactions_original_idx on public.apple_transactions (environment, original_transaction_id);
 alter table public.apple_transactions enable row level security;
 
 create table if not exists public.apple_notifications (
@@ -254,8 +270,22 @@ create table if not exists public.apple_notifications (
 );
 alter table public.apple_notifications enable row level security;
 
-revoke all on public.apple_transactions  from anon, authenticated;
-revoke all on public.apple_notifications from anon, authenticated;
+-- The test-company allowlist. Sandbox purchases (TestFlight, App Review) are
+-- applied ONLY to companies listed here. Service role / SQL editor only: no
+-- policies, no grants, no function lets an app user join it.
+create table if not exists public.apple_sandbox_companies (
+  company_id uuid primary key references public.companies(id) on delete cascade,
+  note       text not null default '',
+  added_at   timestamptz not null default now()
+);
+alter table public.apple_sandbox_companies enable row level security;
+
+comment on table public.apple_sandbox_companies is
+  'Harbour South test companies (QA, App Review demo). Apple Sandbox/TestFlight purchases give a test entitlement only to these companies, and never over a Production subscription. Edited by Harbour South staff with the service role only.';
+
+revoke all on public.apple_transactions      from anon, authenticated;
+revoke all on public.apple_notifications     from anon, authenticated;
+revoke all on public.apple_sandbox_companies from anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. Entitlement, evaluated against the database clock.
@@ -551,12 +581,23 @@ declare
   v_new_tx    boolean;
   v_token     text := lower(nullif(p_transaction->>'appAccountToken', ''));
   v_switch    boolean := false;
+  v_env       text := p_transaction->>'environment';
+  v_found     boolean;
 begin
   if not public.push_caller_is_service_role() then
     raise exception 'Apple entitlement is written by the server only.' using errcode = 'TD403';
   end if;
   if p_company is null or v_tx_id is null or v_orig is null or v_product is null then
     return 'invalidPayload';
+  end if;
+
+  -- Apple's signed environment decides what a purchase may do. Only Apple's
+  -- two server environments are accepted. Xcode StoreKit-testing purchases are
+  -- signed by a local certificate and are refused before they get here;
+  -- anything else ('Xcode', 'LocalTesting', missing, unknown) is refused here,
+  -- without a ledger row.
+  if v_env is null or v_env not in ('Production', 'Sandbox') then
+    return 'unsupportedEnvironment';
   end if;
 
   select * into v_tier from public.subscription_tiers t where t.apple_product_monthly = v_product;
@@ -591,12 +632,14 @@ begin
   -- One Apple subscription belongs to one company, for ever: checked against
   -- the current link AND the ledger, so a subscription a company has since
   -- replaced still cannot be attached to somebody else.
+  -- Scoped to the environment: test and Production ids are separate identities.
   if exists (
     select 1 from public.company_subscriptions s
-     where s.apple_original_transaction_id = v_orig and s.company_id <> p_company
+     where s.apple_environment = v_env and s.apple_original_transaction_id = v_orig and s.company_id <> p_company
   ) or exists (
     select 1 from public.apple_transactions t
-     where t.original_transaction_id = v_orig and t.company_id is not null and t.company_id <> p_company
+     where t.environment = v_env and t.original_transaction_id = v_orig
+       and t.company_id is not null and t.company_id <> p_company
   ) then
     raise exception 'This App Store subscription already belongs to another Harbour South company.'
       using errcode = 'TD409';
@@ -607,9 +650,9 @@ begin
     revoked_at, offer_type, offer_identifier, offer_discount_type, environment, signed_at, source
   ) values (
     v_tx_id, v_orig, p_company, v_product, v_purchase, v_expires, v_revoked, v_offer,
-    p_transaction->>'offerIdentifier', v_discount, p_transaction->>'environment', v_signed, p_source
+    p_transaction->>'offerIdentifier', v_discount, v_env, v_signed, p_source
   )
-  on conflict (transaction_id) do update set
+  on conflict (environment, transaction_id) do update set
     revoked_at = coalesce(excluded.revoked_at, t.revoked_at),
     signed_at  = greatest(excluded.signed_at, t.signed_at),
     company_id = coalesce(t.company_id, excluded.company_id),
@@ -621,7 +664,20 @@ begin
   end if;
 
   select * into v_sub from public.company_subscriptions s where s.company_id = p_company for update;
-  if not found then
+  v_found := found;
+
+  -- A test purchase (Sandbox: TestFlight, App Review, sandbox Apple ID) is
+  -- recorded above and applied ONLY to an allowlisted test company, and never
+  -- over a Production subscription. For everyone else the company's real
+  -- entitlement is not touched.
+  if v_env = 'Sandbox' and (
+       not exists (select 1 from public.apple_sandbox_companies a where a.company_id = p_company)
+       or v_sub.apple_environment = 'Production'
+     ) then
+    return 'sandboxNotApplied';
+  end if;
+
+  if not v_found then
     insert into public.company_subscriptions (company_id) values (p_company)
     returning * into v_sub;
   end if;
@@ -633,11 +689,14 @@ begin
   -- the ledger and nothing about the current subscription changes — in
   -- particular, renewal info (cancellation, billing retry) from one
   -- subscription is never written onto another.
-  if v_sub.apple_original_transaction_id is not null and v_sub.apple_original_transaction_id <> v_orig then
+  -- A Production purchase always takes over from a test one.
+  if v_sub.apple_original_transaction_id is not null
+     and (v_sub.apple_original_transaction_id <> v_orig or v_sub.apple_environment is distinct from v_env) then
     v_switch := v_revoked is null
                 and v_expires is not null
                 and (
-                  not public.subscription_state_is_entitled(public.subscription_entitlement_state(
+                  (v_env = 'Production' and v_sub.apple_environment is distinct from 'Production')
+                  or not public.subscription_state_is_entitled(public.subscription_entitlement_state(
                     v_sub.store::text, v_sub.apple_expires_at, v_sub.apple_revoked_at, v_sub.apple_auto_renew,
                     v_sub.apple_grace_period_expires_at, v_sub.apple_in_billing_retry,
                     coalesce(v_sub.apple_is_free_offer, false), v_sub.apple_offer_type))
@@ -655,6 +714,7 @@ begin
                 or v_purchase >= v_sub.apple_purchase_at;
   v_apply_rn := p_renewal is not null
                 and coalesce(p_renewal->>'originalTransactionId', v_orig) = v_orig
+                and coalesce(p_renewal->>'environment', v_env) = v_env
                 and (v_switch or v_sub.apple_renewal_signed_at is null or v_rn_signed >= v_sub.apple_renewal_signed_at);
 
   if not v_apply_tx and not v_apply_rn then
@@ -672,7 +732,7 @@ begin
     apple_original_transaction_id = case when v_apply_tx then v_orig else s.apple_original_transaction_id end,
     apple_last_transaction_id     = case when v_apply_tx then v_tx_id else s.apple_last_transaction_id end,
     apple_product_id              = case when v_apply_tx then v_product else s.apple_product_id end,
-    apple_environment             = case when v_apply_tx then p_transaction->>'environment' else s.apple_environment end,
+    apple_environment             = case when v_apply_tx then v_env else s.apple_environment end,
     apple_purchase_at             = case when v_apply_tx then v_purchase else s.apple_purchase_at end,
     apple_expires_at              = case when v_apply_tx then v_expires else s.apple_expires_at end,
     apple_revoked_at              = case when v_apply_tx then v_revoked else s.apple_revoked_at end,
@@ -839,7 +899,7 @@ begin
     or coalesce(public.has_perm('saasBillingManage'::app_permission), false)
   ) then
     raise exception 'Billing details are restricted to the account owner.'
-      using errcode = 'TD403', message = 'saasBillingRead';
+      using errcode = 'TD403';
   end if;
 
   v_company := public.commerce_company_scope(p_company);
@@ -1028,3 +1088,106 @@ grant execute on function public.sync_subscription_seats(uuid) to service_role;
 revoke all on function public.apple_ms(text) from public, anon;
 revoke all on function public.subscription_entitlement_state(text, timestamptz, timestamptz, boolean, timestamptz, boolean, boolean, integer, timestamptz) from public, anon;
 revoke all on function public.subscription_state_is_entitled(text) from public, anon;
+
+-- ---------------------------------------------------------------------------
+-- 11. The workspace gate: "no active subscription = no working workspace".
+--
+-- Every ACTIVE member of a company may read exactly two facts about it:
+-- whether it has an active subscription, and the state. No Apple ids, no
+-- purchase ids, no prices, no billing details. The company is always the
+-- caller's own (current_company_id()); there is no parameter to name another.
+-- ---------------------------------------------------------------------------
+create or replace function public.company_workspace_access()
+returns table (
+  has_active_subscription boolean,
+  subscription_state      text
+)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_company uuid := public.current_company_id();
+  v_ent     record;
+begin
+  if v_company is null then
+    raise exception 'No company in context.' using errcode = 'TD404';
+  end if;
+  select * into v_ent from public.company_entitlement_for(v_company);
+  has_active_subscription := coalesce(v_ent.has_entitlement, false);
+  subscription_state      := coalesce(v_ent.entitlement_state, 'none');
+  return next;
+end $$;
+
+comment on function public.company_workspace_access() is
+  'Minimal read for every company member: has_active_subscription and subscription_state only. Drives the app''s company-level workspace lock.';
+
+revoke all on function public.company_workspace_access() from public, anon;
+grant execute on function public.company_workspace_access() to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 12. The downgrade rule.
+--
+-- A company may not move to a plan that allows fewer active users than it
+-- has. The owner first deactivates enough people — the owner chooses who.
+-- Nothing is suspended, chosen or deleted here: this only answers the
+-- question, and the app refuses to start the Apple purchase when the answer
+-- is no. Deactivated people stay recoverable and can be reactivated later
+-- within the plan's seats.
+-- ---------------------------------------------------------------------------
+create or replace function public.subscription_plan_change_check(p_tier_id text, p_company uuid default null)
+returns table (
+  allowed             boolean,
+  tier_id             text,
+  tier_name           text,
+  user_limit          integer,
+  active_users        integer,
+  users_to_deactivate integer,
+  message             text
+)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_company uuid;
+  v_tier    public.subscription_tiers%rowtype;
+begin
+  if not (
+    public.push_caller_is_service_role()
+    or coalesce(public.has_perm('saasBillingManage'::app_permission), false)
+  ) then
+    raise exception 'Only the account owner can change the plan.'
+      using errcode = 'TD403';
+  end if;
+
+  v_company := public.commerce_company_scope(p_company);
+  if v_company is null then
+    raise exception 'No company in context.' using errcode = 'TD404';
+  end if;
+
+  select * into v_tier from public.subscription_tiers t where t.id = p_tier_id and t.is_active;
+  if not found then
+    raise exception 'That plan is not available.' using errcode = 'P0001';
+  end if;
+
+  select count(*)::integer into active_users
+    from public.app_users u where u.company_id = v_company and u.status = 'active';
+
+  tier_id    := v_tier.id;
+  tier_name  := v_tier.display_name;
+  user_limit := v_tier.user_limit;
+  users_to_deactivate := case
+    when not public.seat_limits_enforced() or v_tier.user_limit is null then 0
+    else greatest(active_users - v_tier.user_limit, 0) end;
+  allowed := users_to_deactivate = 0;
+  message := case when allowed then null else format(
+    '%s includes up to %s active %s and your company has %s. Deactivate %s %s first — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated if you move to a bigger plan later.',
+    v_tier.display_name, v_tier.user_limit, case when v_tier.user_limit = 1 then 'user' else 'users' end,
+    active_users, users_to_deactivate, case when users_to_deactivate = 1 then 'person' else 'people' end) end;
+  return next;
+end $$;
+
+comment on function public.subscription_plan_change_check(text, uuid) is
+  'Whether the company may move to a plan: refused while active users exceed the plan''s seats. Answers only; never suspends or deletes anyone. Owner or service role.';
+
+revoke all on function public.subscription_plan_change_check(text, uuid) from public, anon;
+grant execute on function public.subscription_plan_change_check(text, uuid) to authenticated, service_role;

@@ -48,6 +48,12 @@ declare
   v_n      int;
   i        int;
   v_prod   text;
+  v_ct uuid; v_co uuid; v_cp uuid; v_cl uuid; v_cd uuid;
+  v_ownerl uuid := gen_random_uuid();
+  v_workerl uuid := gen_random_uuid();
+  v_ownerd uuid := gen_random_uuid();
+  v_workerd uuid;
+  v_chk record;
 begin
   -- ---------------------------------------------------------------------------
   -- Pure state function
@@ -98,6 +104,7 @@ begin
     (select (value #>> '{}')::int from public.platform_settings where key='application_fee_bps') = 30
     and (select (value #>> '{}')::boolean from public.platform_settings where key='application_fee_enabled')
     and (select (value #>> '{}')::int from public.platform_settings where key='application_fee_minimum_cents') = 0);
+  r := r || format('Seat limits are ON as shipped by the migration|%s|', public.seat_limits_enforced());
 
   -- ---------------------------------------------------------------------------
   -- Fixtures
@@ -128,13 +135,13 @@ begin
   r := r || format('New company without a plan is limited to 1 user|%s|limit=%s', v_state.plan_user_limit = 1, v_state.plan_user_limit);
 
   -- Unknown product changes nothing.
-  v_out := public.apple_apply_transaction(v_c, jsonb_build_object('transactionId','T0','originalTransactionId','O1','productId','com.example.other','purchaseDate',v_ms_now,'expiresDate',v_ms_now + v_day));
+  v_out := public.apple_apply_transaction(v_c, jsonb_build_object('environment','Production','transactionId','T0','originalTransactionId','O1','productId','com.example.other','purchaseDate',v_ms_now,'expiresDate',v_ms_now + v_day));
   r := r || format('Unknown product is refused without effect|%s|%s', v_out = 'unknownProduct' and (select store from public.company_subscriptions where company_id=v_c) = 'none', v_out);
 
   -- 14-day introductory free trial on Team monthly.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
-      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 14*v_day,'offerType',1,'offerDiscountType','FREE_TRIAL','offerPeriod','P2W','environment','Sandbox','signedDate',v_ms_now,'price',0),
+    jsonb_build_object('environment','Production','transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 14*v_day,'offerType',1,'offerDiscountType','FREE_TRIAL','offerPeriod','P2W','signedDate',v_ms_now,'price',0),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.team.monthly','signedDate',v_ms_now), 'app');
   select * into v_state from public.company_commercial_state(v_c);
   r := r || format('14-day introductory trial is an entitlement on Team monthly|%s|out=%s state=%s tier=%s period=%s', v_out = 'applied:trial' and v_state.has_entitlement and v_state.entitlement_state='trial' and v_state.tier_id='team' and v_state.billing_period='monthly' and v_state.is_free_offer and v_state.trial_days_remaining = 14, v_out, v_state.entitlement_state, v_state.tier_id, v_state.billing_period);
@@ -143,14 +150,14 @@ begin
 
   -- Replay is idempotent.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 14*v_day,'offerType',1,'offerDiscountType','FREE_TRIAL','signedDate',v_ms_now), null, 'notification');
   select count(*) into v_n from public.apple_transactions where original_transaction_id='O1';
   r := r || format('A replayed transaction is idempotent|%s|rows=%s out=%s', v_n = 1 and v_out = 'applied:trial', v_n, v_out);
 
   -- After the trial Apple bills automatically: first paid renewal.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 1000,'price',39990),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.team.monthly','signedDate',v_ms_now + 1000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -158,14 +165,14 @@ begin
 
   -- Out-of-order: the trial transaction arriving late cannot roll it back.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T1','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 14*v_day,'offerType',1,'offerDiscountType','FREE_TRIAL','signedDate',v_ms_now), null, 'notification');
   select * into v_state from public.company_commercial_state(v_c);
   r := r || format('A late older transaction cannot roll state backwards|%s|out=%s state=%s', v_out = 'stale' and v_state.entitlement_state='active', v_out, v_state.entitlement_state);
 
   -- Cancellation: auto-renew off, still entitled until the period ends.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 2000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',0,'autoRenewProductId','com.harboursouth.fieldservice.team.monthly','signedDate',v_ms_now + 2000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -173,7 +180,7 @@ begin
 
   -- Downgrade scheduled (Team -> Starter at renewal): current plan unchanged.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 3000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.starter.monthly','signedDate',v_ms_now + 3000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -182,11 +189,11 @@ begin
   -- Immediate upgrade (Team monthly -> Business annual): the old transaction is
   -- marked upgraded and a new one starts now.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','T2','originalTransactionId','O1','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 30*v_day,'isUpgraded',true,'signedDate',v_ms_now + 4000), null, 'notification');
   r := r || format('The superseded transaction of an upgrade is history only|%s|%s', v_out='upgradedAway', v_out);
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T3','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','T3','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 5000,'expiresDate',v_ms_now + 365*v_day,'signedDate',v_ms_now + 5000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.business.annual','signedDate',v_ms_now + 5000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -194,7 +201,7 @@ begin
 
   -- Billing problem: expired, Apple retrying, grace period running.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 6000,'expiresDate',v_ms_now - v_day,'signedDate',v_ms_now + 6000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'isInBillingRetryPeriod',true,'gracePeriodExpiresDate',v_ms_now + 6*v_day,'signedDate',v_ms_now + 6000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -202,7 +209,7 @@ begin
 
   -- Grace over, Apple still retrying: not entitled.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 6000,'expiresDate',v_ms_now - v_day,'signedDate',v_ms_now + 7000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',1,'isInBillingRetryPeriod',true,'signedDate',v_ms_now + 7000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -210,7 +217,7 @@ begin
 
   -- Retry gave up: expired.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','T4','originalTransactionId','O1','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 6000,'expiresDate',v_ms_now - v_day,'signedDate',v_ms_now + 8000),
     jsonb_build_object('originalTransactionId','O1','autoRenewStatus',0,'isInBillingRetryPeriod',false,'expirationIntent',2,'signedDate',v_ms_now + 8000), 'notification');
   select * into v_state from public.company_commercial_state(v_c);
@@ -218,29 +225,29 @@ begin
 
   -- Resubscribe (restore of a new purchase), then refund.
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T5','originalTransactionId','O1','productId','com.harboursouth.fieldservice.starter.annual',
+    jsonb_build_object('environment','Production','transactionId','T5','originalTransactionId','O1','productId','com.harboursouth.fieldservice.starter.annual',
       'purchaseDate',v_ms_now + 9000,'expiresDate',v_ms_now + 365*v_day,'signedDate',v_ms_now + 9000), null, 'restore');
   select * into v_state from public.company_commercial_state(v_c);
   r := r || format('Resubscribing (or restoring) re-entitles on Starter annual|%s|out=%s', v_out='applied:active' and v_state.tier_id='starter' and v_state.billing_period='annual' and v_state.plan_price_cents = 19199, v_out);
   v_out := public.apple_apply_transaction(v_c,
-    jsonb_build_object('transactionId','T5','originalTransactionId','O1','productId','com.harboursouth.fieldservice.starter.annual',
+    jsonb_build_object('environment','Production','transactionId','T5','originalTransactionId','O1','productId','com.harboursouth.fieldservice.starter.annual',
       'purchaseDate',v_ms_now + 9000,'expiresDate',v_ms_now + 365*v_day,'revocationDate',v_ms_now + 10000,'signedDate',v_ms_now + 10000), null, 'notification');
   select * into v_state from public.company_commercial_state(v_c);
   r := r || format('A refunded subscription is revoked immediately|%s|out=%s', v_out='applied:revoked' and not v_state.has_entitlement, v_out);
 
   -- Offer Codes: 30-day and 90-day free, then normal renewal.
   v_out := public.apple_apply_transaction(v_c2,
-    jsonb_build_object('transactionId','U1','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
+    jsonb_build_object('environment','Production','transactionId','U1','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
       'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'offerType',3,'offerIdentifier','SPRING30','offerDiscountType','FREE_TRIAL','offerPeriod','P1M','signedDate',v_ms_now), null, 'app');
   select * into v_state from public.company_commercial_state(v_c2);
   r := r || format('A 30-day free Offer Code is an entitlement|%s|out=%s code=%s', v_out='applied:offer' and v_state.has_entitlement and v_state.offer_type = 3 and v_state.offer_identifier='SPRING30' and v_state.effective_monthly_cents = 0, v_out, v_state.offer_identifier);
   v_out := public.apple_apply_transaction(v_c2,
-    jsonb_build_object('transactionId','U2','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
+    jsonb_build_object('environment','Production','transactionId','U2','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
       'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 90*v_day,'offerType',3,'offerIdentifier','PARTNER90','offerDiscountType','FREE_TRIAL','offerPeriod','P3M','signedDate',v_ms_now + 1000), null, 'app');
   select * into v_state from public.company_commercial_state(v_c2);
   r := r || format('A 90-day free Offer Code is an entitlement|%s|days=%s', v_out='applied:offer' and v_state.trial_days_remaining = 90, v_state.trial_days_remaining);
   v_out := public.apple_apply_transaction(v_c2,
-    jsonb_build_object('transactionId','U3','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
+    jsonb_build_object('environment','Production','transactionId','U3','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
       'purchaseDate',v_ms_now + 2000,'expiresDate',v_ms_now + 120*v_day,'signedDate',v_ms_now + 2000), null, 'notification');
   select * into v_state from public.company_commercial_state(v_c2);
   r := r || format('After an Offer Code the normal paid subscription follows|%s|out=%s', v_out='applied:active' and not v_state.is_free_offer and v_state.effective_monthly_cents=1999 and v_state.offer_type is null, v_out);
@@ -248,7 +255,7 @@ begin
   -- One Apple subscription, one company.
   begin
     v_out := public.apple_apply_transaction(v_cb,
-      jsonb_build_object('transactionId','U4','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
+      jsonb_build_object('environment','Production','transactionId','U4','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
         'purchaseDate',v_ms_now + 3000,'expiresDate',v_ms_now + 150*v_day,'signedDate',v_ms_now + 3000), null, 'app');
     r := r || format('An App Store subscription cannot be attached to a second company|false|accepted %s', v_out);
   exception when others then
@@ -258,7 +265,7 @@ begin
   -- All six products map.
   foreach v_prod in array array['starter.monthly','starter.annual','team.monthly','team.annual','business.monthly','business.annual'] loop
     v_out := public.apple_apply_transaction(v_cb,
-      jsonb_build_object('transactionId','P-' || v_prod,'originalTransactionId','O3','productId','com.harboursouth.fieldservice.' || v_prod,
+      jsonb_build_object('environment','Production','transactionId','P-' || v_prod,'originalTransactionId','O3','productId','com.harboursouth.fieldservice.' || v_prod,
         'purchaseDate',v_ms_now + (array_position(array['starter.monthly','starter.annual','team.monthly','team.annual','business.monthly','business.annual'], v_prod) * 1000),
         'expiresDate',v_ms_now + 40*v_day,'signedDate',v_ms_now), null, 'app');
     select * into v_state from public.company_commercial_state(v_cb);
@@ -276,7 +283,7 @@ begin
   -- A second owner subscribes on their own Apple ID while the company plan is
   -- live and runs longer: the company keeps its plan; nothing is overwritten.
   v_out := public.apple_apply_transaction(v_cb,
-    jsonb_build_object('transactionId','N1','originalTransactionId','O4','productId','com.harboursouth.fieldservice.starter.monthly',
+    jsonb_build_object('environment','Production','transactionId','N1','originalTransactionId','O4','productId','com.harboursouth.fieldservice.starter.monthly',
       'purchaseDate',v_ms_now + 50000,'expiresDate',v_ms_now + 20*v_day,'signedDate',v_ms_now + 50000),
     jsonb_build_object('originalTransactionId','O4','autoRenewStatus',0,'autoRenewProductId','com.harboursouth.fieldservice.starter.monthly','signedDate',v_ms_now + 50000), 'app');
   select * into v_state from public.company_commercial_state(v_cb);
@@ -286,14 +293,14 @@ begin
 
   -- A family-shared copy is not the purchaser's subscription.
   v_out := public.apple_apply_transaction(v_cb,
-    jsonb_build_object('transactionId','F1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','F1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 51000,'expiresDate',v_ms_now + 40*v_day,'signedDate',v_ms_now + 51000,'inAppOwnershipType','FAMILY_SHARED'), null, 'app');
   r := r || format('A family-shared transaction is not treated as a purchase|%s|%s', v_out = 'notPurchaser', v_out);
 
   -- The company plan lapses in favour of a longer one bought by the new owner:
   -- the company follows the subscription that actually entitles it.
   v_out := public.apple_apply_transaction(v_cb,
-    jsonb_build_object('transactionId','N2','originalTransactionId','O5','productId','com.harboursouth.fieldservice.business.annual',
+    jsonb_build_object('environment','Production','transactionId','N2','originalTransactionId','O5','productId','com.harboursouth.fieldservice.business.annual',
       'purchaseDate',v_ms_now + 52000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 52000),
     jsonb_build_object('originalTransactionId','O5','autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.business.annual','signedDate',v_ms_now + 52000), 'app');
   select * into v_state from public.company_commercial_state(v_cb);
@@ -304,7 +311,7 @@ begin
   -- A subscription a company has moved off still belongs to that company.
   begin
     v_out := public.apple_apply_transaction(v_c2,
-      jsonb_build_object('transactionId','R1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
+      jsonb_build_object('environment','Production','transactionId','R1','originalTransactionId','O3','productId','com.harboursouth.fieldservice.business.annual',
         'purchaseDate',v_ms_now + 53000,'expiresDate',v_ms_now + 40*v_day,'signedDate',v_ms_now + 53000), null, 'restore');
     r := r || format('Restoring a superseded subscription into another company is refused|false|accepted %s', v_out);
   exception when others then
@@ -314,7 +321,7 @@ begin
   -- A purchase made for one company (appAccountToken) can never land in another.
   begin
     v_out := public.apple_apply_transaction(v_c2,
-      jsonb_build_object('transactionId','K1','originalTransactionId','O6','productId','com.harboursouth.fieldservice.team.monthly',
+      jsonb_build_object('environment','Production','transactionId','K1','originalTransactionId','O6','productId','com.harboursouth.fieldservice.team.monthly',
         'purchaseDate',v_ms_now + 54000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 54000,'appAccountToken', upper(v_cb::text)), null, 'restore');
     r := r || format('A purchase tagged for another company is refused|false|accepted %s', v_out);
   exception when others then
@@ -332,12 +339,129 @@ begin
      and u.table_name in ('app_users','users');
   r := r || format('No subscription table references a user|%s|n=%s', v_n = 0, v_n);
 
+
+  -- ---------------------------------------------------------------------------
+  -- Apple environments: Production vs Sandbox (TestFlight / App Review)
+  -- ---------------------------------------------------------------------------
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier)
+    values ('SUBTEST QA','hvac','US','USD','America/New_York') returning id into v_ct;
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier)
+    values ('SUBTEST Ordinary','hvac','US','USD','America/New_York') returning id into v_co;
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier)
+    values ('SUBTEST QA Prod','hvac','US','USD','America/New_York') returning id into v_cp;
+  insert into public.company_subscriptions (company_id) values (v_ct), (v_co), (v_cp);
+  insert into public.apple_sandbox_companies (company_id, note) values (v_ct, 'suite'), (v_cp, 'suite');
+
+  -- Production creates a real entitlement.
+  v_out := public.apple_apply_transaction(v_cp,
+    jsonb_build_object('environment','Production','transactionId','E-P1','originalTransactionId','E-OP','productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  select * into v_state from public.company_commercial_state(v_cp);
+  r := r || format('ENV: a Production purchase creates a real entitlement|%s|out=%s env=%s', v_out = 'applied:active' and v_state.has_entitlement and v_state.tier_id = 'team' and v_state.apple_environment = 'Production', v_out, v_state.apple_environment);
+
+  -- Sandbox on an allowlisted test company: a test entitlement, marked Sandbox.
+  v_out := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('environment','Sandbox','transactionId','E-S1','originalTransactionId','E-OS','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  select * into v_state from public.company_commercial_state(v_ct);
+  r := r || format('ENV: Sandbox on an approved test company gives a test entitlement only|%s|out=%s env=%s', v_out = 'applied:active' and v_state.has_entitlement and v_state.apple_environment = 'Sandbox', v_out, v_state.apple_environment);
+
+  -- Sandbox on an ordinary company: recorded as a test transaction, no entitlement.
+  v_out := public.apple_apply_transaction(v_co,
+    jsonb_build_object('environment','Sandbox','transactionId','E-S2','originalTransactionId','E-OS2','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  select * into v_state from public.company_commercial_state(v_co);
+  r := r || format('ENV: Sandbox on an ordinary company does not change its entitlement|%s|out=%s state=%s store=%s', v_out = 'sandboxNotApplied' and not v_state.has_entitlement and v_state.entitlement_state = 'none' and v_state.billing_store = 'none', v_out, v_state.entitlement_state, v_state.billing_store);
+  r := r || format('ENV: the ordinary company''s test purchase is kept as a test ledger row|%s|', exists(select 1 from public.apple_transactions where environment = 'Sandbox' and transaction_id = 'E-S2' and company_id = v_co));
+
+  -- Sandbox on an ordinary company that holds a Production plan: untouched.
+  v_out := public.apple_apply_transaction(v_c2,
+    jsonb_build_object('environment','Sandbox','transactionId','E-S4','originalTransactionId','E-OS4','productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 900000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 900000),
+    jsonb_build_object('environment','Sandbox','originalTransactionId','E-OS4','autoRenewStatus',0,'signedDate',v_ms_now + 900000), 'app');
+  select * into v_state from public.company_commercial_state(v_c2);
+  r := r || format('ENV: Sandbox leaves an ordinary company''s Production plan untouched|%s|out=%s tier=%s env=%s orig=%s', v_out = 'sandboxNotApplied' and v_state.tier_id = 'starter' and v_state.apple_environment = 'Production' and v_state.apple_original_transaction_id = 'O2' and v_state.will_auto_renew, v_out, v_state.tier_id, v_state.apple_environment, v_state.apple_original_transaction_id);
+
+  -- Sandbox can never replace Production, even on an allowlisted company.
+  v_out := public.apple_apply_transaction(v_cp,
+    jsonb_build_object('environment','Sandbox','transactionId','E-S3','originalTransactionId','E-OS3','productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 1000), null, 'app');
+  select * into v_state from public.company_commercial_state(v_cp);
+  r := r || format('ENV: Sandbox cannot replace a Production entitlement (test company too)|%s|out=%s tier=%s env=%s', v_out = 'sandboxNotApplied' and v_state.tier_id = 'team' and v_state.apple_environment = 'Production' and v_state.apple_original_transaction_id = 'E-OP', v_out, v_state.tier_id, v_state.apple_environment);
+
+  -- Sandbox renewal info can never be written onto the Production subscription.
+  v_out := public.apple_apply_transaction(v_cp,
+    jsonb_build_object('environment','Production','transactionId','E-P1','originalTransactionId','E-OP','productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now),
+    jsonb_build_object('environment','Sandbox','originalTransactionId','E-OP','autoRenewStatus',0,'signedDate',v_ms_now + 5000), 'notification');
+  select * into v_state from public.company_commercial_state(v_cp);
+  r := r || format('ENV: renewal info from the other environment is ignored|%s|out=%s renew=%s', v_state.will_auto_renew and v_state.entitlement_state = 'active', v_out, v_state.will_auto_renew);
+
+  -- Production always takes over from a test subscription, even a shorter one.
+  v_out := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('environment','Production','transactionId','E-P2','originalTransactionId','E-OP2','productId','com.harboursouth.fieldservice.starter.monthly',
+      'purchaseDate',v_ms_now + 2000,'expiresDate',v_ms_now + 10*v_day,'signedDate',v_ms_now + 2000), null, 'app');
+  select * into v_state from public.company_commercial_state(v_ct);
+  r := r || format('ENV: Production takes precedence over a test subscription|%s|out=%s tier=%s env=%s', v_out = 'applied:active' and v_state.tier_id = 'starter' and v_state.apple_environment = 'Production', v_out, v_state.tier_id, v_state.apple_environment);
+  v_out := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('environment','Sandbox','transactionId','E-S1b','originalTransactionId','E-OS','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now + 3000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 3000), null, 'notification');
+  select * into v_state from public.company_commercial_state(v_ct);
+  r := r || format('ENV: a later test renewal cannot take the plan back from Production|%s|out=%s tier=%s', v_out = 'sandboxNotApplied' and v_state.tier_id = 'starter' and v_state.apple_environment = 'Production', v_out, v_state.tier_id);
+
+  -- Test and Production identities are separate: the same ids in each
+  -- environment belong to different companies without colliding.
+  v_out := public.apple_apply_transaction(v_co,
+    jsonb_build_object('environment','Production','transactionId','SAME-1','originalTransactionId','SAME-O','productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  begin
+    v_s := public.apple_apply_transaction(v_cb,
+      jsonb_build_object('environment','Sandbox','transactionId','SAME-1','originalTransactionId','SAME-O','productId','com.harboursouth.fieldservice.team.monthly',
+        'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  exception when others then
+    v_s := 'error ' || sqlstate;
+  end;
+  select count(*) into v_n from public.apple_transactions where transaction_id = 'SAME-1';
+  r := r || format('ENV: test and Production purchase identities stay separate|%s|prod=%s test=%s rows=%s', v_out = 'applied:active' and v_s = 'sandboxNotApplied' and v_n = 2
+    and exists(select 1 from public.apple_transactions where transaction_id='SAME-1' and environment='Production' and company_id=v_co)
+    and exists(select 1 from public.apple_transactions where transaction_id='SAME-1' and environment='Sandbox' and company_id=v_cb), v_out, v_s, v_n);
+  select * into v_state from public.company_commercial_state(v_co);
+  r := r || format('ENV: the ordinary company is now entitled only through Production|%s|env=%s', v_state.has_entitlement and v_state.apple_environment = 'Production', v_state.apple_environment);
+
+  -- Unknown and missing environments are refused without a trace.
+  v_out := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('environment','Xcode','transactionId','X-1','originalTransactionId','X-O1','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now + 4000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 4000), null, 'app');
+  v_s := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('transactionId','X-2','originalTransactionId','X-O2','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now + 4000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 4000), null, 'app');
+  v_tok := public.apple_apply_transaction(v_ct,
+    jsonb_build_object('environment','LocalTesting','transactionId','X-3','originalTransactionId','X-O3','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now + 4000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 4000), null, 'app');
+  select count(*) into v_n from public.apple_transactions where transaction_id in ('X-1','X-2','X-3');
+  select * into v_state from public.company_commercial_state(v_ct);
+  r := r || format('ENV: unknown or missing environments are rejected, nothing recorded|%s|xcode=%s missing=%s local=%s rows=%s tier=%s',
+    v_out = 'unsupportedEnvironment' and v_s = 'unsupportedEnvironment' and v_tok = 'unsupportedEnvironment' and v_n = 0 and v_state.tier_id = 'starter',
+    v_out, v_s, v_tok, v_n, v_state.tier_id);
+
+  -- The allowlist cannot be read, joined or edited by app users.
+  r := r || format('ENV: app users cannot read or edit the test-company allowlist|%s|',
+    not has_table_privilege('authenticated', 'public.apple_sandbox_companies', 'select')
+    and not has_table_privilege('authenticated', 'public.apple_sandbox_companies', 'insert')
+    and not has_table_privilege('authenticated', 'public.apple_sandbox_companies', 'update')
+    and not has_table_privilege('authenticated', 'public.apple_sandbox_companies', 'delete')
+    and not has_table_privilege('anon', 'public.apple_sandbox_companies', 'select')
+    and not exists(select 1 from pg_policies where schemaname = 'public' and tablename = 'apple_sandbox_companies')
+    and not exists(select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'public' and p.prosrc ilike '%insert into public.apple_sandbox_companies%'));
+
   -- ---------------------------------------------------------------------------
   -- Only the server writes entitlement
   -- ---------------------------------------------------------------------------
   perform set_config('request.jwt.claims', json_build_object('sub', v_owner2::text, 'role', 'authenticated')::text, true);
   begin
-    perform public.apple_apply_transaction(v_c2, jsonb_build_object('transactionId','X','originalTransactionId','X','productId','com.harboursouth.fieldservice.business.annual'));
+    perform public.apple_apply_transaction(v_c2, jsonb_build_object('environment','Production','transactionId','X','originalTransactionId','X','productId','com.harboursouth.fieldservice.business.annual'));
     r := r || array['A signed-in user cannot write entitlement|false|accepted'];
   exception when others then
     r := r || format('A signed-in user cannot write entitlement|%s|%s', sqlstate in ('TD403','42501'), sqlstate);
@@ -375,7 +499,7 @@ begin
   -- Team: 5 users total.
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
   perform public.apple_apply_transaction(v_c2,
-    jsonb_build_object('transactionId','U9','originalTransactionId','O2','productId','com.harboursouth.fieldservice.team.monthly',
+    jsonb_build_object('environment','Production','transactionId','U9','originalTransactionId','O2','productId','com.harboursouth.fieldservice.team.monthly',
       'purchaseDate',v_ms_now + 99000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 99000), null, 'app');
   perform set_config('request.jwt.claims', json_build_object('sub', v_owner2::text, 'role', 'authenticated')::text, true);
   v_n := 0;
@@ -419,7 +543,7 @@ begin
   -- Downgrade to Starter: nobody is suspended; adding is refused.
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
   perform public.apple_apply_transaction(v_c2,
-    jsonb_build_object('transactionId','U10','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
+    jsonb_build_object('environment','Production','transactionId','U10','originalTransactionId','O2','productId','com.harboursouth.fieldservice.starter.monthly',
       'purchaseDate',v_ms_now + 199000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 199000), null, 'app');
   select count(*) into v_n from public.app_users where company_id = v_c2 and status = 'active';
   select * into v_state from public.company_commercial_state(v_c2);
@@ -480,6 +604,143 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', v_joiner::text, 'role', 'authenticated')::text, true);
   select * into v_state from public.company_commercial_state(null);
   r := r || format('The new Owner sees the same company plan|%s|tier=%s', v_state.has_entitlement and v_state.tier_id = 'business', v_state.tier_id);
+
+
+  -- ---------------------------------------------------------------------------
+  -- Workspace lock: the minimal member read
+  -- ---------------------------------------------------------------------------
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+  select '00000000-0000-0000-0000-000000000000', u.id, 'authenticated', 'authenticated', u.em, 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false
+  from (values (v_ownerl,'ownerl@subtest.invalid'), (v_workerl,'workerl@subtest.invalid'), (v_ownerd,'ownerd@subtest.invalid')) u(id, em);
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier)
+    values ('SUBTEST Lock','hvac','US','USD','America/New_York') returning id into v_cl;
+  insert into public.company_subscriptions (company_id) values (v_cl);
+  insert into public.app_users (id, company_id, name, email, role) values
+    (v_ownerl, v_cl, 'OwnerL', 'ownerl@subtest.invalid', 'owner'),
+    (v_workerl, v_cl, 'WorkerL', 'workerl@subtest.invalid', 'fieldWorker');
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_workerl::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.company_workspace_access();
+  r := r || format('LOCK: a company with no plan is locked|%s|has=%s state=%s', not v_chk.has_active_subscription and v_chk.subscription_state = 'none', v_chk.has_active_subscription, v_chk.subscription_state);
+
+  foreach v_s in array array['expired','revoked','billingRetry','trial','active','offer','gracePeriod','cancelling'] loop
+    perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+    update public.company_subscriptions set
+      store = 'apple',
+      apple_expires_at = case v_s when 'expired' then now() - interval '1 day' when 'billingRetry' then now() - interval '1 day'
+                                  when 'gracePeriod' then now() - interval '1 day' when 'cancelling' then now() + interval '5 days'
+                                  else now() + interval '20 days' end,
+      apple_revoked_at = case when v_s = 'revoked' then now() end,
+      apple_auto_renew = v_s not in ('expired','cancelling'),
+      apple_grace_period_expires_at = case when v_s = 'gracePeriod' then now() + interval '5 days' end,
+      apple_in_billing_retry = v_s in ('billingRetry','gracePeriod'),
+      apple_is_free_offer = v_s in ('trial','offer'),
+      apple_offer_type = case v_s when 'trial' then 1 when 'offer' then 3 end,
+      tier_id = 'team'
+    where company_id = v_cl;
+    perform set_config('request.jwt.claims', json_build_object('sub', v_workerl::text, 'role', 'authenticated')::text, true);
+    select * into v_chk from public.company_workspace_access();
+    r := r || format('LOCK: %s company is %s|%s|has=%s state=%s', v_s,
+      case when v_s in ('expired','revoked','billingRetry') then 'locked' else 'unlocked' end,
+      v_chk.subscription_state = v_s and v_chk.has_active_subscription = (v_s not in ('expired','revoked','billingRetry')),
+      v_chk.has_active_subscription, v_chk.subscription_state);
+  end loop;
+
+  r := r || format('LOCK: members read exactly two facts and cannot name a company|%s|%s',
+    pg_get_function_result('public.company_workspace_access()'::regprocedure) = 'TABLE(has_active_subscription boolean, subscription_state text)'
+    and (select pronargs from pg_proc where oid = 'public.company_workspace_access()'::regprocedure) = 0
+    and has_function_privilege('authenticated', 'public.company_workspace_access()', 'execute')
+    and not has_function_privilege('anon', 'public.company_workspace_access()', 'execute'),
+    pg_get_function_result('public.company_workspace_access()'::regprocedure));
+  begin
+    select * into v_state from public.company_commercial_state(null);
+    r := r || array['LOCK: a field worker still cannot read billing details|false|accepted'];
+  exception when others then
+    r := r || format('LOCK: a field worker still cannot read billing details|%s|%s', sqlstate = 'TD403', sqlstate);
+  end;
+
+  -- ---------------------------------------------------------------------------
+  -- Downgrades: refused while active users exceed the target plan
+  -- ---------------------------------------------------------------------------
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier)
+    values ('SUBTEST Downgrade','hvac','US','USD','America/New_York') returning id into v_cd;
+  insert into public.company_subscriptions (company_id) values (v_cd);
+  insert into public.app_users (id, company_id, name, email, role) values (v_ownerd, v_cd, 'OwnerD', 'ownerd@subtest.invalid', 'owner');
+  for i in 1..9 loop
+    v_workerd := gen_random_uuid();
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+      values ('00000000-0000-0000-0000-000000000000', v_workerd, 'authenticated', 'authenticated', 'dg' || i || '@subtest.invalid', 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+    insert into public.app_users (id, company_id, name, email, role, status) values (v_workerd, v_cd, 'DG' || i, 'dg' || i || '@subtest.invalid', 'fieldWorker', 'active');
+  end loop;
+  perform public.apple_apply_transaction(v_cd,
+    jsonb_build_object('environment','Production','transactionId','D-1','originalTransactionId','D-O','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownerd::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.subscription_plan_change_check('team');
+  r := r || format('SEATS: Business (10 active) -> Team is blocked until 5 are deactivated|%s|allowed=%s remove=%s msg=%s', not v_chk.allowed and v_chk.users_to_deactivate = 5 and v_chk.active_users = 10 and v_chk.message ilike '%Deactivate 5 people%', v_chk.allowed, v_chk.users_to_deactivate, v_chk.message);
+  select * into v_chk from public.subscription_plan_change_check('starter');
+  r := r || format('SEATS: Business (10 active) -> Starter is blocked until 9 are deactivated|%s|allowed=%s remove=%s', not v_chk.allowed and v_chk.users_to_deactivate = 9, v_chk.allowed, v_chk.users_to_deactivate);
+  select * into v_chk from public.subscription_plan_change_check('business');
+  r := r || format('SEATS: Business has no hard-coded cap in the plan check|%s|limit=%s', v_chk.allowed and v_chk.user_limit is null, v_chk.user_limit);
+  select count(*) into v_n from public.app_users where company_id = v_cd and status = 'active';
+  r := r || format('SEATS: a refused downgrade suspends nobody|%s|active=%s', v_n = 10, v_n);
+
+  -- The owner chooses who to deactivate.
+  update public.app_users set status = 'suspended' where company_id = v_cd and email in ('dg1@subtest.invalid','dg2@subtest.invalid','dg3@subtest.invalid','dg4@subtest.invalid','dg5@subtest.invalid');
+  select * into v_chk from public.subscription_plan_change_check('team');
+  r := r || format('SEATS: Team becomes possible once the owner is down to 5 active|%s|allowed=%s active=%s', v_chk.allowed and v_chk.active_users = 5, v_chk.allowed, v_chk.active_users);
+  select * into v_chk from public.subscription_plan_change_check('starter');
+  r := r || format('SEATS: Starter still needs 4 more deactivated|%s|remove=%s', not v_chk.allowed and v_chk.users_to_deactivate = 4, v_chk.users_to_deactivate);
+  update public.app_users set status = 'suspended' where company_id = v_cd and email in ('dg6@subtest.invalid','dg7@subtest.invalid','dg8@subtest.invalid','dg9@subtest.invalid');
+  select * into v_chk from public.subscription_plan_change_check('starter');
+  r := r || format('SEATS: Starter becomes possible once only the owner is active|%s|allowed=%s', v_chk.allowed, v_chk.allowed);
+  select count(*) into v_n from public.app_users where company_id = v_cd;
+  r := r || format('SEATS: no user record is deleted by the downgrade process|%s|rows=%s', v_n = 10 and (select count(*) from public.app_users where company_id = v_cd and status = 'suspended') = 9, v_n);
+
+  -- After the move to Starter, a deactivated person stays recoverable but
+  -- cannot be reactivated beyond the plan.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  perform public.apple_apply_transaction(v_cd,
+    jsonb_build_object('environment','Production','transactionId','D-2','originalTransactionId','D-O','productId','com.harboursouth.fieldservice.starter.monthly',
+      'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 1000), null, 'notification');
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownerd::text, 'role', 'authenticated')::text, true);
+  begin
+    update public.app_users set status = 'active' where company_id = v_cd and email = 'dg1@subtest.invalid';
+    r := r || array['SEATS: on Starter, reactivating a second person is refused|false|accepted'];
+  exception when others then
+    r := r || format('SEATS: on Starter, reactivating a second person is refused|%s|%s', sqlerrm ilike '%Starter plan%', sqlerrm);
+  end;
+  begin
+    perform public.create_invitation('dgnew@subtest.invalid', 'fieldWorker', 7);
+    r := r || array['SEATS: on Starter, adding a second person is refused|false|accepted'];
+  exception when others then
+    r := r || format('SEATS: on Starter, adding a second person is refused|%s|%s', sqlerrm ilike '%Starter plan%', sqlerrm);
+  end;
+
+  -- Upgrading again makes the deactivated people recoverable.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  perform public.apple_apply_transaction(v_cd,
+    jsonb_build_object('environment','Production','transactionId','D-3','originalTransactionId','D-O','productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now + 2000,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 2000), null, 'notification');
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownerd::text, 'role', 'authenticated')::text, true);
+  begin
+    update public.app_users set status = 'active' where company_id = v_cd and email in ('dg1@subtest.invalid','dg2@subtest.invalid','dg3@subtest.invalid','dg4@subtest.invalid');
+    select count(*) into v_n from public.app_users where company_id = v_cd and status = 'active';
+    r := r || format('SEATS: after upgrading to Team, deactivated people can be reactivated up to 5|%s|active=%s', v_n = 5, v_n);
+  exception when others then
+    r := r || format('SEATS: after upgrading to Team, deactivated people can be reactivated up to 5|false|%s', sqlerrm);
+  end;
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_workerl::text, 'role', 'authenticated')::text, true);
+  begin
+    perform public.subscription_plan_change_check('starter');
+    r := r || array['SEATS: only the owner can run the plan-change check|false|accepted'];
+  exception when others then
+    r := r || format('SEATS: only the owner can run the plan-change check|%s|%s', sqlstate = 'TD403', sqlstate);
+  end;
 
   -- Tidy (the whole transaction is rolled back anyway).
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);

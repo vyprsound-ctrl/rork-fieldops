@@ -11,6 +11,7 @@ import SwiftUI
 /// field worker never receives the office shell.
 struct ContentView: View {
     @Environment(AppEnvironment.self) private var env
+    @Environment(\.scenePhase) private var scenePhase
 
     /// A destination a notification tap asked for.
     ///
@@ -33,10 +34,23 @@ struct ContentView: View {
                 // the reset finishes, so nobody lands in the shell mid-flow.
                 ChooseNewPasswordView()
             } else if let session = env.activeSession {
-                if session.role.usesFieldShell {
-                    EngineerShellView()
-                } else {
-                    OwnerShellView()
+                // No active subscription = no working workspace.
+                switch env.workspaceGate {
+                case .checking:
+                    ZStack {
+                        Theme.canvas.ignoresSafeArea()
+                        LoadingStateView(message: "Opening your workspace")
+                    }
+                case .memberLocked:
+                    WorkspaceLockedView()
+                case .ownerReadOnly:
+                    OwnerReadOnlyShellView()
+                case .open:
+                    if session.role.usesFieldShell {
+                        EngineerShellView()
+                    } else {
+                        OwnerShellView()
+                    }
                 }
             } else {
                 SignInView()
@@ -45,6 +59,7 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.25), value: env.session)
         .animation(.easeInOut(duration: 0.25), value: env.productionSession)
         .animation(.easeInOut(duration: 0.25), value: env.pendingPasswordReset)
+        .animation(.easeInOut(duration: 0.25), value: env.workspaceGate)
         .sheet(item: $deepLinkRoute) { route in
             NavigationStack {
                 RouteDestinationView(route: route)
@@ -77,6 +92,13 @@ struct ContentView: View {
         .task(id: env.productionSession?.userID) {
             await env.syncStoreEntitlements()
         }
+        .task(id: env.signedInSession?.userID) {
+            await env.refreshWorkspaceAccess()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, env.signedInSession != nil else { return }
+            Task { await env.refreshWorkspaceAccess() }
+        }
         .onChange(of: PushDeepLinkInbox.shared.pending) { _, _ in
             consumePendingDeepLink()
         }
@@ -88,7 +110,7 @@ struct ContentView: View {
     /// The session check is the important part: a parked route must never
     /// navigate a signed-out user into a tenant screen.
     private func consumePendingDeepLink() {
-        guard env.activeSession != nil else { return }
+        guard env.activeSession != nil, env.workspaceGate != .memberLocked else { return }
         guard let route = PushDeepLinkInbox.shared.consume() else { return }
         deepLinkRoute = route
     }

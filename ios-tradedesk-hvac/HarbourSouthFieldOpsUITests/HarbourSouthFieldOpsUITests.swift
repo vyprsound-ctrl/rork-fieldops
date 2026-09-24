@@ -823,15 +823,60 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
     }
 
     /// A company with no plan is invited to start Apple's 14-day free trial.
+    /// Its owner lands straight on the plan screen: no active subscription
+    /// means no working workspace.
     func testUnsubscribedCompanyIsOfferedTheFreeTrial() throws {
         signIn(as: "Erin Vaught")
-        openMoreSection("Subscription & Users")
-        require(app.navigationBars["Subscription"], "the Subscription screen")
+        require(app.navigationBars["Subscription"], "the Choose a plan screen, presented on sign-in")
         require(app.staticTexts["No plan yet"], "the no-plan status")
         let trial = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "14-day free trial")).firstMatch
         XCTAssertTrue(trial.waitForExistence(timeout: 20) || scrollTo(trial), "A plan must offer the 14-day free trial")
         let restore = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] %@", "Restore purchases")).firstMatch
         XCTAssertTrue(scrollTo(restore), "Restore purchases must be offered")
+    }
+
+    // MARK: - Workspace lock
+
+    /// Anyone but the owner of a company with no active subscription sees only
+    /// the locked screen — no tabs, no company data.
+    func testMemberOfUnsubscribedCompanyIsLockedOut() throws {
+        signIn(as: "Ray Kessler")
+        let message = app.staticTexts["workspace.locked.message"]
+        require(message, "the locked-workspace message")
+        XCTAssertEqual(message.label, "Your company's subscription has ended. Please ask the account owner to renew the subscription.")
+        XCTAssertFalse(app.tabBars.buttons["Jobs"].exists, "A locked member must not reach the workspace")
+        XCTAssertTrue(app.buttons["Sign out"].exists, "A locked member can still sign out")
+    }
+
+    /// The owner of a company with no active subscription can browse company
+    /// data, but not create or edit it, and can reopen the plan screen.
+    func testOwnerOfUnsubscribedCompanyIsReadOnly() throws {
+        signIn(as: "Erin Vaught")
+        dismissPlanScreenToReadOnlyWorkspace()
+        require(app.buttons["workspace.readOnly.banner"], "the read-only banner")
+        openTab("Jobs")
+        require(app.navigationBars.firstMatch, "the Jobs screen")
+        XCTAssertFalse(app.buttons["New job"].waitForExistence(timeout: 3), "A read-only workspace must not offer New job")
+
+        forceTap(app.buttons["workspace.readOnly.banner"])
+        require(app.navigationBars["Subscription"], "the plan screen, reopened from the banner")
+    }
+
+    /// A subscribed company's people are never locked.
+    func testSubscribedCompanyIsNotLocked() throws {
+        signIn(as: "Marcus Hale")
+        require(app.tabBars.buttons["Jobs"], "the field worker shell")
+        XCTAssertFalse(app.staticTexts["workspace.locked.message"].exists)
+        XCTAssertFalse(app.buttons["workspace.readOnly.banner"].exists)
+    }
+
+    private func dismissPlanScreenToReadOnlyWorkspace(file: StaticString = #filePath, line: UInt = #line) {
+        let browse = app.buttons["workspace.readOnly.browse"]
+        guard browse.waitForExistence(timeout: 20) else {
+            XCTFail("The plan screen never offered View data", file: file, line: line)
+            return
+        }
+        browse.tap()
     }
 
     // MARK: - Helpers for commercial screens
@@ -899,6 +944,7 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
     /// same screen.
     func testConnectStripeMenuItemOffersConnectWhenNotConnected() throws {
         signIn(as: "Erin Vaught")
+        dismissPlanScreenToReadOnlyWorkspace()
         openTab("More")
 
         let row = app.buttons["more.section.payments_integration"]

@@ -42,6 +42,60 @@ nonisolated struct StoreLinkResult: Hashable, Sendable {
     let belongsToAnotherCompany: Bool
     /// Apple's signature could not be verified.
     let unverified: Bool
+    /// A test purchase (TestFlight, App Review, Sandbox) was recorded but did
+    /// not change the company's plan, or the purchase came from an environment
+    /// the server refuses. Never a paid plan.
+    var testPurchaseNotApplied: Bool = false
+
+    /// Outcomes the server has recorded for good. Anything else stays
+    /// unfinished so StoreKit redelivers it.
+    static let finishedOutcomes: Set<String> = [
+        "stale", "upgradedAway", "unknownProduct", "otherSubscription", "notPurchaser",
+        "sandboxNotApplied", "unsupportedEnvironment"
+    ]
+
+    /// Reads the per-purchase outcomes returned by `apple-subscription`.
+    static func summarise(outcomes: [(transactionID: String?, outcome: String)], linked: Bool) -> StoreLinkResult {
+        let handled: [UInt64] = outcomes.compactMap { item in
+            let done = item.outcome.hasPrefix("applied") || finishedOutcomes.contains(item.outcome)
+            return done ? item.transactionID.flatMap(UInt64.init) : nil
+        }
+        return StoreLinkResult(
+            linked: linked,
+            handledTransactionIDs: handled,
+            belongsToAnotherCompany: outcomes.contains { $0.outcome == "belongsToAnotherCompany" },
+            unverified: outcomes.contains { $0.outcome == "unverified" },
+            testPurchaseNotApplied: outcomes.contains { $0.outcome == "sandboxNotApplied" || $0.outcome == "unsupportedEnvironment" }
+        )
+    }
+}
+
+/// The only subscription facts every company member may read: whether the
+/// company has an active subscription, and its state. Drives the
+/// company-level workspace lock (`company_workspace_access()`).
+nonisolated struct WorkspaceAccess: Hashable, Sendable {
+    let hasActiveSubscription: Bool
+    let state: EntitlementState
+}
+
+/// Whether the company may move to a plan. Refused while it has more active
+/// users than the plan allows; the owner chooses who to deactivate.
+nonisolated struct PlanChangeCheck: Hashable, Sendable {
+    let allowed: Bool
+    let userLimit: Int?
+    let activeUsers: Int
+    let usersToDeactivate: Int
+    let message: String?
+
+    /// The rule, as the server applies it. Used by the development stack.
+    static func evaluate(planName: String, userLimit: Int?, activeUsers: Int) -> PlanChangeCheck {
+        let excess = userLimit.map { max(activeUsers - $0, 0) } ?? 0
+        guard excess > 0, let userLimit else {
+            return PlanChangeCheck(allowed: true, userLimit: userLimit, activeUsers: activeUsers, usersToDeactivate: 0, message: nil)
+        }
+        let message = "\(planName) includes up to \(userLimit) active \(userLimit == 1 ? "user" : "users") and your company has \(activeUsers). Deactivate \(excess) \(excess == 1 ? "person" : "people") first — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated if you move to a bigger plan later."
+        return PlanChangeCheck(allowed: false, userLimit: userLimit, activeUsers: activeUsers, usersToDeactivate: excess, message: message)
+    }
 }
 
 // MARK: - Stripe Connect

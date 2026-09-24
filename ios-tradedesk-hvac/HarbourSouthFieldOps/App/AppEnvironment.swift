@@ -38,6 +38,19 @@ nonisolated enum AuthPhase: Equatable, Sendable {
     }
 }
 
+/// The company-level rule: no active subscription = no working workspace.
+nonisolated enum WorkspaceGate: Equatable, Sendable {
+    /// The company's position for this person has not been read yet.
+    case checking
+    /// Active subscription (or the position could not be read).
+    case open
+    /// No active subscription, and this is the owner: data read-only, plan
+    /// screen available.
+    case ownerReadOnly
+    /// No active subscription, and this is anyone else: locked.
+    case memberLocked
+}
+
 /// Composition root. Swapping a mock for a production adapter happens here and
 /// nowhere else — no screen constructs a service directly.
 @Observable
@@ -105,6 +118,11 @@ final class AppEnvironment {
     // Production session — resolved from the database, never from client input.
     private(set) var productionSession: TenantSession?
     private(set) var authPhase: AuthPhase = .signedOut
+    /// The company's subscription position, as every member may read it.
+    private(set) var workspaceAccess: WorkspaceAccess?
+    /// Whose position `workspaceAccess` is, so one person's answer is never
+    /// applied to the next person who signs in.
+    private var workspaceAccessUserID: String?
     private(set) var passwordResetNotice: String?
     /// Set when a recovery link has authenticated somebody who has not yet
     /// chosen a new password. Held here rather than published as the live
@@ -242,6 +260,42 @@ final class AppEnvironment {
             // StoreKit redelivers it.
             print("[store] subscription could not be linked yet: \(error.localizedDescription)")
         }
+        await refreshWorkspaceAccess()
+    }
+
+    // MARK: - Workspace gate
+
+    /// Re-reads whether the company has an active subscription. Called when a
+    /// session starts, when the app returns to the foreground, and after any
+    /// purchase, restore or Offer Code redemption.
+    ///
+    /// A failed read keeps the last known answer for this person (or opens
+    /// the workspace if there is none): the gate is a commercial rule, and a
+    /// dropped connection must never lock a paying company out.
+    func refreshWorkspaceAccess() async {
+        guard let base = signedInSession else {
+            workspaceAccess = nil
+            workspaceAccessUserID = nil
+            return
+        }
+        do {
+            let access = try await gateway.workspaceAccess(session: base)
+            guard signedInSession?.userID == base.userID else { return }
+            workspaceAccess = access
+        } catch {
+            print("[workspace] access could not be read: \(error.localizedDescription)")
+            guard signedInSession?.userID == base.userID else { return }
+            if workspaceAccessUserID != base.userID { workspaceAccess = nil }
+        }
+        workspaceAccessUserID = base.userID
+    }
+
+    /// Where the signed-in person stands against the company-level gate.
+    var workspaceGate: WorkspaceGate {
+        guard let base = signedInSession else { return .open }
+        guard workspaceAccessUserID == base.userID else { return .checking }
+        guard let access = workspaceAccess, !access.hasActiveSubscription else { return .open }
+        return base.role == .owner ? .ownerReadOnly : .memberLocked
     }
 
     /// The notification adapter matching whichever session is signed in.
@@ -293,8 +347,15 @@ final class AppEnvironment {
     /// Vocabulary for the signed-in company's trade. Neutral before sign-in.
     var terms: Terminology { activeSession?.terms ?? .generic }
 
-    /// Whichever session is currently driving the UI.
-    var activeSession: TenantSession? { productionSession ?? session }
+    /// Whichever session is signed in, exactly as authenticated.
+    var signedInSession: TenantSession? { productionSession ?? session }
+
+    /// Whichever session is currently driving the UI. While the company has no
+    /// active subscription, the owner's session is read-only.
+    var activeSession: TenantSession? {
+        guard let base = signedInSession else { return nil }
+        return workspaceGate == .ownerReadOnly ? base.readOnlyWorkspace() : base
+    }
 
     var isProductionAvailable: Bool { productionAuth != nil }
 

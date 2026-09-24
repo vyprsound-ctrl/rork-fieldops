@@ -25,6 +25,11 @@ final class SubscriptionViewModel {
     var period: BillingPeriod = .monthly
     var actionError: String?
     var notice: String?
+    /// Neither success nor failure: e.g. a TestFlight purchase that did not
+    /// change the company's plan.
+    var caution: String?
+
+    static let testPurchaseMessage = "This was a test purchase (TestFlight or Sandbox). It doesn't change your company's plan — nothing has been charged and your plan is exactly as it was."
 
     var isWorking: Bool { workingProductID != nil || isRestoring }
 
@@ -102,9 +107,19 @@ final class SubscriptionViewModel {
         workingProductID = productID
         actionError = nil
         notice = nil
+        caution = nil
         defer { workingProductID = nil }
 
         do {
+            // A plan with fewer seats than the company's active users is
+            // refused before Apple is ever asked. The owner chooses who to
+            // deactivate; nobody is suspended automatically.
+            let check = try await gateway.planChangeCheck(session: session, planID: plan.id)
+            guard check.allowed else {
+                actionError = check.message ?? "Deactivate people first to move to \(plan.displayName)."
+                return
+            }
+
             switch try await store.purchase(productID: productID, appAccountToken: UUID(uuidString: session.companyID)) {
             case .cancelled:
                 return
@@ -113,13 +128,7 @@ final class SubscriptionViewModel {
             case .purchased(let purchase):
                 let result = try await gateway.linkStorePurchases(session: session, purchases: [purchase])
                 for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
-                if result.belongsToAnotherCompany {
-                    actionError = "This Apple ID's Harbour South subscription already belongs to another company."
-                } else if result.unverified {
-                    actionError = StoreBillingError.unverified.errorDescription
-                } else {
-                    notice = "You're on \(plan.displayName). Thanks for choosing Harbour South."
-                }
+                apply(Self.purchaseOutcome(result, planName: plan.displayName))
             }
         } catch {
             actionError = (error as? LocalizedError)?.errorDescription ?? DataError.wrap(error).errorDescription
@@ -131,6 +140,7 @@ final class SubscriptionViewModel {
         isRestoring = true
         actionError = nil
         notice = nil
+        caution = nil
         defer { isRestoring = false }
         do {
             let purchases = try await store.restore()
@@ -143,12 +153,48 @@ final class SubscriptionViewModel {
             for id in result.handledTransactionIDs { await store.finish(transactionID: id) }
             if result.belongsToAnotherCompany {
                 actionError = "This Apple ID's Harbour South subscription already belongs to another company."
+            } else if result.linked {
+                notice = "Purchases restored."
+            } else if result.testPurchaseNotApplied {
+                caution = Self.testPurchaseMessage
             } else {
-                notice = result.linked ? "Purchases restored." : "No active Harbour South subscription was found for this Apple ID."
+                notice = "No active Harbour South subscription was found for this Apple ID."
             }
         } catch {
             actionError = (error as? LocalizedError)?.errorDescription ?? DataError.wrap(error).errorDescription
         }
         await refreshCommercial(gateway: gateway, session: session)
+    }
+
+    /// What the owner is told after a purchase, from what the SERVER made of
+    /// it. "You're on …" only when the server actually applied it.
+    enum PurchaseOutcome: Equatable {
+        case success(String)
+        case failure(String)
+        case caution(String)
+    }
+
+    static func purchaseOutcome(_ result: StoreLinkResult, planName: String) -> PurchaseOutcome {
+        if result.belongsToAnotherCompany {
+            return .failure("This Apple ID's Harbour South subscription already belongs to another company.")
+        }
+        if result.unverified {
+            return .failure(StoreBillingError.unverified.errorDescription ?? "Apple couldn't confirm that purchase.")
+        }
+        if result.linked {
+            return .success("You're on \(planName). Thanks for choosing Harbour South.")
+        }
+        if result.testPurchaseNotApplied {
+            return .caution(testPurchaseMessage)
+        }
+        return .caution("Apple accepted the purchase, but Harbour South hasn't confirmed it yet. It will appear here shortly — or tap Restore purchases.")
+    }
+
+    private func apply(_ outcome: PurchaseOutcome) {
+        switch outcome {
+        case .success(let message): notice = message
+        case .failure(let message): actionError = message
+        case .caution(let message): caution = message
+        }
     }
 }

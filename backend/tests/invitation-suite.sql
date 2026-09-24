@@ -54,6 +54,11 @@ declare
   v_cust_a uuid; v_cust_b uuid;
   v_n int; v_txt text; v_uuid uuid;
 begin
+  -- This suite proves the invitation lifecycle, not plan seats (those are in
+  -- subscription-entitlement-suite.sql). Its fixture companies hold no plan,
+  -- so the seat rule is lifted for this rolled-back run only.
+  update public.platform_settings set value = 'false'::jsonb where key = 'seat_limits_enforced';
+
   insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
                           email_confirmed_at, created_at, updated_at,
                           raw_app_meta_data, raw_user_meta_data, is_super_admin)

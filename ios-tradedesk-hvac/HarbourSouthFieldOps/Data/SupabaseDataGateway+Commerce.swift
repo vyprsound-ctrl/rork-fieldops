@@ -238,6 +238,32 @@ private nonisolated struct AppleLinkResponse: Decodable, Sendable {
     let error: String?
 }
 
+private nonisolated struct WorkspaceAccessRecord: Decodable, Sendable {
+    let hasActiveSubscription: Bool?
+    let subscriptionState: String?
+
+    enum CodingKeys: String, CodingKey {
+        case hasActiveSubscription = "has_active_subscription"
+        case subscriptionState = "subscription_state"
+    }
+}
+
+private nonisolated struct PlanChangeCheckRecord: Decodable, Sendable {
+    let allowed: Bool?
+    let userLimit: Int?
+    let activeUsers: Int?
+    let usersToDeactivate: Int?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case allowed
+        case userLimit = "user_limit"
+        case activeUsers = "active_users"
+        case usersToDeactivate = "users_to_deactivate"
+        case message
+    }
+}
+
 /// The error envelope every Edge Function in this project returns on failure.
 nonisolated struct FunctionErrorBody: Decodable, Sendable {
     let error: String?
@@ -571,20 +597,53 @@ extension SupabaseDataGateway {
         if let error = response.error { throw DataError.rejected(error) }
 
         let results = response.results ?? []
-        let handled: [UInt64] = results.compactMap { item in
-            let done = item.outcome.hasPrefix("applied") || item.outcome == "stale"
-                || item.outcome == "upgradedAway" || item.outcome == "unknownProduct"
-                || item.outcome == "otherSubscription" || item.outcome == "notPurchaser"
-            return done ? item.transactionId.flatMap(UInt64.init) : nil
-        }
 
         record("subscription.link", session, allowed: true, "Apple-signed purchase verified and recorded server-side")
 
-        return StoreLinkResult(
-            linked: response.linked ?? false,
-            handledTransactionIDs: handled,
-            belongsToAnotherCompany: results.contains { $0.outcome == "belongsToAnotherCompany" },
-            unverified: results.contains { $0.outcome == "unverified" }
+        return StoreLinkResult.summarise(
+            outcomes: results.map { (transactionID: $0.transactionId, outcome: $0.outcome) },
+            linked: response.linked ?? false
+        )
+    }
+
+    /// Every company member may read this: two facts, nothing else. The
+    /// company is the caller's own inside the database.
+    func workspaceAccess(session: TenantSession) async throws -> WorkspaceAccess {
+        let rows: [WorkspaceAccessRecord]
+        do {
+            let data = try await client.rpc("company_workspace_access").execute().data
+            rows = try SupabaseCoding.decoder.decode([WorkspaceAccessRecord].self, from: data)
+        } catch {
+            throw DataError.wrap(error)
+        }
+        guard let row = rows.first else { throw DataError.notFound }
+        return WorkspaceAccess(
+            hasActiveSubscription: row.hasActiveSubscription ?? false,
+            state: EntitlementState(rawValue: row.subscriptionState ?? "") ?? .none
+        )
+    }
+
+    /// Asks the database whether the company may move to a plan. Refused while
+    /// active users exceed the plan's seats.
+    func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck {
+        try require(.saasBillingManage, session, query: "subscription.planChangeCheck")
+        let rows: [PlanChangeCheckRecord]
+        do {
+            let data = try await client.rpc(
+                "subscription_plan_change_check",
+                params: ["p_tier_id": AnyJSON.string(planID.rawValue)]
+            ).execute().data
+            rows = try SupabaseCoding.decoder.decode([PlanChangeCheckRecord].self, from: data)
+        } catch {
+            throw DataError.wrap(error)
+        }
+        guard let row = rows.first else { throw DataError.notFound }
+        return PlanChangeCheck(
+            allowed: row.allowed ?? false,
+            userLimit: row.userLimit,
+            activeUsers: row.activeUsers ?? 0,
+            usersToDeactivate: row.usersToDeactivate ?? 0,
+            message: row.message
         )
     }
 

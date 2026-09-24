@@ -13,8 +13,39 @@ nonisolated struct TenantSession: Hashable, Sendable {
     let displayName: String
     let email: String
     let trade: Trade
+    /// The company has no active subscription and this is its owner: company
+    /// data stays readable, and only what is needed to subscribe again (plan,
+    /// restore, Offer Codes, deactivating people) remains available. The role
+    /// and the permission matrix themselves are unchanged.
+    var isWorkspaceReadOnly: Bool = false
 
-    var permissions: Set<Permission> { PermissionMatrix.permissions(for: role) }
+    var permissions: Set<Permission> {
+        let granted = PermissionMatrix.permissions(for: role)
+        return isWorkspaceReadOnly ? granted.intersection(Self.availableWithoutSubscription) : granted
+    }
+
+    /// What an owner keeps while the company has no active subscription.
+    static let availableWithoutSubscription: Set<Permission> = [
+        .companyProfileRead, .companyDelete,
+        .usersRead, .usersManage,
+        .saasBillingRead, .saasBillingManage,
+        .customersReadAll, .customersReadAssignedSiteOnly, .customerBillingDetailsRead,
+        .jobsReadAll, .jobsReadAssignedOnly, .jobStatusHistoryReadAll,
+        .calendarReadAll, .calendarReadOwnOnly,
+        .jobNotesRead, .jobPhotosRead, .equipmentRead,
+        .fieldWorkerLocationReadAll,
+        .quotesRead, .quoteFinancialsRead,
+        .invoicesRead, .paymentsRead,
+        .smsLedgerRead,
+        .reportsOperational, .reportsFinancial
+    ]
+
+    /// This session with the company's workspace in read-only mode.
+    func readOnlyWorkspace() -> TenantSession {
+        var copy = self
+        copy.isWorkspaceReadOnly = true
+        return copy
+    }
 
     func can(_ permission: Permission) -> Bool { permissions.contains(permission) }
 

@@ -266,6 +266,136 @@ struct DevelopmentCommercialSeedTests {
     }
 }
 
+// MARK: - Apple environments, workspace lock and seats
+
+/// What the app does with the server's verdict on a purchase.
+struct StoreLinkOutcomeTests {
+    @Test("A test purchase that was not applied never reads as a paid plan")
+    func sandboxNotApplied() {
+        let result = StoreLinkResult.summarise(outcomes: [(transactionID: "42", outcome: "sandboxNotApplied")], linked: false)
+        #expect(result.testPurchaseNotApplied)
+        #expect(result.linked == false)
+        #expect(result.handledTransactionIDs == [42])
+        #expect(SubscriptionViewModel.purchaseOutcome(result, planName: "Team") == .caution(SubscriptionViewModel.testPurchaseMessage))
+    }
+
+    @Test("A refused environment is reported as a test purchase, not success")
+    func unsupportedEnvironment() {
+        let result = StoreLinkResult.summarise(outcomes: [(transactionID: "7", outcome: "unsupportedEnvironment")], linked: false)
+        #expect(result.testPurchaseNotApplied)
+        if case .success = SubscriptionViewModel.purchaseOutcome(result, planName: "Team") {
+            Issue.record("An unsupported environment must never read as success")
+        }
+    }
+
+    @Test("Only an applied purchase says You're on the plan")
+    func applied() {
+        let result = StoreLinkResult.summarise(outcomes: [(transactionID: "9", outcome: "applied:active")], linked: true)
+        #expect(result.testPurchaseNotApplied == false)
+        #expect(SubscriptionViewModel.purchaseOutcome(result, planName: "Team") == .success("You're on Team. Thanks for choosing Harbour South."))
+    }
+
+    @Test("Nothing confirmed yet is a caution, not a success")
+    func unconfirmed() {
+        let result = StoreLinkResult.summarise(outcomes: [(transactionID: "9", outcome: "error")], linked: false)
+        #expect(result.handledTransactionIDs.isEmpty)
+        if case .success = SubscriptionViewModel.purchaseOutcome(result, planName: "Team") {
+            Issue.record("An unconfirmed purchase must never read as success")
+        }
+    }
+}
+
+/// No active subscription = no working workspace.
+struct WorkspaceLockTests {
+    private func session(_ role: Role, company: String = "cmp_northline") -> TenantSession {
+        TenantSession(userID: "u", companyID: company, role: role, displayName: "X", email: "x@example.com", trade: .plumbing)
+    }
+
+    @Test("A read-only owner keeps reading and subscribing, but cannot create or edit")
+    func readOnlyOwner() {
+        let owner = session(.owner).readOnlyWorkspace()
+        for kept: Permission in [.jobsReadAll, .customersReadAll, .invoicesRead, .quotesRead, .reportsFinancial,
+                                 .saasBillingRead, .saasBillingManage, .usersManage, .companyDelete] {
+            #expect(owner.can(kept), "read-only owner lost \(kept)")
+        }
+        for withheld: Permission in [.jobsManage, .customersManage, .invoicesManage, .quotesManage, .paymentsManage,
+                                     .assignmentsManage, .jobNotesCreate, .jobPhotosCreate, .companyProfileManage,
+                                     .smsCreditsConsume, .smsCreditsPurchase] {
+            #expect(owner.can(withheld) == false, "read-only owner kept \(withheld)")
+        }
+        #expect(owner.role == .owner)
+    }
+
+    @Test("The role matrix itself is unchanged by the lock")
+    func matrixUnchanged() {
+        #expect(session(.owner).permissions == PermissionMatrix.permissions(for: .owner))
+        #expect(session(.owner).can(.jobsManage))
+    }
+
+    @Test("The seeded unsubscribed company is locked; the subscribed one is not")
+    func seededAccess() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let north = try await gateway.workspaceAccess(session: session(.fieldWorker))
+        let gulf = try await gateway.workspaceAccess(session: session(.fieldWorker, company: "cmp_gulfcoast"))
+        #expect(north.hasActiveSubscription == false)
+        #expect(north.state == .none)
+        #expect(gulf.hasActiveSubscription)
+    }
+
+    @Test("Entitled states unlock; none, billing retry, expired and refunded lock")
+    func entitledStates() {
+        for unlocked: EntitlementState in [.trial, .offer, .active, .cancelling, .gracePeriod] {
+            #expect(unlocked.isEntitled)
+        }
+        for locked: EntitlementState in [.none, .billingRetry, .expired, .revoked] {
+            #expect(locked.isEntitled == false)
+        }
+    }
+}
+
+/// Downgrades are refused while the company has more active people than the
+/// target plan allows. Nobody is chosen or suspended automatically.
+struct DowngradeSeatTests {
+    @Test("Business with 10 active people cannot move to Team until 5 are deactivated")
+    func businessToTeam() {
+        let check = PlanChangeCheck.evaluate(planName: "Team", userLimit: 5, activeUsers: 10)
+        #expect(check.allowed == false)
+        #expect(check.usersToDeactivate == 5)
+        #expect(check.message?.contains("Deactivate 5 people") == true)
+        #expect(PlanChangeCheck.evaluate(planName: "Team", userLimit: 5, activeUsers: 5).allowed)
+    }
+
+    @Test("Business with 10 active people cannot move to Starter until 9 are deactivated")
+    func businessToStarter() {
+        let check = PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 10)
+        #expect(check.allowed == false)
+        #expect(check.usersToDeactivate == 9)
+        #expect(PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 1).allowed)
+    }
+
+    @Test("Business has no hard-coded cap")
+    func businessUncapped() {
+        let business = PlanCatalog.standard.first { $0.id == .business }
+        #expect(business?.userLimit == nil)
+        #expect(PlanChangeCheck.evaluate(planName: "Business", userLimit: nil, activeUsers: 250).allowed)
+    }
+
+    @Test("The seeded Gulf Coast team (6 active) is refused Starter and Team, allowed Business")
+    func seededCheck() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let tom = TenantSession(userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
+                                displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac)
+        #expect(try await gateway.planChangeCheck(session: tom, planID: .starter).allowed == false)
+        #expect(try await gateway.planChangeCheck(session: tom, planID: .team).usersToDeactivate == 1)
+        #expect(try await gateway.planChangeCheck(session: tom, planID: .business).allowed)
+        let marcus = TenantSession(userID: "usr_marcus", companyID: "cmp_gulfcoast", role: .fieldWorker,
+                                   displayName: "Marcus Hale", email: "marcus@gulfcoastair.com", trade: .hvac)
+        await #expect(throws: DataError.self) {
+            _ = try await gateway.planChangeCheck(session: marcus, planID: .starter)
+        }
+    }
+}
+
 // MARK: - Payment terms and due dates
 
 struct PaymentTermsTests {

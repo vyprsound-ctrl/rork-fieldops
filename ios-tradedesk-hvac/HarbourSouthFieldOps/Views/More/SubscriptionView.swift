@@ -34,6 +34,7 @@ struct SubscriptionView: View {
             Task {
                 await env.syncStoreEntitlements()
                 await reload(showLoading: false)
+                await env.refreshWorkspaceAccess()
             }
         }
         .sensoryFeedback(.success, trigger: viewModel.notice)
@@ -66,6 +67,9 @@ struct SubscriptionView: View {
         VStack(alignment: .leading, spacing: 20) {
             if let notice = viewModel.notice {
                 noticeBanner(notice)
+            }
+            if let caution = viewModel.caution {
+                cautionBanner(caution)
             }
 
             if let commercial = viewModel.commercial {
@@ -112,10 +116,11 @@ struct SubscriptionView: View {
                         isCurrent: viewModel.isCurrent(plan),
                         isRecommended: !(viewModel.commercial?.hasEntitlement ?? false)
                             && PlanCatalog.recommended(forActiveUsers: overview.activeUsers, in: overview.plans)?.id == plan.id,
-                        tooSmall: !plan.fits(activeUsers: overview.activeUsers),
-                        activeUsers: overview.activeUsers,
+                        tooSmall: !plan.fits(activeUsers: activeUsers(overview)),
+                        activeUsers: activeUsers(overview),
                         isWorking: viewModel.workingProductID == plan.productID(for: viewModel.period),
-                        isDisabled: viewModel.isWorking || !overview.canManage || viewModel.isBilledToAnotherAppleID,
+                        isDisabled: viewModel.isWorking || !overview.canManage || viewModel.isBilledToAnotherAppleID
+                            || isBlockedBySeats(plan, overview),
                         actionTitle: actionTitle(for: plan)
                     ) {
                         Task { await buy(plan) }
@@ -141,6 +146,18 @@ struct SubscriptionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func activeUsers(_ overview: SubscriptionOverview) -> Int {
+        viewModel.commercial?.activeUsers ?? overview.activeUsers
+    }
+
+    /// A plan with fewer seats than the company's active people cannot be
+    /// chosen until the owner deactivates enough of them. The server repeats
+    /// this check before Apple is asked.
+    private func isBlockedBySeats(_ plan: PlanOffer, _ overview: SubscriptionOverview) -> Bool {
+        guard viewModel.commercial?.seatLimitsEnforced ?? true else { return false }
+        return !plan.fits(activeUsers: activeUsers(overview))
     }
 
     private func actionTitle(for plan: PlanOffer) -> String {
@@ -186,7 +203,7 @@ struct SubscriptionView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                 }
-                if let commercial, commercial.isOverPlan {
+                if let commercial, commercial.isOverPlan, commercial.hasEntitlement {
                     Text("You have more people than your plan includes. Everyone keeps working — move to a bigger plan to add anyone else.")
                         .font(.caption)
                         .foregroundStyle(Theme.amber)
@@ -306,6 +323,21 @@ struct SubscriptionView: View {
         .clipShape(.rect(cornerRadius: Theme.cardRadius))
     }
 
+    private func cautionBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill").foregroundStyle(Theme.primary)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("subscription.caution")
+            Spacer(minLength: 0)
+        }
+        .padding(13)
+        .background(Theme.primaryTint)
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+    }
+
     private func unavailableCard(_ problem: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.circle.fill")
@@ -332,11 +364,13 @@ struct SubscriptionView: View {
     private func buy(_ plan: PlanOffer) async {
         guard let session else { return }
         await viewModel.buy(plan, gateway: env.gateway, store: env.storeBilling, session: session)
+        await env.refreshWorkspaceAccess()
     }
 
     private func restore() async {
         guard let session else { return }
         await viewModel.restore(gateway: env.gateway, store: env.storeBilling, session: session)
+        await env.refreshWorkspaceAccess()
     }
 
     private func reload(showLoading: Bool = true) async {
@@ -521,10 +555,13 @@ private struct PlanCard: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(Theme.secondary)
 
-            if tooSmall {
-                Text("You have \(activeUsers) active people — more than \(plan.displayName) includes.")
+            if tooSmall, let limit = plan.userLimit {
+                let excess = max(activeUsers - limit, 0)
+                Text("You have \(activeUsers) active people — more than \(plan.displayName) includes. Deactivate \(excess) \(excess == 1 ? "person" : "people") first; you choose who, and they can be reactivated later.")
                     .font(.caption)
                     .foregroundStyle(Theme.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("plan-\(plan.id.rawValue)-seats")
             }
 
             if !isCurrent {

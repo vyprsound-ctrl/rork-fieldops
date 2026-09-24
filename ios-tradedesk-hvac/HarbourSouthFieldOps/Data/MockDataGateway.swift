@@ -4138,6 +4138,27 @@ actor MockDataGateway: DataGateway {
         )
     }
 
+    /// The seeded workspace position: Gulf Coast is subscribed, Northline has
+    /// no plan and is therefore locked. Readable by every member.
+    func workspaceAccess(session: TenantSession) async throws -> WorkspaceAccess {
+        try await Task.sleep(for: latency)
+        let subscribed = session.companyID == "cmp_gulfcoast"
+        return WorkspaceAccess(hasActiveSubscription: subscribed, state: subscribed ? .active : .none)
+    }
+
+    /// Same rule as `subscription_plan_change_check()`: refused while active
+    /// users exceed the plan's seats.
+    func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck {
+        try await Task.sleep(for: latency)
+        guard session.can(.saasBillingManage) else {
+            record("subscription.planChangeCheck", session, allowed: false, "Blocked — missing saasBillingManage")
+            throw DataError.notPermitted(.saasBillingManage)
+        }
+        let active = scoped(store.users, session, companyID: \.companyID).filter { $0.status == .active }.count
+        let plan = PlanCatalog.standard.first { $0.id == planID }
+        return PlanChangeCheck.evaluate(planName: plan?.displayName ?? planID.rawValue, userLimit: plan?.userLimit, activeUsers: active)
+    }
+
     // MARK: - Job media
 
     /// Stores a captured image against a job.

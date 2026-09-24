@@ -336,6 +336,15 @@ protocol DataGateway: Sendable {
     /// never records a subscription itself. Owner only.
     func linkStorePurchases(session: TenantSession, purchases: [SignedStorePurchase]) async throws -> StoreLinkResult
 
+    /// Whether the caller's company has an active subscription, and its
+    /// state. Readable by every company member; carries nothing else.
+    func workspaceAccess(session: TenantSession) async throws -> WorkspaceAccess
+
+    /// Whether the company may move to `planID`: refused while it has more
+    /// active users than that plan allows. Owner only. Answers only — it never
+    /// suspends or deletes anybody.
+    func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck
+
     // MARK: Business email identity
 
     /// The business's own customer-facing email address, as used on the
