@@ -31,11 +31,23 @@
 --      Production subscription. Any other environment (Xcode, missing, unknown)
 --      is refused. Test and Production purchase ids are separate identities.
 --   7. No active subscription = no working workspace. Every company member can
---      read exactly two facts (company_workspace_access): whether the company
---      has an active subscription, and its state. Nothing else.
---   8. A plan change to a plan with fewer seats than the company's active users
---      is refused (subscription_plan_change_check) until the owner deactivates
---      enough people. Nobody is chosen, suspended or deleted automatically.
+--      read the company's workspace position (company_workspace_access):
+--      whether it has an active subscription, its state, and its seat position
+--      (plan name, user limit, active users). No Apple ids, prices or billing.
+--   8. Apple is the source of truth for the plan. Harbour South never refuses
+--      an Apple upgrade, downgrade or crossgrade (subscription_plan_change_check
+--      only WARNS). When Apple's lower plan takes effect with more active users
+--      than it allows, the company enters SEAT RESOLUTION: the owner chooses
+--      who to deactivate; nobody is chosen, suspended or deleted automatically.
+--   9. A downgrade Apple has scheduled for the next renewal takes part in the
+--      seat rule now: the company keeps its current plan until Apple applies
+--      the change, but cannot grow beyond the pending plan's limit.
+--  10. Account deletion (delete_my_account): a member's own account is
+--      anonymised, deactivated and signed out everywhere; the company and its
+--      records are untouched. The SOLE owner can only delete their account by
+--      closing the company workspace: every membership ends, business records
+--      (customers, jobs, invoices, payments, photos, messages) are retained
+--      but unreachable, and nothing in Stripe is touched.
 --
 -- WHAT IS RETIRED, AND WHAT IS DELIBERATELY KEPT
 --
@@ -339,6 +351,14 @@ $$;
 
 -- Everything the seat rule and the commercial read need, for one company.
 -- Internal: takes the company as given; granted to nobody.
+--
+--   user_limit          the ENTITLED plan's cap (NULL = no cap).
+--   pending_tier_id     a different plan Apple will renew into (a scheduled
+--   pending_user_limit  downgrade), and its cap.
+--   seat_ceiling        the cap for ADDING people: the lower of the two, so a
+--                       company cannot grow past a downgrade it has scheduled.
+--   seats_over_limit    entitled, and more active people than the entitled
+--                       plan allows: the owner must resolve seats.
 create or replace function public.company_entitlement_for(p_company uuid)
 returns table (
   has_entitlement      boolean,
@@ -351,7 +371,11 @@ returns table (
   monthly_cents        integer,
   annual_cents         integer,
   active_users         integer,
-  open_invitations     integer
+  open_invitations     integer,
+  pending_tier_id      text,
+  pending_user_limit   integer,
+  seat_ceiling         integer,
+  seats_over_limit     boolean
 )
 language plpgsql stable security definer
 set search_path = public
@@ -359,6 +383,7 @@ as $$
 declare
   v_sub   public.company_subscriptions%rowtype;
   v_tier  public.subscription_tiers%rowtype;
+  v_next  public.subscription_tiers%rowtype;
   v_fallback integer;
 begin
   select * into v_sub from public.company_subscriptions s where s.company_id = p_company;
@@ -386,6 +411,17 @@ begin
     included_users := v_tier.included_users;
     monthly_cents  := v_tier.base_cents;
     annual_cents   := v_tier.annual_cents;
+
+    -- A plan change Apple has scheduled for the next renewal (a downgrade).
+    -- It is not in force yet, but the company may not grow beyond it.
+    if coalesce(v_sub.apple_auto_renew, true) and v_sub.apple_auto_renew_product_id is not null then
+      select * into v_next from public.subscription_tiers t
+       where v_sub.apple_auto_renew_product_id in (t.apple_product_monthly, t.apple_product_annual);
+      if found and v_next.id is distinct from v_tier.id then
+        pending_tier_id    := v_next.id;
+        pending_user_limit := v_next.user_limit;
+      end if;
+    end if;
   else
     select (value #>> '{}')::integer into v_fallback
       from public.platform_settings where key = 'unsubscribed_user_limit';
@@ -394,6 +430,15 @@ begin
     included_users := user_limit;
     monthly_cents := 0; annual_cents := 0;
   end if;
+
+  seat_ceiling := case
+    when user_limit is null then pending_user_limit
+    when pending_user_limit is null then user_limit
+    else least(user_limit, pending_user_limit) end;
+  seats_over_limit := has_entitlement
+                      and public.seat_limits_enforced()
+                      and user_limit is not null
+                      and active_users > user_limit;
 
   return next;
 end $$;
@@ -414,6 +459,12 @@ begin
   if not e.has_entitlement then
     return format('Choose a Harbour South plan to add more people. Without a plan your company can have %s active %s.',
                   e.user_limit, case when e.user_limit = 1 then 'user' else 'users' end);
+  end if;
+  -- A scheduled downgrade is the tighter limit.
+  if e.pending_user_limit is not null and (e.user_limit is null or e.pending_user_limit < e.user_limit) then
+    return format('Your plan changes to %s at renewal, which includes up to %s active %s. You can''t add more people than that before the change.',
+                  (select display_name from public.subscription_tiers where id = e.pending_tier_id),
+                  e.pending_user_limit, case when e.pending_user_limit = 1 then 'user' else 'users' end);
   end if;
   select display_name into v_next
     from public.subscription_tiers t
@@ -448,7 +499,7 @@ begin
   if coalesce(auth.role(), '') <> 'authenticated' then return new; end if;
   if not public.seat_limits_enforced() then return new; end if;
 
-  select user_limit into v_limit from public.company_entitlement_for(new.company_id);
+  select seat_ceiling into v_limit from public.company_entitlement_for(new.company_id);
   if v_limit is null then return new; end if;
 
   select count(*)::integer into v_active
@@ -517,8 +568,8 @@ begin
   -- 0013: the plan's seat rule.
   select * into v_seats from public.company_entitlement_for(v_company);
   if public.seat_limits_enforced()
-     and v_seats.user_limit is not null
-     and v_seats.active_users + v_seats.open_invitations >= v_seats.user_limit then
+     and v_seats.seat_ceiling is not null
+     and v_seats.active_users + v_seats.open_invitations >= v_seats.seat_ceiling then
     raise exception '%', public.company_seat_refusal(v_company) using errcode = 'P0001';
   end if;
 
@@ -752,7 +803,7 @@ begin
     apple_auto_renew              = case when v_apply_rn then (p_renewal->>'autoRenewStatus')::integer = 1
                                          when v_new_tx then null else s.apple_auto_renew end,
     apple_auto_renew_product_id   = case when v_apply_rn then p_renewal->>'autoRenewProductId'
-                                         when v_switch then null else s.apple_auto_renew_product_id end,
+                                         when v_switch or v_new_tx then null else s.apple_auto_renew_product_id end,
     apple_grace_period_expires_at = case when v_apply_rn then public.apple_ms(p_renewal->>'gracePeriodExpiresDate')
                                          when v_new_tx then null else s.apple_grace_period_expires_at end,
     apple_in_billing_retry        = case when v_apply_rn then coalesce((p_renewal->>'isInBillingRetryPeriod')::boolean, false)
@@ -879,7 +930,10 @@ returns table (
   billing_store              text,
   apple_environment          text,
   seat_limits_enforced       boolean,
-  apple_original_transaction_id text
+  apple_original_transaction_id text,
+  seats_over_limit           boolean,
+  users_to_deactivate        integer,
+  pending_user_limit         integer
 )
 language plpgsql stable security definer
 set search_path = public
@@ -954,8 +1008,11 @@ begin
   open_invitations    := v_ent.open_invitations;
   seat_limits_enforced := public.seat_limits_enforced();
   can_add_user        := not seat_limits_enforced
-                         or v_ent.user_limit is null
-                         or v_ent.active_users + v_ent.open_invitations < v_ent.user_limit;
+                         or v_ent.seat_ceiling is null
+                         or v_ent.active_users + v_ent.open_invitations < v_ent.seat_ceiling;
+  seats_over_limit    := coalesce(v_ent.seats_over_limit, false);
+  users_to_deactivate := case when seats_over_limit then v_ent.active_users - v_ent.user_limit else 0 end;
+  pending_user_limit  := v_ent.pending_user_limit;
 
   period_ends_at       := case when v_sub.store = 'apple' then v_sub.apple_expires_at end;
   will_auto_renew      := case when v_sub.store = 'apple' then coalesce(v_sub.apple_auto_renew, true) end;
@@ -1090,17 +1147,24 @@ revoke all on function public.subscription_entitlement_state(text, timestamptz, 
 revoke all on function public.subscription_state_is_entitled(text) from public, anon;
 
 -- ---------------------------------------------------------------------------
--- 11. The workspace gate: "no active subscription = no working workspace".
+-- 11. The workspace gate: "no active subscription = no working workspace",
+--     and seat resolution after a downgrade Apple has applied.
 --
--- Every ACTIVE member of a company may read exactly two facts about it:
--- whether it has an active subscription, and the state. No Apple ids, no
+-- Every ACTIVE member of a company may read its workspace position: whether
+-- it has an active subscription, the state, and the seat position (plan name,
+-- user limit, active users, whether seats must be resolved). No Apple ids, no
 -- purchase ids, no prices, no billing details. The company is always the
 -- caller's own (current_company_id()); there is no parameter to name another.
 -- ---------------------------------------------------------------------------
 create or replace function public.company_workspace_access()
 returns table (
   has_active_subscription boolean,
-  subscription_state      text
+  subscription_state      text,
+  plan_name               text,
+  user_limit              integer,
+  active_users            integer,
+  seats_over_limit        boolean,
+  users_to_deactivate     integer
 )
 language plpgsql stable security definer
 set search_path = public
@@ -1115,24 +1179,29 @@ begin
   select * into v_ent from public.company_entitlement_for(v_company);
   has_active_subscription := coalesce(v_ent.has_entitlement, false);
   subscription_state      := coalesce(v_ent.entitlement_state, 'none');
+  plan_name               := v_ent.tier_name;
+  user_limit              := case when has_active_subscription then v_ent.user_limit end;
+  active_users            := v_ent.active_users;
+  seats_over_limit        := coalesce(v_ent.seats_over_limit, false);
+  users_to_deactivate     := case when seats_over_limit then v_ent.active_users - v_ent.user_limit else 0 end;
   return next;
 end $$;
 
 comment on function public.company_workspace_access() is
-  'Minimal read for every company member: has_active_subscription and subscription_state only. Drives the app''s company-level workspace lock.';
+  'Workspace position for every company member: subscription state and seat position (plan name, user limit, active users, seats to resolve). No Apple ids, prices or billing. Drives the app''s company-level workspace lock and seat resolution.';
 
 revoke all on function public.company_workspace_access() from public, anon;
 grant execute on function public.company_workspace_access() to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- 12. The downgrade rule.
+-- 12. The plan-change check.
 --
--- A company may not move to a plan that allows fewer active users than it
--- has. The owner first deactivates enough people — the owner chooses who.
--- Nothing is suspended, chosen or deleted here: this only answers the
--- question, and the app refuses to start the Apple purchase when the answer
--- is no. Deactivated people stay recoverable and can be reactivated later
--- within the plan's seats.
+-- Apple owns upgrades, downgrades and crossgrades, and customers can make them
+-- in iOS Settings without this app. So the check never refuses: `allowed` is
+-- always true. When the target plan allows fewer active users than the
+-- company has, it says how many people will need deactivating once Apple
+-- applies the change (seat resolution) — the owner chooses who. Nothing is
+-- suspended, chosen or deleted here.
 -- ---------------------------------------------------------------------------
 create or replace function public.subscription_plan_change_check(p_tier_id text, p_company uuid default null)
 returns table (
@@ -1178,16 +1247,229 @@ begin
   users_to_deactivate := case
     when not public.seat_limits_enforced() or v_tier.user_limit is null then 0
     else greatest(active_users - v_tier.user_limit, 0) end;
-  allowed := users_to_deactivate = 0;
-  message := case when allowed then null else format(
-    '%s includes up to %s active %s and your company has %s. Deactivate %s %s first — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated if you move to a bigger plan later.',
+  allowed := true;
+  message := case when users_to_deactivate = 0 then null else format(
+    '%s includes up to %s active %s and your company has %s. When Apple applies the change you''ll need to deactivate %s %s before normal work continues — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated later.',
     v_tier.display_name, v_tier.user_limit, case when v_tier.user_limit = 1 then 'user' else 'users' end,
     active_users, users_to_deactivate, case when users_to_deactivate = 1 then 'person' else 'people' end) end;
   return next;
 end $$;
 
 comment on function public.subscription_plan_change_check(text, uuid) is
-  'Whether the company may move to a plan: refused while active users exceed the plan''s seats. Answers only; never suspends or deletes anyone. Owner or service role.';
+  'What moving to a plan means for seats. Never refuses (Apple owns plan changes): reports how many people must be deactivated once the change applies. Never suspends or deletes anyone. Owner or service role.';
 
 revoke all on function public.subscription_plan_change_check(text, uuid) from public, anon;
 grant execute on function public.subscription_plan_change_check(text, uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 13. Account deletion (Apple App Review Guideline 5.1.1(v)).
+--
+-- delete_my_account(p_close_company) deletes the CALLER's own account:
+--
+--   * Not the sole active Owner: the membership row is anonymised ("Deleted
+--     user", placeholder email, no phone) and deactivated, push devices are
+--     revoked, and the sign-in identity is anonymised, banned and every session
+--     and refresh token is deleted — so no session can continue. The company,
+--     its other people and every business record stay exactly as they are.
+--     The membership row itself is kept (anonymised) because job notes,
+--     photos, status history and payments reference it by foreign key; those
+--     are the company's records, not the person's account.
+--
+--   * The sole active Owner: refused unless p_close_company is true. Closing
+--     the workspace marks the company closed, ends every membership
+--     (deactivated, never deleted), revokes open invitations and push devices,
+--     stops recurring job generation, revokes public invoice links, then
+--     deletes the Owner's account as
+--     above. Business and financial records (customers, jobs, quotes,
+--     invoices, payments, photos, messages) are RETAINED, unreachable by any
+--     app user: invoices and payments reference customers and jobs with
+--     RESTRICT foreign keys, and financial records are not destroyed from the
+--     app. Nothing in Stripe is touched (the connected account is the trade
+--     company's own); the Apple subscription is cancelled by the customer in
+--     Apple's subscription settings.
+-- ---------------------------------------------------------------------------
+alter table public.companies add column if not exists closed_at timestamptz;
+
+comment on column public.companies.closed_at is
+  'Set when the sole Owner deleted their account and closed the workspace (delete_my_account). Records are retained; no membership remains active.';
+
+-- app_users_update_guard, reproduced exactly as deployed with ONE addition:
+-- the last-Owner rule steps aside only inside delete_my_account's workspace
+-- closure, which sets a transaction-local marker for that company (not
+-- settable through the API) AND has already marked the company closed.
+create or replace function public.app_users_update_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_actor uuid := auth.uid();
+  v_actor_role app_role;
+  v_active_owners int;
+  v_closing boolean := coalesce(current_setting('harbour.closing_company', true), '') = old.company_id::text
+                       and exists (select 1 from public.companies c where c.id = old.company_id and c.closed_at is not null);
+begin
+  if new.company_id is distinct from old.company_id then
+    raise exception 'company_id is immutable once a membership exists'
+      using errcode = 'P0001';
+  end if;
+
+  if new.id is distinct from old.id then
+    raise exception 'user id is immutable' using errcode = 'P0001';
+  end if;
+
+  if new.role is distinct from old.role then
+    select role into v_actor_role from public.app_users where id = v_actor;
+
+    if v_actor is not null then
+      if v_actor = old.id then
+        raise exception 'You cannot change your own role' using errcode = '42501';
+      end if;
+      if not public.has_perm('usersManage') then
+        raise exception 'You do not have permission to change roles' using errcode = '42501';
+      end if;
+      if new.role = 'owner' and v_actor_role is distinct from 'owner' then
+        raise exception 'Only an Owner can grant the Owner role' using errcode = '42501';
+      end if;
+    end if;
+
+    if old.role = 'owner' and new.role <> 'owner' then
+      select count(*) into v_active_owners from public.app_users
+        where company_id = old.company_id and role = 'owner' and status = 'active';
+      if v_active_owners <= 1 then
+        raise exception 'A company must always have at least one active Owner'
+          using errcode = 'P0001';
+      end if;
+    end if;
+  end if;
+
+  -- Suspending the last Owner removes them in all but name.
+  if old.role = 'owner' and old.status = 'active' and new.status <> 'active' and not v_closing then
+    select count(*) into v_active_owners from public.app_users
+      where company_id = old.company_id and role = 'owner' and status = 'active';
+    if v_active_owners <= 1 then
+      raise exception 'A company must always have at least one active Owner'
+        using errcode = 'P0001';
+    end if;
+  end if;
+
+  return new;
+end;
+$function$;
+
+-- What the confirmation screen needs to say. The caller's own row only.
+create or replace function public.account_deletion_context()
+returns table (
+  has_membership       boolean,
+  is_owner             boolean,
+  is_sole_owner        boolean,
+  company_name         text,
+  other_active_members integer
+)
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_uid  uuid := auth.uid();
+  v_user public.app_users%rowtype;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in' using errcode = 'TD401';
+  end if;
+  select * into v_user from public.app_users u where u.id = v_uid;
+  has_membership := found;
+  is_owner := has_membership and v_user.role = 'owner' and v_user.status = 'active';
+  is_sole_owner := is_owner and (
+    select count(*) from public.app_users u
+     where u.company_id = v_user.company_id and u.role = 'owner' and u.status = 'active') = 1;
+  select c.name into company_name from public.companies c where c.id = v_user.company_id;
+  select count(*)::integer into other_active_members from public.app_users u
+   where u.company_id = v_user.company_id and u.status = 'active' and u.id <> v_uid;
+  other_active_members := coalesce(other_active_members, 0);
+  return next;
+end $$;
+
+revoke all on function public.account_deletion_context() from public, anon;
+grant execute on function public.account_deletion_context() to authenticated;
+
+create or replace function public.delete_my_account(p_close_company boolean default false)
+returns text
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_uid         uuid := auth.uid();
+  v_user        public.app_users%rowtype;
+  v_member      boolean;
+  v_sole        boolean := false;
+  v_outcome     text := 'accountDeleted';
+  v_placeholder text;
+begin
+  if v_uid is null then
+    raise exception 'Not signed in' using errcode = 'TD401';
+  end if;
+  v_placeholder := 'deleted-' || v_uid::text || '@deleted.invalid';
+
+  select * into v_user from public.app_users u where u.id = v_uid for update;
+  v_member := found;
+
+  if v_member and v_user.role = 'owner' and v_user.status = 'active' then
+    select count(*) = 1 into v_sole from public.app_users u
+     where u.company_id = v_user.company_id and u.role = 'owner' and u.status = 'active';
+  end if;
+
+  if v_sole and not coalesce(p_close_company, false) then
+    raise exception 'You''re the only owner of this company. Deleting your account closes the company''s Harbour South workspace — confirm closing it to continue.'
+      using errcode = 'TD409';
+  end if;
+
+  -- Sole Owner: close the workspace. Records are retained; access ends.
+  if v_sole then
+    perform set_config('harbour.closing_company', v_user.company_id::text, true);
+    update public.companies set closed_at = coalesce(closed_at, now()), updated_at = now()
+     where id = v_user.company_id;
+    update public.invitations set revoked_at = now()
+     where company_id = v_user.company_id and accepted_at is null and revoked_at is null;
+    update public.service_agreements set is_active = false, updated_at = now()
+     where company_id = v_user.company_id and is_active;
+    update public.invoice_share_tokens set revoked_at = now()
+     where company_id = v_user.company_id and revoked_at is null;
+    update public.push_devices set revoked_at = now(), revoked_reason = 'workspaceClosed', updated_at = now()
+     where company_id = v_user.company_id and revoked_at is null;
+    update public.app_users set status = 'suspended', updated_at = now()
+     where company_id = v_user.company_id and id <> v_uid and status <> 'suspended';
+    v_outcome := 'workspaceClosed';
+  end if;
+
+  -- The caller's membership: anonymised and deactivated, never deleted.
+  if v_member then
+    update public.app_users set
+      name = 'Deleted user', email = v_placeholder, phone = '', avatar_url = null,
+      status = 'suspended', duty_state = 'offDuty', updated_at = now()
+     where id = v_uid;
+    update public.push_devices set revoked_at = now(), revoked_reason = 'accountDeleted', updated_at = now()
+     where user_id = v_uid and revoked_at is null;
+  end if;
+
+  -- The sign-in identity: every session ends now and it can never sign in again.
+  delete from auth.refresh_tokens where user_id = v_uid::text;
+  delete from auth.sessions where user_id = v_uid;
+  delete from auth.mfa_factors where user_id = v_uid;
+  delete from auth.one_time_tokens where user_id = v_uid;
+  delete from auth.identities where user_id = v_uid;
+  update auth.users set
+    email = v_placeholder, phone = null, encrypted_password = '',
+    raw_user_meta_data = '{}'::jsonb, raw_app_meta_data = '{"provider":"deleted"}'::jsonb,
+    confirmation_token = '', recovery_token = '', email_change = '', email_change_token_new = '',
+    banned_until = '2999-12-31 00:00:00+00'::timestamptz, deleted_at = now(), updated_at = now()
+   where id = v_uid;
+
+  return v_outcome;
+end $$;
+
+comment on function public.delete_my_account(boolean) is
+  'Deletes the caller''s own account: membership anonymised and deactivated, sign-in identity anonymised and banned, all sessions ended. The sole Owner must pass p_close_company = true, which closes the workspace (every membership deactivated) while retaining business and financial records. Never touches Stripe.';
+
+revoke all on function public.delete_my_account(boolean) from public, anon;
+grant execute on function public.delete_my_account(boolean) to authenticated;

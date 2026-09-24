@@ -241,10 +241,36 @@ private nonisolated struct AppleLinkResponse: Decodable, Sendable {
 private nonisolated struct WorkspaceAccessRecord: Decodable, Sendable {
     let hasActiveSubscription: Bool?
     let subscriptionState: String?
+    let planName: String?
+    let userLimit: Int?
+    let activeUsers: Int?
+    let seatsOverLimit: Bool?
+    let usersToDeactivate: Int?
 
     enum CodingKeys: String, CodingKey {
         case hasActiveSubscription = "has_active_subscription"
         case subscriptionState = "subscription_state"
+        case planName = "plan_name"
+        case userLimit = "user_limit"
+        case activeUsers = "active_users"
+        case seatsOverLimit = "seats_over_limit"
+        case usersToDeactivate = "users_to_deactivate"
+    }
+}
+
+private nonisolated struct AccountDeletionContextRecord: Decodable, Sendable {
+    let hasMembership: Bool?
+    let isOwner: Bool?
+    let isSoleOwner: Bool?
+    let companyName: String?
+    let otherActiveMembers: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case hasMembership = "has_membership"
+        case isOwner = "is_owner"
+        case isSoleOwner = "is_sole_owner"
+        case companyName = "company_name"
+        case otherActiveMembers = "other_active_members"
     }
 }
 
@@ -606,8 +632,9 @@ extension SupabaseDataGateway {
         )
     }
 
-    /// Every company member may read this: two facts, nothing else. The
-    /// company is the caller's own inside the database.
+    /// Every company member may read this: subscription state and seat
+    /// position, no billing details. The company is the caller's own inside
+    /// the database.
     func workspaceAccess(session: TenantSession) async throws -> WorkspaceAccess {
         let rows: [WorkspaceAccessRecord]
         do {
@@ -619,12 +646,17 @@ extension SupabaseDataGateway {
         guard let row = rows.first else { throw DataError.notFound }
         return WorkspaceAccess(
             hasActiveSubscription: row.hasActiveSubscription ?? false,
-            state: EntitlementState(rawValue: row.subscriptionState ?? "") ?? .none
+            state: EntitlementState(rawValue: row.subscriptionState ?? "") ?? .none,
+            planName: row.planName,
+            userLimit: row.userLimit,
+            activeUsers: row.activeUsers ?? 0,
+            seatsOverLimit: row.seatsOverLimit ?? false,
+            usersToDeactivate: row.usersToDeactivate ?? 0
         )
     }
 
-    /// Asks the database whether the company may move to a plan. Refused while
-    /// active users exceed the plan's seats.
+    /// What moving to a plan means for seats. The database never refuses a
+    /// plan change (Apple owns it); it reports people to deactivate.
     func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck {
         try require(.saasBillingManage, session, query: "subscription.planChangeCheck")
         let rows: [PlanChangeCheckRecord]
@@ -639,12 +671,48 @@ extension SupabaseDataGateway {
         }
         guard let row = rows.first else { throw DataError.notFound }
         return PlanChangeCheck(
-            allowed: row.allowed ?? false,
+            allowed: row.allowed ?? true,
             userLimit: row.userLimit,
             activeUsers: row.activeUsers ?? 0,
             usersToDeactivate: row.usersToDeactivate ?? 0,
             message: row.message
         )
+    }
+
+    // MARK: - Account deletion
+
+    func accountDeletionContext(session: TenantSession) async throws -> AccountDeletionContext {
+        let rows: [AccountDeletionContextRecord]
+        do {
+            let data = try await client.rpc("account_deletion_context").execute().data
+            rows = try SupabaseCoding.decoder.decode([AccountDeletionContextRecord].self, from: data)
+        } catch {
+            throw DataError.wrap(error)
+        }
+        guard let row = rows.first else { throw DataError.notFound }
+        return AccountDeletionContext(
+            isOwner: row.isOwner ?? false,
+            isSoleOwner: row.isSoleOwner ?? false,
+            companyName: row.companyName ?? "",
+            otherActiveMembers: row.otherActiveMembers ?? 0
+        )
+    }
+
+    /// The database anonymises the account, ends every session and, for the
+    /// sole Owner who confirmed it, closes the workspace. Nothing in Stripe is
+    /// touched.
+    func deleteMyAccount(session: TenantSession, closeCompany: Bool) async throws -> AccountDeletionOutcome {
+        let raw: String
+        do {
+            raw = try await client.rpc("delete_my_account", params: ["p_close_company": AnyJSON.bool(closeCompany)])
+                .execute().value
+        } catch let error as PostgrestError where error.code == "TD409" {
+            throw DataError.rejected(error.message)
+        } catch {
+            throw DataError.wrap(error)
+        }
+        record("account.delete", session, allowed: true, closeCompany ? "Own account deleted; workspace closed, records retained" : "Own account deleted; company untouched")
+        return AccountDeletionOutcome(rawValue: raw) ?? .accountDeleted
     }
 
     // MARK: - Stripe Connect (FLOW B)

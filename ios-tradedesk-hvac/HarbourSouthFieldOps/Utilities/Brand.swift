@@ -33,10 +33,27 @@ nonisolated enum Brand {
     /// Used when the asset is absent, so the mark is never an empty box.
     static let fallbackSymbolName = "point.topleft.down.to.point.bottomright.curvepath.fill"
 
-    /// Harbour South's published privacy policy, linked from the subscription
-    /// screen as Apple requires for auto-renewable subscriptions. `nil` until
-    /// the policy is published — set it here, then the link appears.
-    static let privacyPolicyURL: URL? = nil
+    /// The Info.plist key holding Harbour South's published privacy policy URL.
+    static let privacyPolicyInfoKey = "HarbourSouthPrivacyPolicyURL"
+
+    /// Harbour South's published privacy policy, linked from More, the
+    /// subscription screen and Delete Account as Apple requires.
+    ///
+    /// CONFIGURATION-DRIVEN: read from `HarbourSouthPrivacyPolicyURL` in
+    /// Info.plist. It is empty until the real policy is published — put the
+    /// public https URL there and every entry point opens it, with no code
+    /// change. Until then the entry points say the policy is not yet available
+    /// rather than linking to an invented address.
+    static var privacyPolicyURL: URL? {
+        privacyPolicyURL(from: Bundle.main.object(forInfoDictionaryKey: privacyPolicyInfoKey) as? String)
+    }
+
+    /// Only a real https address counts.
+    static func privacyPolicyURL(from raw: String?) -> URL? {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("https://"), let url = URL(string: trimmed), url.host != nil else { return nil }
+        return url
+    }
 
     /// Apple's standard licensed application end user licence agreement,
     /// used as the Terms of Use unless a custom EULA is set in App Store Connect.

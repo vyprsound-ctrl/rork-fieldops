@@ -116,6 +116,14 @@ struct ProductionSignInView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if let notice = env.accountDeletedNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.green)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("signIn.accountDeleted")
+                }
+
                 if let error = env.authPhase.errorMessage {
                     Text(error)
                         .font(.footnote)

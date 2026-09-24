@@ -13,10 +13,12 @@ nonisolated struct TenantSession: Hashable, Sendable {
     let displayName: String
     let email: String
     let trade: Trade
-    /// The company has no active subscription and this is its owner: company
-    /// data stays readable, and only what is needed to subscribe again (plan,
-    /// restore, Offer Codes, deactivating people) remains available. The role
-    /// and the permission matrix themselves are unchanged.
+    /// The company has no active subscription (or has more active people than
+    /// its plan allows) and this is its owner: company data stays readable,
+    /// and only what is needed to put that right (plan, restore, Offer Codes,
+    /// deactivating people) remains available. Every other create, update or
+    /// delete is refused by the data layer. The role and the permission matrix
+    /// themselves are unchanged.
     var isWorkspaceReadOnly: Bool = false
 
     var permissions: Set<Permission> {
@@ -48,6 +50,14 @@ nonisolated struct TenantSession: Hashable, Sendable {
     }
 
     func can(_ permission: Permission) -> Bool { permissions.contains(permission) }
+
+    /// False while the workspace is read-only. Operational writes that are not
+    /// tied to a single permission (messages, job status, availability,
+    /// location) check this.
+    var canMutateWorkspace: Bool { !isWorkspaceReadOnly }
+
+    /// The sentence a refused workspace write shows.
+    static let readOnlyRefusal = "Your company's Harbour South workspace is read-only right now. Open Subscription to restore normal work."
 
     var terms: Terminology { trade.terminology }
 

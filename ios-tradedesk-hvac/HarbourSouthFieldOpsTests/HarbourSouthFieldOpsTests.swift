@@ -353,24 +353,33 @@ struct WorkspaceLockTests {
     }
 }
 
-/// Downgrades are refused while the company has more active people than the
-/// target plan allows. Nobody is chosen or suspended automatically.
+/// Apple owns downgrades: the plan check never refuses. It warns how many
+/// people must be deactivated once the change applies. Nobody is chosen or
+/// suspended automatically.
 struct DowngradeSeatTests {
-    @Test("Business with 10 active people cannot move to Team until 5 are deactivated")
+    @Test("Business with 10 active people -> Team is never refused; it warns 5 must be deactivated")
     func businessToTeam() {
         let check = PlanChangeCheck.evaluate(planName: "Team", userLimit: 5, activeUsers: 10)
-        #expect(check.allowed == false)
+        #expect(check.allowed)
         #expect(check.usersToDeactivate == 5)
-        #expect(check.message?.contains("Deactivate 5 people") == true)
-        #expect(PlanChangeCheck.evaluate(planName: "Team", userLimit: 5, activeUsers: 5).allowed)
+        #expect(check.message?.contains("deactivate 5 people") == true)
+        let fits = PlanChangeCheck.evaluate(planName: "Team", userLimit: 5, activeUsers: 5)
+        #expect(fits.allowed && fits.usersToDeactivate == 0 && fits.message == nil)
     }
 
-    @Test("Business with 10 active people cannot move to Starter until 9 are deactivated")
+    @Test("Business with 10 active people -> Starter is never refused; it warns 9 must be deactivated")
     func businessToStarter() {
         let check = PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 10)
-        #expect(check.allowed == false)
+        #expect(check.allowed)
         #expect(check.usersToDeactivate == 9)
-        #expect(PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 1).allowed)
+        #expect(PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 1).usersToDeactivate == 0)
+    }
+
+    @Test("Team with 5 active -> Starter warns 4 must be deactivated")
+    func teamToStarter() {
+        let check = PlanChangeCheck.evaluate(planName: "Starter", userLimit: 1, activeUsers: 5)
+        #expect(check.allowed)
+        #expect(check.usersToDeactivate == 4)
     }
 
     @Test("Business has no hard-coded cap")
@@ -380,12 +389,13 @@ struct DowngradeSeatTests {
         #expect(PlanChangeCheck.evaluate(planName: "Business", userLimit: nil, activeUsers: 250).allowed)
     }
 
-    @Test("The seeded Gulf Coast team (6 active) is refused Starter and Team, allowed Business")
+    @Test("The seeded Gulf Coast team (6 active) is warned for Starter and Team, never refused")
     func seededCheck() async throws {
         let gateway = MockDataGateway(latency: .zero)
         let tom = TenantSession(userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
                                 displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac)
-        #expect(try await gateway.planChangeCheck(session: tom, planID: .starter).allowed == false)
+        let starter = try await gateway.planChangeCheck(session: tom, planID: .starter)
+        #expect(starter.allowed && starter.usersToDeactivate == 5)
         #expect(try await gateway.planChangeCheck(session: tom, planID: .team).usersToDeactivate == 1)
         #expect(try await gateway.planChangeCheck(session: tom, planID: .business).allowed)
         let marcus = TenantSession(userID: "usr_marcus", companyID: "cmp_gulfcoast", role: .fieldWorker,
@@ -393,6 +403,136 @@ struct DowngradeSeatTests {
         await #expect(throws: DataError.self) {
             _ = try await gateway.planChangeCheck(session: marcus, planID: .starter)
         }
+    }
+}
+
+/// Seat resolution, the read-only gate, account deletion and legal links.
+struct SeatResolutionAndAccessTests {
+    private func session(_ role: Role, company: String = "cmp_gulfcoast", user: String = "u") -> TenantSession {
+        TenantSession(userID: user, companyID: company, role: role, displayName: "X", email: "x@example.com", trade: .hvac)
+    }
+
+    private let overPlan = WorkspaceAccess(hasActiveSubscription: true, state: .active, planName: "Team",
+                                           userLimit: 5, activeUsers: 10, seatsOverLimit: true, usersToDeactivate: 5)
+
+    @Test("Entitled states open the workspace for owner and staff (active, trial, offer, cancelling, grace)")
+    func entitledOpen() {
+        for state: EntitlementState in [.active, .trial, .offer, .cancelling, .gracePeriod] {
+            let access = WorkspaceAccess(hasActiveSubscription: true, state: state)
+            #expect(WorkspaceGate.resolve(access: access, role: .owner) == .open)
+            #expect(WorkspaceGate.resolve(access: access, role: .fieldWorker) == .open)
+            #expect(WorkspaceGate.resolve(access: access, role: .dispatcher) == .open)
+        }
+    }
+
+    @Test("No plan, expired, billing retry and refunded: owner read-only, staff locked")
+    func notEntitled() {
+        for state: EntitlementState in [.none, .expired, .billingRetry, .revoked] {
+            let access = WorkspaceAccess(hasActiveSubscription: false, state: state)
+            #expect(WorkspaceGate.resolve(access: access, role: .owner) == .ownerReadOnly)
+            #expect(WorkspaceGate.resolve(access: access, role: .fieldWorker) == .memberLocked)
+            #expect(WorkspaceGate.resolve(access: access, role: .admin) == .memberLocked)
+        }
+    }
+
+    @Test("A network failure (no answer) never locks anyone out")
+    func networkFailureStaysOpen() {
+        #expect(WorkspaceGate.resolve(access: nil, role: .owner) == .open)
+        #expect(WorkspaceGate.resolve(access: nil, role: .fieldWorker) == .open)
+    }
+
+    @Test("After an applied downgrade the owner resolves seats; staff wait")
+    func seatResolutionGate() {
+        #expect(WorkspaceGate.resolve(access: overPlan, role: .owner) == .ownerSeatResolution)
+        #expect(WorkspaceGate.resolve(access: overPlan, role: .fieldWorker) == .memberSeatResolution)
+        #expect(WorkspaceGate.ownerSeatResolution.isOwnerReadOnly)
+        #expect(WorkspaceGate.memberSeatResolution.isMemberLocked)
+        #expect(WorkspaceGate.open.isOwnerReadOnly == false && WorkspaceGate.open.isMemberLocked == false)
+    }
+
+    @Test("The seat resolution instruction names the limit, the count and how many to deactivate")
+    func seatMessage() {
+        #expect(overPlan.seatResolutionMessage == "Your subscription now allows 5 active users. You currently have 10 active users. Deactivate 5 users to continue.")
+        let starter = WorkspaceAccess(hasActiveSubscription: true, state: .active, planName: "Starter",
+                                      userLimit: 1, activeUsers: 10, seatsOverLimit: true, usersToDeactivate: 9)
+        #expect(starter.seatResolutionMessage?.hasPrefix("Your subscription now allows 1 active user.") == true)
+        #expect(WorkspaceAccess(hasActiveSubscription: true, state: .active).seatResolutionMessage == nil)
+    }
+
+    @Test("A read-only owner keeps people management and subscription actions")
+    func readOnlyKeepsSubscriptionActions() {
+        let owner = session(.owner).readOnlyWorkspace()
+        #expect(owner.can(.usersManage) && owner.can(.usersRead))
+        #expect(owner.can(.saasBillingManage) && owner.can(.saasBillingRead))
+        #expect(owner.canMutateWorkspace == false)
+        #expect(session(.owner).canMutateWorkspace)
+    }
+
+    @Test("Read-only mutation attempts are refused by the data layer")
+    func readOnlyMutationsRefused() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let tom = TenantSession(userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
+                                displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac).readOnlyWorkspace()
+        var query = JobQuery()
+        query.dateScope = .all
+        let jobs = try await gateway.jobs(session: tom, query: query)
+        let jobID = try #require(jobs.first?.id)
+
+        await #expect(throws: DataError.self) {
+            try await gateway.updateJobStatus(session: tom, jobID: jobID, to: .cancelled, locationFix: nil)
+        }
+        await #expect(throws: DataError.self) {
+            try await gateway.sendOfficeMessage(session: tom, draft: OfficeMessageDraft(threadID: nil, jobID: jobID, subject: "x", body: "hello"))
+        }
+        await #expect(throws: DataError.self) {
+            try await gateway.addJobNote(session: tom, jobID: jobID, body: "note", visibility: .internalOnly)
+        }
+        await #expect(throws: DataError.self) {
+            try await gateway.addJobPhoto(session: tom, jobID: jobID, kind: .before, caption: nil)
+        }
+        // Reading is still fine.
+        #expect(try await gateway.jobDetail(session: tom, jobID: jobID).id == jobID)
+    }
+
+    @Test("A staff member deletes only their own account; the company carries on")
+    func deleteStaffAccount() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let marcus = TenantSession(userID: "usr_marcus", companyID: "cmp_gulfcoast", role: .fieldWorker,
+                                   displayName: "Marcus Hale", email: "marcus@gulfcoastair.com", trade: .hvac)
+        let context = try await gateway.accountDeletionContext(session: marcus)
+        #expect(context.isSoleOwner == false)
+        #expect(try await gateway.deleteMyAccount(session: marcus, closeCompany: false) == .accountDeleted)
+        let deleted = await gateway.user(id: "usr_marcus")
+        #expect(deleted?.status == .suspended && deleted?.name == "Deleted user")
+        #expect(await gateway.user(id: "usr_owner")?.status == .active)
+        #expect(await gateway.user(id: "usr_dee")?.status == .active)
+    }
+
+    @Test("The sole owner cannot delete silently; closing needs explicit confirmation")
+    func deleteSoleOwner() async throws {
+        let gateway = MockDataGateway(latency: .zero)
+        let tom = TenantSession(userID: "usr_owner", companyID: "cmp_gulfcoast", role: .owner,
+                                displayName: "Tom Ellison", email: "tom@gulfcoastair.com", trade: .hvac)
+        #expect(try await gateway.accountDeletionContext(session: tom).isSoleOwner)
+        await #expect(throws: DataError.self) {
+            _ = try await gateway.deleteMyAccount(session: tom, closeCompany: false)
+        }
+        #expect(await gateway.user(id: "usr_owner")?.status == .active)
+        #expect(try await gateway.deleteMyAccount(session: tom, closeCompany: true) == .workspaceClosed)
+        #expect(await gateway.user(id: "usr_owner")?.status == .suspended)
+        #expect(await gateway.user(id: "usr_marcus")?.status == .suspended)
+        // Records are kept: the other company is untouched and users are not removed.
+        #expect(await gateway.user(id: "usr_marcus") != nil)
+        #expect(await gateway.user(id: "usr_north_owner")?.status == .active)
+    }
+
+    @Test("Privacy policy is configuration-driven and never invented")
+    func privacyPolicyConfig() {
+        #expect(Brand.privacyPolicyURL(from: nil) == nil)
+        #expect(Brand.privacyPolicyURL(from: "") == nil)
+        #expect(Brand.privacyPolicyURL(from: "http://example.com/privacy") == nil)
+        #expect(Brand.privacyPolicyURL(from: " https://example.com/privacy ")?.absoluteString == "https://example.com/privacy")
+        #expect(Brand.termsOfUseURL?.absoluteString == "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
     }
 }
 

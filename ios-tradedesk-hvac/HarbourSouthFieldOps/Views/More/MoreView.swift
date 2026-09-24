@@ -126,6 +126,40 @@ struct MoreView: View {
                     }
                 }
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Account")
+                        .sectionLabelStyle()
+
+                    NavigationLink {
+                        DeleteAccountView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.xmark")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.red)
+                                .frame(width: 32, height: 32)
+                                .background(Theme.red.opacity(0.1))
+                                .clipShape(.rect(cornerRadius: 8))
+                            Text("Delete account")
+                                .font(.body)
+                                .foregroundStyle(Theme.ink)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.meta)
+                        }
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: Theme.minTap)
+                        .contentShape(.rect)
+                        .cardSurface()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("more.deleteAccount")
+
+                    LegalLinksView()
+                        .padding(.horizontal, 4)
+                }
+
                 Button {
                     // One entry point for both stacks. The production path also
                     // removes this device's push registration before the session

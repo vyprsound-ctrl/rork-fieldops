@@ -54,6 +54,17 @@ declare
   v_ownerd uuid := gen_random_uuid();
   v_workerd uuid;
   v_chk record;
+  v_ce uuid; v_cf uuid; v_cg uuid; v_cx uuid;
+  v_ownere uuid := gen_random_uuid();
+  v_ownerf uuid := gen_random_uuid();
+  v_ownerg uuid := gen_random_uuid();
+  v_workere uuid;
+  v_ox1 uuid := gen_random_uuid();
+  v_ox2 uuid := gen_random_uuid();
+  v_wx  uuid := gen_random_uuid();
+  v_cust_x uuid;
+  v_before int;
+  v_ok boolean;
 begin
   -- ---------------------------------------------------------------------------
   -- Pure state function
@@ -647,8 +658,8 @@ begin
       v_chk.has_active_subscription, v_chk.subscription_state);
   end loop;
 
-  r := r || format('LOCK: members read exactly two facts and cannot name a company|%s|%s',
-    pg_get_function_result('public.company_workspace_access()'::regprocedure) = 'TABLE(has_active_subscription boolean, subscription_state text)'
+  r := r || format('LOCK: members read the workspace position only (no billing) and cannot name a company|%s|%s',
+    pg_get_function_result('public.company_workspace_access()'::regprocedure) = 'TABLE(has_active_subscription boolean, subscription_state text, plan_name text, user_limit integer, active_users integer, seats_over_limit boolean, users_to_deactivate integer)'
     and (select pronargs from pg_proc where oid = 'public.company_workspace_access()'::regprocedure) = 0
     and has_function_privilege('authenticated', 'public.company_workspace_access()', 'execute')
     and not has_function_privilege('anon', 'public.company_workspace_access()', 'execute'),
@@ -680,23 +691,23 @@ begin
 
   perform set_config('request.jwt.claims', json_build_object('sub', v_ownerd::text, 'role', 'authenticated')::text, true);
   select * into v_chk from public.subscription_plan_change_check('team');
-  r := r || format('SEATS: Business (10 active) -> Team is blocked until 5 are deactivated|%s|allowed=%s remove=%s msg=%s', not v_chk.allowed and v_chk.users_to_deactivate = 5 and v_chk.active_users = 10 and v_chk.message ilike '%Deactivate 5 people%', v_chk.allowed, v_chk.users_to_deactivate, v_chk.message);
+  r := r || format('SEATS: Business (10 active) -> Team is never refused; it warns 5 must be deactivated|%s|allowed=%s remove=%s msg=%s', v_chk.allowed and v_chk.users_to_deactivate = 5 and v_chk.active_users = 10 and v_chk.message ilike '%deactivate 5 people%', v_chk.allowed, v_chk.users_to_deactivate, v_chk.message);
   select * into v_chk from public.subscription_plan_change_check('starter');
-  r := r || format('SEATS: Business (10 active) -> Starter is blocked until 9 are deactivated|%s|allowed=%s remove=%s', not v_chk.allowed and v_chk.users_to_deactivate = 9, v_chk.allowed, v_chk.users_to_deactivate);
+  r := r || format('SEATS: Business (10 active) -> Starter is never refused; it warns 9 must be deactivated|%s|allowed=%s remove=%s', v_chk.allowed and v_chk.users_to_deactivate = 9, v_chk.allowed, v_chk.users_to_deactivate);
   select * into v_chk from public.subscription_plan_change_check('business');
   r := r || format('SEATS: Business has no hard-coded cap in the plan check|%s|limit=%s', v_chk.allowed and v_chk.user_limit is null, v_chk.user_limit);
   select count(*) into v_n from public.app_users where company_id = v_cd and status = 'active';
-  r := r || format('SEATS: a refused downgrade suspends nobody|%s|active=%s', v_n = 10, v_n);
+  r := r || format('SEATS: the plan-change check suspends nobody|%s|active=%s', v_n = 10, v_n);
 
   -- The owner chooses who to deactivate.
   update public.app_users set status = 'suspended' where company_id = v_cd and email in ('dg1@subtest.invalid','dg2@subtest.invalid','dg3@subtest.invalid','dg4@subtest.invalid','dg5@subtest.invalid');
   select * into v_chk from public.subscription_plan_change_check('team');
-  r := r || format('SEATS: Team becomes possible once the owner is down to 5 active|%s|allowed=%s active=%s', v_chk.allowed and v_chk.active_users = 5, v_chk.allowed, v_chk.active_users);
+  r := r || format('SEATS: Team needs nobody deactivated once the owner is down to 5 active|%s|allowed=%s active=%s', v_chk.allowed and v_chk.active_users = 5 and v_chk.users_to_deactivate = 0 and v_chk.message is null, v_chk.allowed, v_chk.active_users);
   select * into v_chk from public.subscription_plan_change_check('starter');
-  r := r || format('SEATS: Starter still needs 4 more deactivated|%s|remove=%s', not v_chk.allowed and v_chk.users_to_deactivate = 4, v_chk.users_to_deactivate);
+  r := r || format('SEATS: Starter still needs 4 more deactivated|%s|remove=%s', v_chk.allowed and v_chk.users_to_deactivate = 4, v_chk.users_to_deactivate);
   update public.app_users set status = 'suspended' where company_id = v_cd and email in ('dg6@subtest.invalid','dg7@subtest.invalid','dg8@subtest.invalid','dg9@subtest.invalid');
   select * into v_chk from public.subscription_plan_change_check('starter');
-  r := r || format('SEATS: Starter becomes possible once only the owner is active|%s|allowed=%s', v_chk.allowed, v_chk.allowed);
+  r := r || format('SEATS: Starter needs nobody deactivated once only the owner is active|%s|allowed=%s', v_chk.allowed and v_chk.users_to_deactivate = 0, v_chk.allowed);
   select count(*) into v_n from public.app_users where company_id = v_cd;
   r := r || format('SEATS: no user record is deleted by the downgrade process|%s|rows=%s', v_n = 10 and (select count(*) from public.app_users where company_id = v_cd and status = 'suspended') = 9, v_n);
 
@@ -741,6 +752,321 @@ begin
   exception when others then
     r := r || format('SEATS: only the owner can run the plan-change check|%s|%s', sqlstate = 'TD403', sqlstate);
   end;
+
+
+  -- ===========================================================================
+  -- APPLE DOWNGRADES: pending (scheduled for renewal) and applied
+  -- ===========================================================================
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+  select '00000000-0000-0000-0000-000000000000', u.id, 'authenticated', 'authenticated', u.em, 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false
+  from (values (v_ownere,'ownere@subtest.invalid'), (v_ownerf,'ownerf@subtest.invalid'), (v_ownerg,'ownerg@subtest.invalid')) u(id, em);
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier) values ('SUBTEST Pending','hvac','US','USD','America/New_York') returning id into v_ce;
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier) values ('SUBTEST Pending4','hvac','US','USD','America/New_York') returning id into v_cf;
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier) values ('SUBTEST ToStarter','hvac','US','USD','America/New_York') returning id into v_cg;
+  insert into public.company_subscriptions (company_id) values (v_ce), (v_cf), (v_cg);
+  insert into public.app_users (id, company_id, name, email, role) values
+    (v_ownere, v_ce, 'OwnerE', 'ownere@subtest.invalid', 'owner'),
+    (v_ownerf, v_cf, 'OwnerF', 'ownerf@subtest.invalid', 'owner'),
+    (v_ownerg, v_cg, 'OwnerG', 'ownerg@subtest.invalid', 'owner');
+  -- v_ce: owner + 9 active + 1 suspended. v_cf: owner + 3 active + 3 suspended. v_cg: owner + 9 active.
+  for i in 1..10 loop
+    v_workere := gen_random_uuid();
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+      values ('00000000-0000-0000-0000-000000000000', v_workere, 'authenticated', 'authenticated', 'pe' || i || '@subtest.invalid', 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+    insert into public.app_users (id, company_id, name, email, role, status) values (v_workere, v_ce, 'PE' || i, 'pe' || i || '@subtest.invalid', 'fieldWorker', (case when i <= 9 then 'active' else 'suspended' end)::public.app_user_status);
+  end loop;
+  for i in 1..6 loop
+    v_workere := gen_random_uuid();
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+      values ('00000000-0000-0000-0000-000000000000', v_workere, 'authenticated', 'authenticated', 'pf' || i || '@subtest.invalid', 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+    insert into public.app_users (id, company_id, name, email, role, status) values (v_workere, v_cf, 'PF' || i, 'pf' || i || '@subtest.invalid', 'fieldWorker', (case when i <= 3 then 'active' else 'suspended' end)::public.app_user_status);
+  end loop;
+  for i in 1..9 loop
+    v_workere := gen_random_uuid();
+    insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+      values ('00000000-0000-0000-0000-000000000000', v_workere, 'authenticated', 'authenticated', 'pg' || i || '@subtest.invalid', 'x', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+    insert into public.app_users (id, company_id, name, email, role, status) values (v_workere, v_cg, 'PG' || i, 'pg' || i || '@subtest.invalid', 'fieldWorker', 'active');
+  end loop;
+
+  -- Business, then Apple schedules Business -> Team for the next renewal.
+  foreach v_cx in array array[v_ce, v_cf] loop
+    perform public.apple_apply_transaction(v_cx,
+      jsonb_build_object('environment','Production','transactionId','PD-1-' || v_cx::text,'originalTransactionId','PD-O-' || v_cx::text,'productId','com.harboursouth.fieldservice.business.monthly',
+        'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now),
+      jsonb_build_object('originalTransactionId','PD-O-' || v_cx::text,'autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.business.monthly','signedDate',v_ms_now), 'app');
+    v_out := public.apple_apply_transaction(v_cx,
+      jsonb_build_object('environment','Production','transactionId','PD-1-' || v_cx::text,'originalTransactionId','PD-O-' || v_cx::text,'productId','com.harboursouth.fieldservice.business.monthly',
+        'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now + 1000),
+      jsonb_build_object('originalTransactionId','PD-O-' || v_cx::text,'autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.team.monthly','signedDate',v_ms_now + 1000), 'notification');
+  end loop;
+  v_cx := null;
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('PENDING: a scheduled Business -> Team keeps Business (no early downgrade)|%s|out=%s tier=%s next=%s entitled=%s', v_out = 'applied:active' and v_state.tier_id = 'business' and v_state.renews_to_tier_id = 'team' and v_state.has_entitlement and v_state.pending_user_limit = 5 and not v_state.seats_over_limit, v_out, v_state.tier_id, v_state.renews_to_tier_id, v_state.has_entitlement);
+  r := r || format('PENDING: 10 active on Business with Team pending cannot add more|%s|can_add=%s', not v_state.can_add_user and v_state.active_users = 10, v_state.can_add_user);
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownere::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.company_workspace_access();
+  r := r || format('PENDING: existing users keep normal Business access (workspace open, no seat resolution)|%s|has=%s over=%s', v_chk.has_active_subscription and not v_chk.seats_over_limit and v_chk.user_limit is null, v_chk.has_active_subscription, v_chk.seats_over_limit);
+  begin
+    perform public.create_invitation('pe-new@subtest.invalid', 'fieldWorker', 7);
+    r := r || array['PENDING: inviting an 11th person is blocked|false|accepted'];
+  exception when others then
+    r := r || format('PENDING: inviting an 11th person is blocked|%s|%s', sqlerrm ilike '%changes to Team at renewal%', sqlerrm);
+  end;
+  begin
+    update public.app_users set status = 'active' where company_id = v_ce and email = 'pe10@subtest.invalid';
+    r := r || array['PENDING: reactivating an 11th person is blocked|false|accepted'];
+  exception when others then
+    r := r || format('PENDING: reactivating an 11th person is blocked|%s|%s', sqlerrm ilike '%changes to Team at renewal%', sqlerrm);
+  end;
+  begin
+    update public.app_users set status = 'suspended' where company_id = v_ce and email = 'pe9@subtest.invalid';
+    select count(*) into v_n from public.app_users where company_id = v_ce and status = 'active';
+    r := r || format('PENDING: voluntary deactivation is still allowed|%s|active=%s', v_n = 9, v_n);
+  exception when others then
+    r := r || format('PENDING: voluntary deactivation is still allowed|false|%s', sqlerrm);
+  end;
+
+  -- Business with Team pending and 4 active: a 5th may be added, a 6th may not.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownerf::text, 'role', 'authenticated')::text, true);
+  begin
+    update public.app_users set status = 'active' where company_id = v_cf and email = 'pf4@subtest.invalid';
+    select count(*) into v_n from public.app_users where company_id = v_cf and status = 'active';
+    r := r || format('PENDING: with 4 active, reactivating a 5th is allowed|%s|active=%s', v_n = 5, v_n);
+  exception when others then
+    r := r || format('PENDING: with 4 active, reactivating a 5th is allowed|false|%s', sqlerrm);
+  end;
+  begin
+    update public.app_users set status = 'active' where company_id = v_cf and email = 'pf5@subtest.invalid';
+    r := r || array['PENDING: with 5 active, reactivating a 6th is blocked|false|accepted'];
+  exception when others then
+    r := r || format('PENDING: with 5 active, reactivating a 6th is blocked|%s|%s', sqlerrm ilike '%Team%', sqlerrm);
+  end;
+  begin
+    perform public.create_invitation('pf-new@subtest.invalid', 'fieldWorker', 7);
+    r := r || array['PENDING: with 5 active, inviting a 6th is blocked|false|accepted'];
+  exception when others then
+    r := r || format('PENDING: with 5 active, inviting a 6th is blocked|%s|%s', sqlerrm ilike '%Team%', sqlerrm);
+  end;
+  update public.app_users set status = 'suspended' where company_id = v_cf and email = 'pf4@subtest.invalid';
+  begin
+    perform public.create_invitation('pf-new@subtest.invalid', 'fieldWorker', 7);
+    r := r || array['PENDING: with 4 active, inviting a 5th is allowed|true|'];
+  exception when others then
+    r := r || format('PENDING: with 4 active, inviting a 5th is allowed|false|%s', sqlerrm);
+  end;
+
+  -- Apple applies the downgrade at renewal: Team is now the plan, 9 active.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  select count(*) into v_before from public.app_users where company_id = v_ce;
+  v_out := public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-2','originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.team.monthly',
+      'purchaseDate',v_ms_now + 5000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 5000),
+    jsonb_build_object('originalTransactionId','PD-O-' || v_ce::text,'autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.team.monthly','signedDate',v_ms_now + 5000), 'notification');
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('APPLIED: Harbour South recognises the lower Apple plan (Team)|%s|out=%s tier=%s', v_out = 'applied:active' and v_state.tier_id = 'team' and v_state.has_entitlement and v_state.pending_user_limit is null, v_out, v_state.tier_id);
+  r := r || format('APPLIED: 9 active on Team (5) enters seat resolution: deactivate 4|%s|over=%s remove=%s', v_state.seats_over_limit and v_state.users_to_deactivate = 4 and not v_state.can_add_user, v_state.seats_over_limit, v_state.users_to_deactivate);
+  select count(*) into v_n from public.app_users where company_id = v_ce and status = 'active';
+  r := r || format('APPLIED: nobody is suspended automatically|%s|active=%s', v_n = 9, v_n);
+  select count(*) into v_n from public.app_users where company_id = v_ce;
+  r := r || format('APPLIED: no user record is deleted|%s|rows=%s before=%s', v_n = v_before, v_n, v_before);
+
+  perform set_config('request.jwt.claims', json_build_object('sub', (select id from public.app_users where company_id = v_ce and email = 'pe1@subtest.invalid')::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.company_workspace_access();
+  r := r || format('APPLIED: members see seat resolution (still subscribed, over the plan)|%s|has=%s over=%s limit=%s active=%s remove=%s plan=%s', v_chk.has_active_subscription and v_chk.seats_over_limit and v_chk.user_limit = 5 and v_chk.active_users = 9 and v_chk.users_to_deactivate = 4 and v_chk.plan_name = 'Team', v_chk.has_active_subscription, v_chk.seats_over_limit, v_chk.user_limit, v_chk.active_users, v_chk.users_to_deactivate, v_chk.plan_name);
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ownere::text, 'role', 'authenticated')::text, true);
+  begin
+    perform public.create_invitation('pe-new2@subtest.invalid', 'fieldWorker', 7);
+    r := r || array['APPLIED: an over-limit company cannot invite|false|accepted'];
+  exception when others then
+    r := r || format('APPLIED: an over-limit company cannot invite|%s|%s', sqlerrm ilike '%Team plan%', sqlerrm);
+  end;
+  begin
+    update public.app_users set status = 'active' where company_id = v_ce and email = 'pe10@subtest.invalid';
+    r := r || array['APPLIED: an over-limit company cannot reactivate|false|accepted'];
+  exception when others then
+    r := r || format('APPLIED: an over-limit company cannot reactivate|%s|%s', sqlerrm ilike '%Team plan%', sqlerrm);
+  end;
+
+  -- The owner chooses who to deactivate.
+  update public.app_users set status = 'suspended' where company_id = v_ce and email in ('pe5@subtest.invalid','pe6@subtest.invalid','pe7@subtest.invalid');
+  select * into v_chk from public.company_workspace_access();
+  r := r || format('RESOLUTION: still over by one after deactivating 3|%s|over=%s remove=%s', v_chk.seats_over_limit and v_chk.users_to_deactivate = 1, v_chk.seats_over_limit, v_chk.users_to_deactivate);
+  update public.app_users set status = 'suspended' where company_id = v_ce and email = 'pe8@subtest.invalid';
+  select * into v_chk from public.company_workspace_access();
+  r := r || format('RESOLUTION: within the plan, normal workspace access resumes|%s|has=%s over=%s active=%s', v_chk.has_active_subscription and not v_chk.seats_over_limit and v_chk.active_users = 5 and v_chk.users_to_deactivate = 0, v_chk.has_active_subscription, v_chk.seats_over_limit, v_chk.active_users);
+  begin
+    update public.app_users set status = 'active' where company_id = v_ce and email = 'pe8@subtest.invalid';
+    r := r || array['RESOLUTION: at the limit, reactivating another is refused|false|accepted'];
+  exception when others then
+    r := r || format('RESOLUTION: at the limit, reactivating another is refused|%s|%s', sqlerrm ilike '%Team plan%', sqlerrm);
+  end;
+  update public.app_users set status = 'suspended' where company_id = v_ce and email = 'pe4@subtest.invalid';
+  begin
+    update public.app_users set status = 'active' where company_id = v_ce and email = 'pe8@subtest.invalid';
+    select count(*) into v_n from public.app_users where company_id = v_ce and status = 'active';
+    r := r || format('RESOLUTION: reactivation after resolution works within the plan|%s|active=%s', v_n = 5, v_n);
+  exception when others then
+    r := r || format('RESOLUTION: reactivation after resolution works within the plan|false|%s', sqlerrm);
+  end;
+
+  -- Team -> Starter applied with 5 active: 4 to deactivate.
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  perform public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-3','originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.starter.monthly',
+      'purchaseDate',v_ms_now + 6000,'expiresDate',v_ms_now + 90*v_day,'signedDate',v_ms_now + 6000), null, 'notification');
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('APPLIED: Team -> Starter with 5 active means deactivate 4|%s|tier=%s remove=%s', v_state.tier_id = 'starter' and v_state.seats_over_limit and v_state.users_to_deactivate = 4, v_state.tier_id, v_state.users_to_deactivate);
+
+  -- Upgrade: Starter -> Business ends seat resolution; nobody removed.
+  perform public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-4','originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now + 7000,'expiresDate',v_ms_now + 90*v_day,'signedDate',v_ms_now + 7000), null, 'notification');
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('UPGRADE: Starter -> Business applies at once and seats use the new plan|%s|tier=%s over=%s limit=%s', v_state.tier_id = 'business' and not v_state.seats_over_limit and v_state.plan_user_limit is null and v_state.can_add_user, v_state.tier_id, v_state.seats_over_limit, v_state.plan_user_limit);
+  select count(*) into v_n from public.app_users where company_id = v_ce;
+  r := r || format('UPGRADE: every user record is still there|%s|rows=%s', v_n = v_before, v_n);
+
+  -- Crossgrade: Business monthly -> Business annual.
+  perform public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-5','originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 8000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 8000), null, 'notification');
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('CROSSGRADE: Business monthly -> annual keeps the plan, changes the period|%s|tier=%s period=%s', v_state.tier_id = 'business' and v_state.billing_period = 'annual' and v_state.plan_price_cents = 66999, v_state.tier_id, v_state.billing_period);
+
+  -- Out-of-order renewal info: an older cancellation cannot overwrite newer state.
+  perform public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-5','originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.business.annual',
+      'purchaseDate',v_ms_now + 8000,'expiresDate',v_ms_now + 400*v_day,'signedDate',v_ms_now + 9000),
+    jsonb_build_object('originalTransactionId','PD-O-' || v_ce::text,'autoRenewStatus',1,'autoRenewProductId','com.harboursouth.fieldservice.business.annual','signedDate',v_ms_now + 9000), 'notification');
+  v_out := public.apple_apply_transaction(v_ce,
+    jsonb_build_object('environment','Production','transactionId','PD-1-' || v_ce::text,'originalTransactionId','PD-O-' || v_ce::text,'productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now - v_day,'signedDate',v_ms_now + 100),
+    jsonb_build_object('originalTransactionId','PD-O-' || v_ce::text,'autoRenewStatus',0,'expirationIntent',1,'signedDate',v_ms_now + 100), 'notification');
+  select * into v_state from public.company_commercial_state(v_ce);
+  r := r || format('ORDER: an old cancellation/expiry event cannot overwrite a newer active plan|%s|out=%s state=%s renew=%s', v_out = 'stale' and v_state.entitlement_state = 'active' and v_state.will_auto_renew and v_state.billing_period = 'annual', v_out, v_state.entitlement_state, v_state.will_auto_renew);
+
+  -- Business -> Starter applied with 10 active: 9 to deactivate.
+  perform public.apple_apply_transaction(v_cg,
+    jsonb_build_object('environment','Production','transactionId','PG-1','originalTransactionId','PG-O','productId','com.harboursouth.fieldservice.business.monthly',
+      'purchaseDate',v_ms_now,'expiresDate',v_ms_now + 30*v_day,'signedDate',v_ms_now), null, 'app');
+  perform public.apple_apply_transaction(v_cg,
+    jsonb_build_object('environment','Production','transactionId','PG-2','originalTransactionId','PG-O','productId','com.harboursouth.fieldservice.starter.monthly',
+      'purchaseDate',v_ms_now + 1000,'expiresDate',v_ms_now + 60*v_day,'signedDate',v_ms_now + 1000), null, 'notification');
+  select * into v_state from public.company_commercial_state(v_cg);
+  select count(*) into v_n from public.app_users where company_id = v_cg and status = 'active';
+  r := r || format('APPLIED: Business -> Starter with 10 active means deactivate 9, nobody suspended|%s|tier=%s remove=%s active=%s', v_state.tier_id = 'starter' and v_state.seats_over_limit and v_state.users_to_deactivate = 9 and v_n = 10, v_state.tier_id, v_state.users_to_deactivate, v_n);
+
+  -- Grace period is full service; no local grace invented.
+  update public.company_subscriptions set apple_expires_at = now() - interval '1 hour', apple_grace_period_expires_at = now() + interval '3 days', apple_in_billing_retry = true where company_id = v_cg;
+  select * into v_state from public.company_commercial_state(v_cg);
+  r := r || format('GRACE: Apple billing grace period keeps full entitlement|%s|state=%s', v_state.entitlement_state = 'gracePeriod' and v_state.has_entitlement, v_state.entitlement_state);
+  update public.company_subscriptions set apple_grace_period_expires_at = now() - interval '1 minute' where company_id = v_cg;
+  select * into v_state from public.company_commercial_state(v_cg);
+  r := r || format('GRACE: when Apple''s grace ends in billing retry, service stops (no Harbour South grace)|%s|state=%s', v_state.entitlement_state = 'billingRetry' and not v_state.has_entitlement and not v_state.seats_over_limit, v_state.entitlement_state);
+
+  -- Duplicate Apple notification ids are claimed once only.
+  insert into public.apple_notifications (notification_uuid, notification_type) values ('DUP-1', 'DID_RENEW');
+  begin
+    insert into public.apple_notifications (notification_uuid, notification_type) values ('DUP-1', 'DID_RENEW');
+    r := r || array['NOTIFY: a duplicate notification id cannot be processed twice|false|accepted'];
+  exception when unique_violation then
+    r := r || array['NOTIFY: a duplicate notification id cannot be processed twice|true|23505'];
+  end;
+
+  -- ===========================================================================
+  -- ACCOUNT DELETION
+  -- ===========================================================================
+  insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_super_admin)
+  select '00000000-0000-0000-0000-000000000000', u.id, 'authenticated', 'authenticated', u.em, 'x', now(), now(), now(), '{"provider":"email"}'::jsonb, '{"name":"x"}'::jsonb, false
+  from (values (v_ox1,'ox1@subtest.invalid'), (v_ox2,'ox2@subtest.invalid'), (v_wx,'wx@subtest.invalid')) u(id, em);
+  insert into public.companies (name, trade, country_code, currency_code, time_zone_identifier) values ('SUBTEST Delete','hvac','US','USD','America/New_York') returning id into v_cx;
+  insert into public.company_subscriptions (company_id) values (v_cx);
+  insert into public.app_users (id, company_id, name, email, phone, role) values
+    (v_ox1, v_cx, 'OX1', 'ox1@subtest.invalid', '555', 'owner'),
+    (v_ox2, v_cx, 'OX2', 'ox2@subtest.invalid', '555', 'owner'),
+    (v_wx,  v_cx, 'WX',  'wx@subtest.invalid',  '555', 'fieldWorker');
+  insert into public.customers (company_id, name) values (v_cx, 'SUBTEST Delete Customer') returning id into v_cust_x;
+  insert into public.stripe_connect_accounts (company_id, stripe_account_id, charges_enabled) values (v_cx, 'acct_subtest_delete', true);
+  insert into auth.sessions (id, user_id) values (gen_random_uuid(), v_wx), (gen_random_uuid(), v_ox1);
+  insert into auth.refresh_tokens (token, user_id, revoked) values ('rt-wx-subtest', v_wx::text, false), ('rt-ox1-subtest', v_ox1::text, false);
+
+  r := r || format('DELETE: only signed-in users can delete an account|%s|', has_function_privilege('authenticated', 'public.delete_my_account(boolean)', 'execute') and not has_function_privilege('anon', 'public.delete_my_account(boolean)', 'execute'));
+
+  -- Non-sole-owner: a field worker.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_wx::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.account_deletion_context();
+  r := r || format('DELETE: a staff member is not the sole owner|%s|sole=%s others=%s', not v_chk.is_sole_owner and not v_chk.is_owner and v_chk.other_active_members = 2, v_chk.is_sole_owner, v_chk.other_active_members);
+  v_out := public.delete_my_account(false);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  r := r || format('DELETE: staff deletion deletes only that account|%s|out=%s', v_out = 'accountDeleted', v_out);
+  r := r || format('DELETE: the membership is anonymised and deactivated, not removed|%s|', exists(select 1 from public.app_users where id = v_wx and status = 'suspended' and name = 'Deleted user' and email like 'deleted-%@deleted.invalid' and phone = ''));
+  r := r || format('DELETE: the sign-in is anonymised and banned|%s|', exists(select 1 from auth.users where id = v_wx and email like 'deleted-%@deleted.invalid' and banned_until > now() + interval '100 years' and deleted_at is not null and encrypted_password = ''));
+  r := r || format('DELETE: every session and refresh token of the deleted user is gone|%s|', not exists(select 1 from auth.sessions where user_id = v_wx) and not exists(select 1 from auth.refresh_tokens where user_id = v_wx::text));
+  r := r || format('DELETE: other people''s sessions are untouched|%s|', exists(select 1 from auth.sessions where user_id = v_ox1) and exists(select 1 from auth.refresh_tokens where user_id = v_ox1::text));
+  r := r || format('DELETE: the company, its owners and its records are preserved|%s|', exists(select 1 from public.companies where id = v_cx and closed_at is null)
+    and (select count(*) from public.app_users where company_id = v_cx and status = 'active') = 2
+    and exists(select 1 from public.customers where id = v_cust_x)
+    and exists(select 1 from public.stripe_connect_accounts where company_id = v_cx and stripe_account_id = 'acct_subtest_delete'));
+  perform set_config('request.jwt.claims', json_build_object('sub', v_wx::text, 'role', 'authenticated')::text, true);
+  r := r || format('DELETE: a leftover access token of the deleted user reaches no company|%s|', public.current_company_id() is null and not public.has_perm('jobsReadAssignedOnly'::app_permission));
+  begin
+    perform public.company_workspace_access();
+    r := r || array['DELETE: the deleted user cannot open the workspace|false|accepted'];
+  exception when others then
+    r := r || format('DELETE: the deleted user cannot open the workspace|%s|%s', sqlstate = 'TD404', sqlstate);
+  end;
+
+  -- Non-sole owner (another active Owner exists).
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ox2::text, 'role', 'authenticated')::text, true);
+  select * into v_chk from public.account_deletion_context();
+  v_ok := v_chk.is_owner and not v_chk.is_sole_owner;
+  v_out := public.delete_my_account(false);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  r := r || format('DELETE: an owner with a co-owner deletes their account; the company carries on|%s|out=%s', v_ok and v_out = 'accountDeleted'
+    and exists(select 1 from public.app_users where id = v_ox1 and status = 'active' and role = 'owner')
+    and exists(select 1 from public.companies where id = v_cx and closed_at is null), v_out);
+
+  -- The last-Owner rule still holds outside a closure (marker alone is useless).
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ox1::text, 'role', 'authenticated')::text, true);
+  perform set_config('harbour.closing_company', v_cx::text, true);
+  begin
+    update public.app_users set status = 'suspended' where id = v_ox1;
+    r := r || array['DELETE: the last active Owner still cannot be suspended outside a closure|false|accepted'];
+  exception when others then
+    r := r || format('DELETE: the last active Owner still cannot be suspended outside a closure|%s|%s', sqlerrm ilike '%at least one active Owner%', sqlerrm);
+  end;
+  perform set_config('harbour.closing_company', '', true);
+
+  -- Sole owner: refused without explicit closure.
+  select * into v_chk from public.account_deletion_context();
+  r := r || format('DELETE: the remaining owner is the sole owner|%s|', v_chk.is_sole_owner);
+  begin
+    perform public.delete_my_account(false);
+    r := r || array['DELETE: the sole owner cannot silently delete the company|false|accepted'];
+  exception when others then
+    r := r || format('DELETE: the sole owner cannot silently delete the company|%s|%s', sqlstate = 'TD409', sqlstate);
+  end;
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  r := r || format('DELETE: a refused sole-owner deletion changes nothing|%s|', exists(select 1 from public.app_users where id = v_ox1 and status = 'active' and name = 'OX1')
+    and exists(select 1 from public.companies where id = v_cx and closed_at is null) and exists(select 1 from auth.sessions where user_id = v_ox1));
+
+  -- Sole owner with explicit closure.
+  select count(*) into v_before from public.app_users where company_id = v_cx;
+  perform set_config('request.jwt.claims', json_build_object('sub', v_ox1::text, 'role', 'authenticated')::text, true);
+  v_out := public.delete_my_account(true);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  r := r || format('DELETE: the sole owner closes the workspace with explicit confirmation|%s|out=%s', v_out = 'workspaceClosed' and exists(select 1 from public.companies where id = v_cx and closed_at is not null), v_out);
+  r := r || format('DELETE: after closure no membership remains active; none is deleted|%s|', not exists(select 1 from public.app_users where company_id = v_cx and status = 'active')
+    and (select count(*) from public.app_users where company_id = v_cx) = v_before);
+  r := r || format('DELETE: the sole owner''s sign-in is banned and sessions gone|%s|', exists(select 1 from auth.users where id = v_ox1 and banned_until > now() and deleted_at is not null)
+    and not exists(select 1 from auth.sessions where user_id = v_ox1) and not exists(select 1 from auth.refresh_tokens where user_id = v_ox1::text));
+  r := r || format('DELETE: closure retains business records and the Stripe account row|%s|', exists(select 1 from public.customers where id = v_cust_x)
+    and exists(select 1 from public.stripe_connect_accounts where company_id = v_cx and stripe_account_id = 'acct_subtest_delete' and charges_enabled)
+    and exists(select 1 from public.company_subscriptions where company_id = v_cx));
+  r := r || format('DELETE: the platform fee is untouched (30 bps)|%s|', (select (value #>> '{}')::int from public.platform_settings where key='application_fee_bps') = 30);
 
   -- Tidy (the whole transaction is rolled back anyway).
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);

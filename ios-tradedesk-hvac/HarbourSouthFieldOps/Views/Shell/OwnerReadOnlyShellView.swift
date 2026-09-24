@@ -1,58 +1,82 @@
 import SwiftUI
 
-/// The owner's workspace while the company has no active subscription.
+/// The owner's workspace while it is not open for normal work.
 ///
-/// Company data stays readable (the session is read-only, so create and edit
-/// controls are withheld and the data layer refuses writes), a banner says
-/// why, and "Choose a plan" is presented straight away — with Restore
-/// purchases and Redeem code on the same screen.
+/// Two reasons, one shape:
+///   * no active subscription — "Choose a plan" is presented straight away,
+///     with Restore purchases and Redeem code on the same screen;
+///   * seat resolution — Apple applied a smaller plan and the company has more
+///     active people than it allows. The owner chooses who to deactivate.
+///
+/// Company data stays readable either way. The session is read-only, so
+/// create and edit controls are withheld and the data layer refuses writes;
+/// managing people and the subscription stay available.
 struct OwnerReadOnlyShellView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var isChoosingPlan: Bool = true
+    var reason: WorkspaceLockReason = .noSubscription
+    @State private var isResolving: Bool = true
 
     var body: some View {
         OwnerShellView()
             .safeAreaInset(edge: .top, spacing: 0) {
                 banner
             }
-            .sheet(isPresented: $isChoosingPlan) {
+            .sheet(isPresented: $isResolving) {
                 NavigationStack {
-                    SubscriptionView()
-                        .navigationDestination(for: AppRoute.self) { route in
-                            RouteDestinationView(route: route)
+                    Group {
+                        if reason == .seatResolution {
+                            SeatResolutionView()
+                        } else {
+                            SubscriptionView()
                         }
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("View data") { isChoosingPlan = false }
-                                    .accessibilityIdentifier("workspace.readOnly.browse")
-                            }
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Sign out", role: .destructive) {
-                                    isChoosingPlan = false
-                                    Task { await env.signOutOfCurrentSession() }
-                                }
+                    }
+                    .navigationDestination(for: AppRoute.self) { route in
+                        RouteDestinationView(route: route)
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("View data") { isResolving = false }
+                                .accessibilityIdentifier("workspace.readOnly.browse")
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Sign out", role: .destructive) {
+                                isResolving = false
+                                Task { await env.signOutOfCurrentSession() }
                             }
                         }
+                    }
                 }
             }
     }
 
+    private var bannerTitle: String {
+        reason == .seatResolution ? "Too many active users · read-only" : "No active subscription · read-only"
+    }
+
+    private var bannerDetail: String {
+        reason == .seatResolution ? "Choose who stays active to continue." : "Choose a plan to start working again."
+    }
+
+    private var bannerAction: String {
+        reason == .seatResolution ? "Resolve" : "Choose a plan"
+    }
+
     private var banner: some View {
         Button {
-            isChoosingPlan = true
+            isResolving = true
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: "lock.fill")
+                Image(systemName: reason == .seatResolution ? "person.2.slash" : "lock.fill")
                     .font(.footnote.weight(.semibold))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("No active subscription · read-only")
+                    Text(bannerTitle)
                         .font(.footnote.weight(.semibold))
-                    Text("Choose a plan to start working again.")
+                    Text(bannerDetail)
                         .font(.caption)
                         .opacity(0.85)
                 }
                 Spacer(minLength: 8)
-                Text("Choose a plan")
+                Text(bannerAction)
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)

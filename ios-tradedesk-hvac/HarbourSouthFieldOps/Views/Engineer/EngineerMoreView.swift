@@ -68,6 +68,18 @@ struct EngineerMoreView: View {
                 sectionsCard
                 signOutButton
 
+                NavigationLink {
+                    DeleteAccountView()
+                } label: {
+                    Text("Delete account")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Theme.red)
+                        .frame(maxWidth: .infinity, minHeight: Theme.minTap)
+                }
+                .accessibilityIdentifier("engineer.deleteAccount")
+
+                LegalLinksView()
+
                 if env.isDevelopmentSession { SimulatedServicesBanner() }
             }
             .padding(.horizontal, Theme.margin)

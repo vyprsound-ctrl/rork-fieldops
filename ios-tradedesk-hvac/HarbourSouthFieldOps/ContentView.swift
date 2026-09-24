@@ -43,8 +43,12 @@ struct ContentView: View {
                     }
                 case .memberLocked:
                     WorkspaceLockedView()
+                case .memberSeatResolution:
+                    WorkspaceLockedView(reason: .seatResolution)
                 case .ownerReadOnly:
                     OwnerReadOnlyShellView()
+                case .ownerSeatResolution:
+                    OwnerReadOnlyShellView(reason: .seatResolution)
                 case .open:
                     if session.role.usesFieldShell {
                         EngineerShellView()
@@ -110,7 +114,7 @@ struct ContentView: View {
     /// The session check is the important part: a parked route must never
     /// navigate a signed-out user into a tenant screen.
     private func consumePendingDeepLink() {
-        guard env.activeSession != nil, env.workspaceGate != .memberLocked else { return }
+        guard env.activeSession != nil, !env.workspaceGate.isMemberLocked else { return }
         guard let route = PushDeepLinkInbox.shared.consume() else { return }
         deepLinkRoute = route
     }

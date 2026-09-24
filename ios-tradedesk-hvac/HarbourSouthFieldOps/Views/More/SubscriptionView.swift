@@ -49,6 +49,22 @@ struct SubscriptionView: View {
         } message: {
             Text(viewModel.actionError ?? "")
         }
+        .alert(
+            "Fewer seats on this plan",
+            isPresented: Binding(
+                get: { viewModel.pendingSeatWarning != nil },
+                set: { if !$0 { viewModel.pendingSeatWarning = nil } }
+            )
+        ) {
+            Button("Continue") {
+                guard let plan = viewModel.pendingSeatWarning?.plan else { return }
+                viewModel.pendingSeatWarning = nil
+                Task { await buy(plan, acknowledgedSeats: true) }
+            }
+            Button("Cancel", role: .cancel) { viewModel.pendingSeatWarning = nil }
+        } message: {
+            Text(viewModel.pendingSeatWarning?.message ?? "")
+        }
     }
 
     @ViewBuilder
@@ -119,8 +135,7 @@ struct SubscriptionView: View {
                         tooSmall: !plan.fits(activeUsers: activeUsers(overview)),
                         activeUsers: activeUsers(overview),
                         isWorking: viewModel.workingProductID == plan.productID(for: viewModel.period),
-                        isDisabled: viewModel.isWorking || !overview.canManage || viewModel.isBilledToAnotherAppleID
-                            || isBlockedBySeats(plan, overview),
+                        isDisabled: viewModel.isWorking || !overview.canManage || viewModel.isBilledToAnotherAppleID,
                         actionTitle: actionTitle(for: plan)
                     ) {
                         Task { await buy(plan) }
@@ -150,14 +165,6 @@ struct SubscriptionView: View {
 
     private func activeUsers(_ overview: SubscriptionOverview) -> Int {
         viewModel.commercial?.activeUsers ?? overview.activeUsers
-    }
-
-    /// A plan with fewer seats than the company's active people cannot be
-    /// chosen until the owner deactivates enough of them. The server repeats
-    /// this check before Apple is asked.
-    private func isBlockedBySeats(_ plan: PlanOffer, _ overview: SubscriptionOverview) -> Bool {
-        guard viewModel.commercial?.seatLimitsEnforced ?? true else { return false }
-        return !plan.fits(activeUsers: activeUsers(overview))
     }
 
     private func actionTitle(for plan: PlanOffer) -> String {
@@ -203,11 +210,21 @@ struct SubscriptionView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.meta)
                 }
-                if let commercial, commercial.isOverPlan, commercial.hasEntitlement {
-                    Text("You have more people than your plan includes. Everyone keeps working — move to a bigger plan to add anyone else.")
+                if let commercial, commercial.isOverPlan, commercial.hasEntitlement, let limit {
+                    let excess = max(active - limit, 0)
+                    Text("Your plan allows \(limit) active \(limit == 1 ? "user" : "users"). Deactivate \(excess) \(excess == 1 ? "user" : "users") in Team to continue normal work — you choose who, and nobody is removed automatically.")
                         .font(.caption)
                         .foregroundStyle(Theme.amber)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("subscription.overPlan")
+                }
+                if let commercial, commercial.hasEntitlement, let next = commercial.renewsToPlanID, next != commercial.planID,
+                   let pending = PlanCatalog.standard.first(where: { $0.id == next }), let pendingLimit = pending.userLimit {
+                    Text("Your plan changes to \(pending.displayName) at renewal, which allows \(pendingLimit) active \(pendingLimit == 1 ? "user" : "users"). Until then you can't add more people than that.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("subscription.pendingDowngrade")
                 }
             }
             .padding(14)
@@ -292,15 +309,7 @@ struct SubscriptionView: View {
     private func legalFooter(_ overview: SubscriptionOverview) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Subscriptions are billed by Apple to your Apple ID and renew automatically at the end of each period unless cancelled at least 24 hours before it ends. A free trial, where offered, turns into the paid plan you chose when it ends unless you cancel first. Manage or cancel any time in Settings → Apple ID → Subscriptions.")
-            HStack(spacing: 14) {
-                if let terms = Brand.termsOfUseURL {
-                    Link("Terms of Use", destination: terms)
-                }
-                if let privacy = Brand.privacyPolicyURL {
-                    Link("Privacy Policy", destination: privacy)
-                }
-            }
-            .font(.caption.weight(.semibold))
+            LegalLinksView()
         }
         .font(.caption2)
         .foregroundStyle(Theme.meta)
@@ -361,9 +370,9 @@ struct SubscriptionView: View {
 
     // MARK: - Actions
 
-    private func buy(_ plan: PlanOffer) async {
+    private func buy(_ plan: PlanOffer, acknowledgedSeats: Bool = false) async {
         guard let session else { return }
-        await viewModel.buy(plan, gateway: env.gateway, store: env.storeBilling, session: session)
+        await viewModel.buy(plan, gateway: env.gateway, store: env.storeBilling, session: session, acknowledgedSeats: acknowledgedSeats)
         await env.refreshWorkspaceAccess()
     }
 
@@ -557,7 +566,7 @@ private struct PlanCard: View {
 
             if tooSmall, let limit = plan.userLimit {
                 let excess = max(activeUsers - limit, 0)
-                Text("You have \(activeUsers) active people — more than \(plan.displayName) includes. Deactivate \(excess) \(excess == 1 ? "person" : "people") first; you choose who, and they can be reactivated later.")
+                Text("You have \(activeUsers) active people — more than \(plan.displayName) includes. After the change you'll deactivate \(excess) \(excess == 1 ? "person" : "people") before normal work continues; you choose who, and they can be reactivated later.")
                     .font(.caption)
                     .foregroundStyle(Theme.amber)
                     .fixedSize(horizontal: false, vertical: true)

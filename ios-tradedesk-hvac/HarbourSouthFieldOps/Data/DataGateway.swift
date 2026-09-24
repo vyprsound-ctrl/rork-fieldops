@@ -336,14 +336,24 @@ protocol DataGateway: Sendable {
     /// never records a subscription itself. Owner only.
     func linkStorePurchases(session: TenantSession, purchases: [SignedStorePurchase]) async throws -> StoreLinkResult
 
-    /// Whether the caller's company has an active subscription, and its
-    /// state. Readable by every company member; carries nothing else.
+    /// The company's workspace position: subscription state and seat
+    /// position. Readable by every company member; no billing details.
     func workspaceAccess(session: TenantSession) async throws -> WorkspaceAccess
 
-    /// Whether the company may move to `planID`: refused while it has more
-    /// active users than that plan allows. Owner only. Answers only — it never
-    /// suspends or deletes anybody.
+    /// What moving to `planID` means for seats. Never refuses — Apple owns
+    /// plan changes. Owner only. Never suspends or deletes anybody.
     func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck
+
+    // MARK: Account deletion
+
+    /// Whether the caller is the company's sole Owner, and what deleting the
+    /// account would affect. The caller's own account only.
+    func accountDeletionContext(session: TenantSession) async throws -> AccountDeletionContext
+
+    /// Deletes the caller's own account. The sole Owner must pass
+    /// `closeCompany: true`, which closes the workspace while retaining the
+    /// company's business and financial records. Never touches Stripe.
+    func deleteMyAccount(session: TenantSession, closeCompany: Bool) async throws -> AccountDeletionOutcome
 
     // MARK: Business email identity
 

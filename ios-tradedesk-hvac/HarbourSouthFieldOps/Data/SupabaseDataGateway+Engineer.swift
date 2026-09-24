@@ -459,6 +459,7 @@ extension SupabaseDataGateway {
     /// this app could set to change somebody else's status, or to change any
     /// other column on the row.
     func updateDutyState(session: TenantSession, state: DutyState) async throws {
+        try requireWritableWorkspace(session, query: "engineer.dutyState")
         try await perform("set_my_duty_state", ["p_state": .string(state.rawValue)])
         record(
             "engineer.dutyState",
@@ -621,6 +622,7 @@ extension SupabaseDataGateway {
 
     @discardableResult
     func sendOfficeMessage(session: TenantSession, draft: OfficeMessageDraft) async throws -> String {
+        try requireWritableWorkspace(session, query: "engineer.sendOfficeMessage")
         let body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw DataError.rejected("Write a message first.") }
 
@@ -651,7 +653,7 @@ extension SupabaseDataGateway {
     }
 
     func markOfficeThreadRead(session: TenantSession, threadID: String) async throws {
-        guard UUID(uuidString: threadID) != nil else { return }
+        guard UUID(uuidString: threadID) != nil, session.canMutateWorkspace else { return }
         try await perform("mark_office_thread_read", ["p_thread": .string(threadID)])
     }
 

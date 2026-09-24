@@ -62,6 +62,15 @@ actor MockDataGateway: DataGateway {
         }
     }
 
+    /// Same rule as the production gateway: operational writes are refused
+    /// while the workspace is read-only.
+    private func requireWritableWorkspace(_ session: TenantSession, query: String) throws {
+        guard session.canMutateWorkspace else {
+            record(query, session, allowed: false, "Blocked at data layer — workspace is read-only")
+            throw DataError.rejected(TenantSession.readOnlyRefusal)
+        }
+    }
+
     /// Tenant gate. Every collection read passes through here.
     private func scoped<T>(_ rows: [T], _ session: TenantSession, companyID: KeyPath<T, String>) -> [T] {
         rows.filter { $0[keyPath: companyID] == session.companyID }
@@ -1054,6 +1063,7 @@ actor MockDataGateway: DataGateway {
         locationFix: LocationFix?
     ) async throws {
         try await Task.sleep(for: latency)
+        try requireWritableWorkspace(session, query: "jobs.updateStatus")
         let job = try requireVisibleJob(jobID, session, query: "jobs.updateStatus")
 
         guard let transition = JobWorkflow.transition(from: job.status, to: status) else {
@@ -3002,6 +3012,7 @@ actor MockDataGateway: DataGateway {
         event: LocationCaptureEvent,
         fix: LocationFix
     ) async throws {
+        try requireWritableWorkspace(session, query: "location.record")
         // A worker may only ever write their *own* position, and only for a job
         // they are actually on.
         guard session.can(.fieldWorkerLocationReadOwnOnly) || session.can(.fieldWorkerLocationReadAll) else {
@@ -3912,6 +3923,7 @@ actor MockDataGateway: DataGateway {
     @discardableResult
     func sendOfficeMessage(session: TenantSession, draft: OfficeMessageDraft) async throws -> String {
         try await Task.sleep(for: latency)
+        try requireWritableWorkspace(session, query: "engineer.sendOfficeMessage")
 
         let body = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
         // A message must say something — in words, in pictures, or both. A
@@ -4009,6 +4021,7 @@ actor MockDataGateway: DataGateway {
     }
 
     func markOfficeThreadRead(session: TenantSession, threadID: String) async throws {
+        guard session.canMutateWorkspace else { return }
         guard let index = store.officeThreads.firstIndex(where: {
             $0.id == threadID && $0.companyID == session.companyID
         }) else { return }
@@ -4146,8 +4159,8 @@ actor MockDataGateway: DataGateway {
         return WorkspaceAccess(hasActiveSubscription: subscribed, state: subscribed ? .active : .none)
     }
 
-    /// Same rule as `subscription_plan_change_check()`: refused while active
-    /// users exceed the plan's seats.
+    /// Same rule as `subscription_plan_change_check()`: never refuses, reports
+    /// how many people must be deactivated once the change applies.
     func planChangeCheck(session: TenantSession, planID: PlanID) async throws -> PlanChangeCheck {
         try await Task.sleep(for: latency)
         guard session.can(.saasBillingManage) else {
@@ -4157,6 +4170,51 @@ actor MockDataGateway: DataGateway {
         let active = scoped(store.users, session, companyID: \.companyID).filter { $0.status == .active }.count
         let plan = PlanCatalog.standard.first { $0.id == planID }
         return PlanChangeCheck.evaluate(planName: plan?.displayName ?? planID.rawValue, userLimit: plan?.userLimit, activeUsers: active)
+    }
+
+    // MARK: - Account deletion
+
+    func accountDeletionContext(session: TenantSession) async throws -> AccountDeletionContext {
+        try await Task.sleep(for: latency)
+        let people = scoped(store.users, session, companyID: \.companyID)
+        let me = people.first { $0.id == session.userID }
+        let isOwner = me?.role == .owner && me?.status == .active
+        let activeOwners = people.filter { $0.role == .owner && $0.status == .active }.count
+        return AccountDeletionContext(
+            isOwner: isOwner,
+            isSoleOwner: isOwner && activeOwners == 1,
+            companyName: company(session)?.name ?? "",
+            otherActiveMembers: people.filter { $0.status == .active && $0.id != session.userID }.count
+        )
+    }
+
+    /// Same rules as `delete_my_account()`: the account is anonymised and
+    /// deactivated, never removed; the sole Owner must close the workspace,
+    /// which deactivates everybody and keeps every record.
+    func deleteMyAccount(session: TenantSession, closeCompany: Bool) async throws -> AccountDeletionOutcome {
+        try await Task.sleep(for: latency)
+        let context = try await accountDeletionContext(session: session)
+        if context.isSoleOwner && !closeCompany {
+            throw DataError.rejected("You're the only owner of this company. Deleting your account closes the company's Harbour South workspace — confirm closing it to continue.")
+        }
+        if context.isSoleOwner {
+            for index in store.users.indices where store.users[index].companyID == session.companyID {
+                store.users[index].status = .suspended
+            }
+        }
+        if let index = store.users.firstIndex(where: { $0.id == session.userID && $0.companyID == session.companyID }) {
+            store.users[index].name = "Deleted user"
+            store.users[index].email = "deleted-\(session.userID)@deleted.invalid"
+            store.users[index].phone = ""
+            store.users[index].status = .suspended
+        }
+        record("account.delete", session, allowed: true, context.isSoleOwner ? "Workspace closed; records retained" : "Own account deleted; company untouched")
+        return context.isSoleOwner ? .workspaceClosed : .accountDeleted
+    }
+
+    /// A seeded user's current record, for tests.
+    func user(id: String) -> UserAccount? {
+        store.users.first { $0.id == id }
     }
 
     // MARK: - Job media

@@ -870,6 +870,62 @@ final class HarbourSouthFieldOpsUITests: XCTestCase {
         XCTAssertFalse(app.buttons["workspace.readOnly.banner"].exists)
     }
 
+    // MARK: - Account deletion and legal links
+
+    /// Delete Account is reachable from More, with Privacy Policy and Terms of
+    /// Use beside it. The sole owner is told the workspace closes.
+    func testOwnerCanReachDeleteAccountWithSoleOwnerWarning() throws {
+        signIn(as: "Tom Ellison")
+        openTab("More")
+        let row = app.buttons["more.deleteAccount"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20) || scrollTo(row), "More must offer Delete account")
+        XCTAssertTrue(app.buttons["legal.terms"].exists || app.links["legal.terms"].exists || scrollTo(app.buttons["legal.terms"]),
+                      "Terms of Use must be reachable from More")
+        _ = scrollTo(row)
+        forceTap(row)
+        require(app.navigationBars["Delete account"], "the Delete account screen")
+        let confirm = app.buttons["deleteAccount.confirm"]
+        require(confirm, "the delete button")
+        XCTAssertTrue(confirm.label.contains("close workspace"), "The sole owner must be told the workspace closes. Saw: \(confirm.label)")
+        forceTap(confirm)
+        require(app.alerts["Close your company's workspace?"], "the second, explicit confirmation")
+        app.alerts.buttons["Cancel"].tap()
+        XCTAssertTrue(app.navigationBars["Delete account"].exists, "Cancelling leaves everything as it was")
+    }
+
+    /// A field worker deletes their own account for real: they are signed out
+    /// and the account can no longer sign in.
+    func testFieldWorkerDeletesOwnAccount() throws {
+        signIn(as: "Dee Nguyen")
+        openTab("More")
+        let row = app.buttons["engineer.deleteAccount"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20) || scrollTo(row), "The field shell must offer Delete account")
+        _ = scrollTo(row)
+        forceTap(row)
+        let confirm = app.buttons["deleteAccount.confirm"]
+        require(confirm, "the delete button")
+        XCTAssertEqual(confirm.label, "Delete my account")
+        forceTap(confirm)
+        require(app.alerts["Delete your account?"], "the confirmation")
+        app.alerts.buttons["Delete account"].tap()
+        require(app.staticTexts["Tom Ellison"], "the sign-in screen after deletion")
+        XCTAssertFalse(app.tabBars.buttons["Jobs"].exists, "No session may continue after deletion")
+        // The deleted account can no longer sign in.
+        let dee = app.staticTexts["Dee Nguyen"]
+        if dee.exists {
+            dee.tap()
+            XCTAssertFalse(app.tabBars.buttons["Jobs"].waitForExistence(timeout: 5), "A deleted account must not sign in again")
+        }
+    }
+
+    /// A locked member can still delete their account.
+    func testLockedMemberCanStillDeleteAccount() throws {
+        signIn(as: "Ray Kessler")
+        require(app.staticTexts["workspace.locked.message"], "the locked screen")
+        XCTAssertTrue(app.buttons["Check again"].exists, "Check again must be offered")
+        XCTAssertTrue(app.buttons["workspace.locked.deleteAccount"].exists, "Delete account must stay available when locked")
+    }
+
     private func dismissPlanScreenToReadOnlyWorkspace(file: StaticString = #filePath, line: UInt = #line) {
         let browse = app.buttons["workspace.readOnly.browse"]
         guard browse.waitForExistence(timeout: 20) else {

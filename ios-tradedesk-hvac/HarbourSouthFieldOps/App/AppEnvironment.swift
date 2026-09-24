@@ -42,13 +42,35 @@ nonisolated enum AuthPhase: Equatable, Sendable {
 nonisolated enum WorkspaceGate: Equatable, Sendable {
     /// The company's position for this person has not been read yet.
     case checking
-    /// Active subscription (or the position could not be read).
+    /// Active subscription within its seats (or the position could not be
+    /// read — a dropped connection never locks a paying company out).
     case open
     /// No active subscription, and this is the owner: data read-only, plan
     /// screen available.
     case ownerReadOnly
     /// No active subscription, and this is anyone else: locked.
     case memberLocked
+    /// Apple applied a smaller plan and the company has more active people
+    /// than it allows. The owner chooses who to deactivate; until then the
+    /// workspace is read-only.
+    case ownerSeatResolution
+    /// The same position, for anyone but the owner: locked until the owner
+    /// has resolved seats.
+    case memberSeatResolution
+
+    /// The one rule, from what the server reported.
+    static func resolve(access: WorkspaceAccess?, role: Role) -> WorkspaceGate {
+        guard let access else { return .open }
+        let isOwner = role == .owner
+        if !access.hasActiveSubscription { return isOwner ? .ownerReadOnly : .memberLocked }
+        if access.seatsOverLimit { return isOwner ? .ownerSeatResolution : .memberSeatResolution }
+        return .open
+    }
+
+    /// The owner's session is read-only in these states.
+    var isOwnerReadOnly: Bool { self == .ownerReadOnly || self == .ownerSeatResolution }
+    /// Everyone else sees the locked screen in these states.
+    var isMemberLocked: Bool { self == .memberLocked || self == .memberSeatResolution }
 }
 
 /// Composition root. Swapping a mock for a production adapter happens here and
@@ -294,8 +316,7 @@ final class AppEnvironment {
     var workspaceGate: WorkspaceGate {
         guard let base = signedInSession else { return .open }
         guard workspaceAccessUserID == base.userID else { return .checking }
-        guard let access = workspaceAccess, !access.hasActiveSubscription else { return .open }
-        return base.role == .owner ? .ownerReadOnly : .memberLocked
+        return WorkspaceGate.resolve(access: workspaceAccess, role: base.role)
     }
 
     /// The notification adapter matching whichever session is signed in.
@@ -351,10 +372,11 @@ final class AppEnvironment {
     var signedInSession: TenantSession? { productionSession ?? session }
 
     /// Whichever session is currently driving the UI. While the company has no
-    /// active subscription, the owner's session is read-only.
+    /// active subscription, or has seats to resolve, the owner's session is
+    /// read-only.
     var activeSession: TenantSession? {
         guard let base = signedInSession else { return nil }
-        return workspaceGate == .ownerReadOnly ? base.readOnlyWorkspace() : base
+        return workspaceGate.isOwnerReadOnly ? base.readOnlyWorkspace() : base
     }
 
     var isProductionAvailable: Bool { productionAuth != nil }
@@ -378,7 +400,16 @@ final class AppEnvironment {
         isSigningIn = true
         signInError = nil
         do {
-            session = try await auth.signIn(accountID: accountID)
+            let candidate = try await auth.signIn(accountID: accountID)
+            // The development sign-in keeps its own copy of the seeded
+            // accounts, so a deletion made through the data layer is honoured
+            // here as well: a deleted account, or anyone in a closed
+            // workspace, can never sign in again.
+            if deletedDevelopmentAccountIDs.contains(candidate.userID)
+                || closedDevelopmentCompanyIDs.contains(candidate.companyID) {
+                throw AuthError.suspended
+            }
+            session = candidate
         } catch {
             signInError = error.localizedDescription
         }
@@ -829,6 +860,47 @@ final class AppEnvironment {
             return false
         }
     }
+
+    // MARK: - Account deletion
+
+    /// Set after an account was deleted, for the sign-in screen to confirm it.
+    private(set) var accountDeletedNotice: String?
+    /// Development stack only: accounts deleted and workspaces closed in this
+    /// run, so the seeded account picker refuses them like the server would.
+    private var deletedDevelopmentAccountIDs: Set<String> = []
+    private var closedDevelopmentCompanyIDs: Set<String> = []
+
+    /// What the Delete Account screen explains before anything happens.
+    func accountDeletionContext() async throws -> AccountDeletionContext {
+        guard let session = signedInSession else { throw DataError.notFound }
+        return try await gateway.accountDeletionContext(session: session)
+    }
+
+    /// Deletes the signed-in person's own account on the server, then ends the
+    /// local session. The server has already ended every session and banned
+    /// the sign-in, so nothing here can keep the account usable.
+    ///
+    /// Uses the authenticated session, not the read-only one: deleting your
+    /// account is always available, whatever the subscription.
+    func deleteAccount(closeCompany: Bool) async throws -> AccountDeletionOutcome {
+        guard let session = signedInSession else { throw DataError.notFound }
+        // The device registration goes while the session can still remove it.
+        if productionSession != nil { await tearDownPushRegistration() }
+        let outcome = try await gateway.deleteMyAccount(session: session, closeCompany: closeCompany)
+        if productionSession == nil {
+            deletedDevelopmentAccountIDs.insert(session.userID)
+            if outcome == .workspaceClosed { closedDevelopmentCompanyIDs.insert(session.companyID) }
+        }
+        await signOutOfCurrentSession()
+        workspaceAccess = nil
+        workspaceAccessUserID = nil
+        accountDeletedNotice = outcome == .workspaceClosed
+            ? "Your account has been deleted and your company's workspace is closed."
+            : "Your account has been deleted."
+        return outcome
+    }
+
+    func clearAccountDeletedNotice() { accountDeletedNotice = nil }
 
     /// Removes this device's registration on sign-out.
     ///

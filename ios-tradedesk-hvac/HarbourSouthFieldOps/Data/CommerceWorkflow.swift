@@ -70,16 +70,37 @@ nonisolated struct StoreLinkResult: Hashable, Sendable {
     }
 }
 
-/// The only subscription facts every company member may read: whether the
-/// company has an active subscription, and its state. Drives the
-/// company-level workspace lock (`company_workspace_access()`).
+/// The workspace position every company member may read
+/// (`company_workspace_access()`): whether the company has an active
+/// subscription, its state, and its seat position. No Apple ids, prices or
+/// billing details. Drives the company-level lock and seat resolution.
 nonisolated struct WorkspaceAccess: Hashable, Sendable {
     let hasActiveSubscription: Bool
     let state: EntitlementState
+    var planName: String? = nil
+    /// The entitled plan's cap on active users. `nil` = no cap (Business) or
+    /// no plan.
+    var userLimit: Int? = nil
+    var activeUsers: Int = 0
+    /// Entitled, but more active people than the plan allows — after Apple
+    /// applied a downgrade. The owner must choose who to deactivate.
+    var seatsOverLimit: Bool = false
+    var usersToDeactivate: Int = 0
+
+    /// The seat resolution instruction, or nil when there is nothing to resolve.
+    var seatResolutionMessage: String? {
+        guard seatsOverLimit, let userLimit else { return nil }
+        return "Your subscription now allows \(userLimit) active \(userLimit == 1 ? "user" : "users"). You currently have \(activeUsers) active users. Deactivate \(usersToDeactivate) \(usersToDeactivate == 1 ? "user" : "users") to continue."
+    }
 }
 
-/// Whether the company may move to a plan. Refused while it has more active
-/// users than the plan allows; the owner chooses who to deactivate.
+/// What moving to a plan means for seats.
+///
+/// Apple owns upgrades, downgrades and crossgrades — customers can make them
+/// in iOS Settings without this app — so this never refuses. When the target
+/// plan allows fewer active users than the company has, it says how many
+/// people will need deactivating once Apple applies the change (seat
+/// resolution). The owner chooses who; nobody is removed automatically.
 nonisolated struct PlanChangeCheck: Hashable, Sendable {
     let allowed: Bool
     let userLimit: Int?
@@ -93,9 +114,26 @@ nonisolated struct PlanChangeCheck: Hashable, Sendable {
         guard excess > 0, let userLimit else {
             return PlanChangeCheck(allowed: true, userLimit: userLimit, activeUsers: activeUsers, usersToDeactivate: 0, message: nil)
         }
-        let message = "\(planName) includes up to \(userLimit) active \(userLimit == 1 ? "user" : "users") and your company has \(activeUsers). Deactivate \(excess) \(excess == 1 ? "person" : "people") first — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated if you move to a bigger plan later."
-        return PlanChangeCheck(allowed: false, userLimit: userLimit, activeUsers: activeUsers, usersToDeactivate: excess, message: message)
+        let message = "\(planName) includes up to \(userLimit) active \(userLimit == 1 ? "user" : "users") and your company has \(activeUsers). When Apple applies the change you'll need to deactivate \(excess) \(excess == 1 ? "person" : "people") before normal work continues — you choose who. Nobody is removed automatically, and anyone you deactivate can be reactivated later."
+        return PlanChangeCheck(allowed: true, userLimit: userLimit, activeUsers: activeUsers, usersToDeactivate: excess, message: message)
     }
+}
+
+/// What the Delete Account screen needs to explain the consequences.
+nonisolated struct AccountDeletionContext: Hashable, Sendable {
+    let isOwner: Bool
+    /// The only active Owner: deleting the account closes the workspace.
+    let isSoleOwner: Bool
+    let companyName: String
+    let otherActiveMembers: Int
+}
+
+/// What `delete_my_account()` did.
+nonisolated enum AccountDeletionOutcome: String, Hashable, Sendable {
+    /// The person's account is gone; the company carries on.
+    case accountDeleted
+    /// The sole Owner's account is gone and the workspace is closed.
+    case workspaceClosed
 }
 
 // MARK: - Stripe Connect

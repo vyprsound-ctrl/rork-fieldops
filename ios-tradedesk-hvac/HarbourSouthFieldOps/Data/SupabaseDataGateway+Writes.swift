@@ -96,6 +96,7 @@ extension SupabaseDataGateway {
         to status: JobStatus,
         locationFix: LocationFix?
     ) async throws {
+        try requireWritableWorkspace(session, query: "jobs.updateStatus")
         try await perform(
             "update_job_status",
             [
@@ -257,6 +258,7 @@ extension SupabaseDataGateway {
         event: LocationCaptureEvent,
         fix: LocationFix
     ) async throws {
+        try requireWritableWorkspace(session, query: "location.record")
         // The policy on this table requires the row to be the caller's own, so
         // the company and user are taken from the session and can't be spoofed.
         try await performWrite(

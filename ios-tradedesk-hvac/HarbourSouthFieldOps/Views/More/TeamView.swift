@@ -62,6 +62,10 @@ struct TeamView: View {
                             userID: member.id,
                             status: status
                         )
+                        // Deactivating people is how seat resolution ends;
+                        // re-read the workspace so normal work resumes the
+                        // moment the company is within its plan.
+                        await env.refreshWorkspaceAccess()
                     }
                 }
             }

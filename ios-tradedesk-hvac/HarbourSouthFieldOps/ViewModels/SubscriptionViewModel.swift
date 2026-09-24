@@ -28,6 +28,15 @@ final class SubscriptionViewModel {
     /// Neither success nor failure: e.g. a TestFlight purchase that did not
     /// change the company's plan.
     var caution: String?
+    /// A plan with fewer seats than the company's active people: the owner is
+    /// told what will happen and confirms. Apple owns the change, so it is
+    /// never refused.
+    var pendingSeatWarning: SeatWarning?
+
+    struct SeatWarning: Equatable {
+        let plan: PlanOffer
+        let message: String
+    }
 
     static let testPurchaseMessage = "This was a test purchase (TestFlight or Sandbox). It doesn't change your company's plan — nothing has been charged and your plan is exactly as it was."
 
@@ -94,7 +103,7 @@ final class SubscriptionViewModel {
         return commercial.planID == plan.id && commercial.billingPeriod == period
     }
 
-    func buy(_ plan: PlanOffer, gateway: DataGateway, store: StoreBillingService, session: TenantSession) async {
+    func buy(_ plan: PlanOffer, gateway: DataGateway, store: StoreBillingService, session: TenantSession, acknowledgedSeats: Bool = false) async {
         guard session.can(.saasBillingManage) else {
             actionError = "Only the account owner can choose a plan."
             return
@@ -112,12 +121,14 @@ final class SubscriptionViewModel {
 
         do {
             // A plan with fewer seats than the company's active users is
-            // refused before Apple is ever asked. The owner chooses who to
-            // deactivate; nobody is suspended automatically.
-            let check = try await gateway.planChangeCheck(session: session, planID: plan.id)
-            guard check.allowed else {
-                actionError = check.message ?? "Deactivate people first to move to \(plan.displayName)."
-                return
+            // never refused — Apple owns plan changes — but the owner is told
+            // first that seats will need resolving once the change applies.
+            if !acknowledgedSeats {
+                let check = try await gateway.planChangeCheck(session: session, planID: plan.id)
+                if check.usersToDeactivate > 0, let message = check.message {
+                    pendingSeatWarning = SeatWarning(plan: plan, message: message)
+                    return
+                }
             }
 
             switch try await store.purchase(productID: productID, appAccountToken: UUID(uuidString: session.companyID)) {

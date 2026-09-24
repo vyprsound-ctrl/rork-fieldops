@@ -113,6 +113,17 @@ actor SupabaseDataGateway: DataGateway {
         }
     }
 
+    /// Refuses an operational write while the workspace is read-only (no
+    /// active subscription, or seats to resolve). For writes that are not
+    /// covered by a single permission — messages, job status, availability,
+    /// location.
+    func requireWritableWorkspace(_ session: TenantSession, query: String) throws {
+        guard session.canMutateWorkspace else {
+            record(query, session, allowed: false, "Blocked before the request — workspace is read-only")
+            throw DataError.rejected(TenantSession.readOnlyRefusal)
+        }
+    }
+
     // MARK: - Transport
 
     func fetch<T: Decodable & Sendable>(_ type: T.Type, _ builder: PostgrestBuilder) async throws -> [T] {
