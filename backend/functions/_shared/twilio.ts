@@ -33,6 +33,9 @@ export const POLICY = {
 export interface TwilioCredentials {
   accountSid: string;
   authToken: string;
+  /// Basic Auth username when it differs from the account (a Main API Key
+  /// SID for the master account). Absent means the Account SID is used.
+  username?: string;
 }
 
 export interface MasterConfig {
@@ -46,10 +49,24 @@ export interface MasterConfig {
 /// reported to the app as "SMS isn't available yet", never as a crash.
 export function masterConfig(): MasterConfig | null {
   const accountSid = (Deno.env.get("TWILIO_MASTER_ACCOUNT_SID") ?? "").trim();
-  const authToken = (Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") ?? "").trim();
-  if (!/^AC[0-9a-f]{32}$/i.test(accountSid) || authToken.length < 16) return null;
+  if (!/^AC[0-9a-f]{32}$/i.test(accountSid)) return null;
+
+  // Preferred: a Main API Key (SK SID + secret) as the Basic Auth username and
+  // password; the AC SID stays the account identifier used in URLs. When both
+  // are set but malformed, fail closed rather than silently using the token.
+  let master: TwilioCredentials;
+  const apiKeySid = (Deno.env.get("TWILIO_MASTER_API_KEY_SID") ?? "").trim();
+  const apiKeySecret = (Deno.env.get("TWILIO_MASTER_API_KEY_SECRET") ?? "").trim();
+  if (apiKeySid && apiKeySecret) {
+    if (!/^SK[0-9a-f]{32}$/i.test(apiKeySid) || apiKeySecret.length < 16) return null;
+    master = { accountSid, authToken: apiKeySecret, username: apiKeySid };
+  } else {
+    const authToken = (Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") ?? "").trim();
+    if (authToken.length < 16) return null;
+    master = { accountSid, authToken };
+  }
   return {
-    master: { accountSid, authToken },
+    master,
     primaryCustomerProfileSid: (Deno.env.get("TWILIO_PRIMARY_CUSTOMER_PROFILE_SID") ?? "").trim() || null,
     callbackBase: callbackBase(),
     notificationEmail: (Deno.env.get("TWILIO_ISV_NOTIFICATION_EMAIL") ?? "").trim() || null,
@@ -171,7 +188,7 @@ export async function twilioRequest<T = any>(
       response = await fetch(target, {
         method,
         headers: {
-          Authorization: `Basic ${btoa(`${credentials.accountSid}:${credentials.authToken}`)}`,
+          Authorization: `Basic ${btoa(`${credentials.username ?? credentials.accountSid}:${credentials.authToken}`)}`,
           ...(options.params ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
           ...(options.headers ?? {}),
         },
