@@ -14,10 +14,25 @@
 ///   4. the leaf and intermediate carry Apple's App Store receipt-signing OIDs,
 ///   5. the ES256 signature over `header.payload` verifies with the leaf key.
 ///
+/// "Issued by" (step 3) means all of: the child's issuer name is byte-identical
+/// to the parent's subject name, the parent is a CA (basicConstraints cA=TRUE)
+/// whose keyUsage, when present, allows keyCertSign, the child's authority key
+/// id matches the parent's subject key id when both are present, and the
+/// child's signature verifies with the parent's public key.
+///
+/// Certificates are parsed and their signatures checked with @peculiar/x509
+/// (pure JavaScript ASN.1 + WebCrypto). `node:crypto`'s X509Certificate is NOT
+/// used: on the Supabase Edge runtime (Deno 2.1.4) its `checkIssued()` and
+/// `verify()` throw "Not implemented". The version is pinned exactly; 2.x needs
+/// a reflect-metadata polyfill that Deno 2.1.4 does not load.
+///
 /// This module has no database or network access, so it can be tested in
 /// isolation (`backend/tests/apple-jws.test.ts`).
 
-import { X509Certificate } from "node:crypto";
+import * as x509 from "npm:@peculiar/x509@1.14.3";
+
+// Always use the runtime's WebCrypto, never a provider guessed from globals.
+x509.cryptoProvider.set(crypto);
 
 /// Apple Root CA - G3, DER, base64.
 /// SHA-256 63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE:7C:4F:5C:75:6F:30:17:B3:A8:C4:88:C3:65:3E:91:79
@@ -46,11 +61,11 @@ export interface VerifyOptions {
   now?: Date;
 }
 
-function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+function base64ToBytes(b64: string) {
   const clean = b64.replace(/-/g, "+").replace(/_/g, "/");
   const padded = clean + "=".repeat((4 - (clean.length % 4)) % 4);
   const binary = atob(padded);
-  const out = new Uint8Array(binary.length);
+  const out = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 }
@@ -69,8 +84,30 @@ function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
   return false;
 }
 
-function validAt(cert: X509Certificate, at: Date): boolean {
-  return new Date(cert.validFrom).getTime() <= at.getTime() && at.getTime() <= new Date(cert.validTo).getTime();
+function validAt(cert: x509.X509Certificate, at: Date): boolean {
+  return cert.notBefore.getTime() <= at.getTime() && at.getTime() <= cert.notAfter.getTime();
+}
+
+/// True only when `cert` was issued and signed by `issuer` (see header, step 3).
+async function isIssuedBy(cert: x509.X509Certificate, issuer: x509.X509Certificate): Promise<boolean> {
+  try {
+    const issuerName = new Uint8Array(cert.issuerName.toArrayBuffer());
+    const issuerSubject = new Uint8Array(issuer.subjectName.toArrayBuffer());
+    if (!bytesEqual(issuerName, issuerSubject)) return false;
+
+    const constraints = issuer.getExtension(x509.BasicConstraintsExtension);
+    if (!constraints?.ca) return false;
+    const usage = issuer.getExtension(x509.KeyUsagesExtension);
+    if (usage && (usage.usages & x509.KeyUsageFlags.keyCertSign) === 0) return false;
+
+    const authorityKeyId = cert.getExtension(x509.AuthorityKeyIdentifierExtension)?.keyId;
+    const subjectKeyId = issuer.getExtension(x509.SubjectKeyIdentifierExtension)?.keyId;
+    if (authorityKeyId && subjectKeyId && authorityKeyId.toLowerCase() !== subjectKeyId.toLowerCase()) return false;
+
+    return await cert.verify({ publicKey: issuer.publicKey, signatureOnly: true });
+  } catch {
+    return false;
+  }
 }
 
 /// Verifies an Apple JWS and returns its decoded payload.
@@ -102,19 +139,19 @@ export async function verifyAppleJws<T = Record<string, unknown>>(
     throw new AppleVerificationError("The chain does not end at Apple Root CA - G3.");
   }
 
-  let leaf: X509Certificate, intermediate: X509Certificate, root: X509Certificate;
+  let leaf: x509.X509Certificate, intermediate: x509.X509Certificate, root: x509.X509Certificate;
   try {
-    leaf = new X509Certificate(leafDer);
-    intermediate = new X509Certificate(intermediateDer);
-    root = new X509Certificate(rootDer);
+    leaf = new x509.X509Certificate(leafDer);
+    intermediate = new x509.X509Certificate(intermediateDer);
+    root = new x509.X509Certificate(rootDer);
   } catch {
     throw new AppleVerificationError("A certificate in the chain could not be read.");
   }
 
-  if (!intermediate.checkIssued(root) || !intermediate.verify(root.publicKey)) {
+  if (!(await isIssuedBy(intermediate, root))) {
     throw new AppleVerificationError("The intermediate certificate was not issued by Apple's root.");
   }
-  if (!leaf.checkIssued(intermediate) || !leaf.verify(intermediate.publicKey)) {
+  if (!(await isIssuedBy(leaf, intermediate))) {
     throw new AppleVerificationError("The signing certificate was not issued by Apple's intermediate.");
   }
   if (!contains(leafDer, LEAF_OID_DER)) {
@@ -130,8 +167,12 @@ export async function verifyAppleJws<T = Record<string, unknown>>(
     throw new AppleVerificationError("A certificate in the chain was not valid when the data was signed.");
   }
 
-  const spki = new Uint8Array(leaf.publicKey.export({ type: "spki", format: "der" }) as Uint8Array);
-  const key = await crypto.subtle.importKey("spki", spki, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  let key: CryptoKey;
+  try {
+    key = await crypto.subtle.importKey("spki", leaf.publicKey.rawData, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  } catch {
+    throw new AppleVerificationError("The signing certificate does not carry an ES256 key.");
+  }
   const signature = base64ToBytes(parts[2]);
   const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
   const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, signature, signingInput);
