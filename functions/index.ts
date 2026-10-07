@@ -679,6 +679,83 @@ function stripeLandingPage(kind: "return" | "refresh"): Response {
   return new Response(html, { status: 200, headers: pageHeaders });
 }
 
+/// Where Stripe Checkout sends the buyer after an SMS-credit purchase.
+///
+/// `sms-purchase` builds `success_url` / `cancel_url` as
+/// `${APP_RETURN_URL}/sms/{success|cancelled}?purchase=<id>`, and production's
+/// APP_RETURN_URL is this Worker. These pages are presentation only: the
+/// `purchase` parameter is never read, nothing is looked up, and no credit is
+/// granted or implied by reaching them. Credits are added solely by the
+/// signature-verified `checkout.session.completed` webhook (`stripe-webhook` →
+/// `credit_sms_purchase`).
+///
+/// RETURN TO APP. The link uses the app's existing registered scheme with the
+/// invitation host and NO token (`com.harboursouth.fieldservice://join`). In
+/// the shipped app that URL is a verified no-op that simply brings the app to
+/// the foreground: `InvitationLink.payload` returns nil without a token, and
+/// `AuthCallback.matches` refuses the `join` host, so it is never treated as a
+/// sign-in callback and no auth or session state is touched. It must never
+/// carry a token or any other parameter.
+const APP_FOREGROUND_URL = "com.harboursouth.fieldservice://join";
+
+function smsCheckoutLandingPage(kind: "success" | "cancelled"): Response {
+  const paid = kind === "success";
+  const title = paid ? "Payment successful" : "Payment cancelled";
+  const lead = paid
+    ? "Your SMS credits have been added to Harbour South FieldOps."
+    : "No payment was completed and no SMS credits were added.";
+  const note = paid
+    ? "Stripe confirms the payment directly with Harbour South, usually within a minute. If your balance hasn\u2019t updated yet, pull down to refresh on the SMS credits screen."
+    : "You can buy SMS credits at any time from More \u2192 SMS credits in the app.";
+
+  const html = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>${escapeHtml(title)} \u00b7 Harbour South FieldOps</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
+         background:linear-gradient(180deg,#0A2447 0,#0A2447 180px,#F6F8FB 180px);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#0F1B2A; }
+  .wrap { width:100%; max-width:440px; }
+  .brand { color:#fff; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
+           text-align:center; margin:0 0 18px; opacity:.92; }
+  .brand span { color:#E16D16; }
+  .card { background:#fff; border-radius:20px; padding:32px 26px 26px; text-align:center;
+          box-shadow:0 1px 3px rgba(10,36,71,.10),0 16px 40px rgba(10,36,71,.10); }
+  .mark { width:52px; height:52px; border-radius:50%; margin:0 auto 18px; display:grid; place-items:center;
+          background:${paid ? "#E7F5EC" : "#F0F3F9"}; color:${paid ? "#14603A" : "#5B6675"};
+          font-size:24px; font-weight:700; }
+  h1 { font-size:21px; margin:0 0 10px; letter-spacing:-.01em; }
+  .lead { margin:0 0 14px; font-size:16px; line-height:1.5; color:#0F1B2A; }
+  .note { margin:0 0 24px; font-size:14px; line-height:1.55; color:#5B6675; }
+  .btn { display:block; padding:15px 18px; border-radius:14px; background:#1B3FA8; color:#fff;
+         font-size:16px; font-weight:600; text-decoration:none; }
+  .btn:active { background:#14307F; }
+  .help { margin:16px 0 0; font-size:13px; line-height:1.5; color:#8A94A3; }
+</style></head>
+<body><main class="wrap">
+  <p class="brand">Harbour South <span>FieldOps</span></p>
+  <div class="card">
+    <div class="mark" aria-hidden="true">${paid ? "\u2713" : "\u00d7"}</div>
+    <h1>${escapeHtml(title)}</h1>
+    <p class="lead">${escapeHtml(lead)}</p>
+    <p class="note">${escapeHtml(note)}</p>
+    <a class="btn" href="${APP_FOREGROUND_URL}">Return to Harbour South FieldOps</a>
+    <p class="help">If the button doesn\u2019t open the app, switch back to Harbour South FieldOps on this device. You can close this page.</p>
+  </div>
+</main></body></html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      ...pageHeaders,
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    },
+  });
+}
+
 // =============================================================================
 // Team invitations
 //
@@ -992,6 +1069,13 @@ export default {
         return new Response("Method not allowed", { status: 405, headers: pageHeaders });
       }
       return stripeLandingPage(url.pathname.endsWith("refresh") ? "refresh" : "return");
+    }
+
+    if (url.pathname === "/sms/success" || url.pathname === "/sms/cancelled") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method not allowed", { status: 405, headers: pageHeaders });
+      }
+      return smsCheckoutLandingPage(url.pathname === "/sms/success" ? "success" : "cancelled");
     }
 
     if (url.pathname === "/q") {
