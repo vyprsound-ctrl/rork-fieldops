@@ -1,0 +1,75 @@
+{
+  "appContext": {
+    "appName": "Harbour South FieldOps",
+    "category": "HVAC field service management",
+    "summary": "Field service management app for HVAC and trade businesses: owners and dispatchers schedule jobs, manage customers and equipment, dispatch engineers, send quotes and invoices; engineers run their day in the field.",
+    "domainKeywords": [
+      "HVAC",
+      "jobs",
+      "dispatch",
+      "engineers",
+      "customers",
+      "calendar",
+      "service visits",
+      "quotes",
+      "invoices"
+    ],
+    "forbiddenInterpretations": [
+      "consumer social app",
+      "fitness app",
+      "finance trading app",
+      "maritime shipping"
+    ]
+  },
+  "theme": {
+    "style": "Calm, trustworthy trade-professional world built on deep harbour navy and crisp cool whites, with soft airflow-like gradients in steel blue and a warm safety-orange accent used sparingly for energy. Lighting is clean and diffused like a bright workshop morning, with brushed-metal sheen, frosted glass layers and gentle cool-to-warm temperature shifts. Backgrounds stay quiet and uncluttered so dense scheduling and job screens read clearly, confident but never loud.",
+    "headlineFont": "font-family: 'Plus Jakarta Sans', sans-serif; weight 800; @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap')",
+    "headlineFontSize": 120,
+    "mockupIds": {
+      "iphone": "deep-blue",
+      "ipad": "space-gray"
+    },
+    "palette": {
+      "primary": "#0F2440",
+      "secondary": "#5B8DB8",
+      "accent": "#FF7A2F"
+    },
+    "layoutId": "hero-clipped"
+  },
+  "slides": [
+    {
+      "label": "Dashboard",
+      "backgroundPrompt": "Abstract digital art of a calm deep harbour navy expanse with long soft horizontal bands of steel blue light drifting across the lower half and a faint warm safety-orange glow pooling at the bottom center. Gentle diffused lighting from above, subtle fine grain texture and depth of field softness at the edges, with the upper 30% kept dark, smooth and uncluttered. 8K quality, ultra smooth gradients, premium feel, no text, no letters, no UI elements, no device mockups",
+      "backgroundUrl": "https://r2-pub.rork.com/app-store-screenshots/645ba06f-0d16-4cbb-8d37-dc247442ccb3.png"
+    },
+    {
+      "label": "Jobs",
+      "backgroundPrompt": "Soft abstract render of layered frosted glass planes in pale ice white and misty steel blue, gently overlapping at shallow angles in the lower portion of the frame, a thin warm orange edge highlight catching on one pane. Bright diffused daylight from the top-left, airy and clean, with the upper 30% fading to a calm near-white cool gradient. 8K quality, ultra smooth gradients, premium feel, no text, no letters, no UI elements, no device mockups",
+      "backgroundUrl": "https://r2-pub.rork.com/app-store-screenshots/ac2ee360-3f7c-4a5e-9ddf-bfb28acfff68.png"
+    },
+    {
+      "label": "Calendar",
+      "backgroundPrompt": "Cinematic abstract scene of deep navy and midnight indigo with sweeping curved ribbons of brushed steel blue light arcing from the lower right corner, a soft warm orange rim glow tracing one ribbon edge. Dramatic low side lighting from the right, fine particle haze and gentle depth blur, the top 30% dark, quiet and open. 8K quality, ultra smooth gradients, premium feel, no text, no letters, no UI elements, no device mockups",
+      "backgroundUrl": "https://r2-pub.rork.com/app-store-screenshots/8fb50d31-b3cc-4950-a56a-fecc827734e0.png"
+    },
+    {
+      "label": "Customers",
+      "backgroundPrompt": "Minimal abstract art of a light cool white canvas with large soft blurred orbs of pale steel blue and powder blue floating in the lower half, one small warm peach-orange orb adding gentle warmth near the bottom left. Soft even studio lighting from above, velvety smooth surface with subtle grain, the upper 30% clean and pale. 8K quality, ultra smooth gradients, premium feel, no text, no letters, no UI elements, no device mockups",
+      "backgroundUrl": "https://r2-pub.rork.com/app-store-screenshots/96bcdc3d-5275-4961-a472-41b57a1c4e0a.png"
+    },
+    {
+      "label": "Dispatch",
+      "backgroundPrompt": "Bright abstract digital art of a light silver-white backdrop with dynamic diagonal streaks of steel blue and soft navy motion light rising from the bottom left, punctuated by a crisp warm safety-orange streak for energy. Clean high-key lighting from the upper right, subtle glossy sheen and motion blur depth, the top 30% calm and softly luminous. 8K quality, ultra smooth gradients, premium feel, no text, no letters, no UI elements, no device mockups",
+      "backgroundUrl": "https://r2-pub.rork.com/app-store-screenshots/dded19ea-f772-4d34-b5e4-65e75a9689a0.png"
+    }
+  ],
+  "headlines": {
+    "en": {
+      "Dashboard": "Run Your<br>Whole Business",
+      "Jobs": "Every Job<br>Tracked",
+      "Calendar": "Your Week<br>at a Glance",
+      "Customers": "Customers<br>Organised",
+      "Dispatch": "Dispatch<br>in Seconds"
+    }
+  }
+}
