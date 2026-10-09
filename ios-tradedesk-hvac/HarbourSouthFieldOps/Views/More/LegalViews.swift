@@ -36,6 +36,23 @@ struct LegalView: View {
                 }
                 .cardSurface()
 
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Published on harboursouth.us")
+                        .sectionLabelStyle()
+                    VStack(spacing: 0) {
+                        ForEach(Array(LegalDocument.allCases.enumerated()), id: \.element.id) { index, document in
+                            LegalWebRow(document: document)
+                            if index < LegalDocument.allCases.count - 1 {
+                                Divider().padding(.leading, 58)
+                            }
+                        }
+                    }
+                    .cardSurface()
+                    Text("Opens the current published version in your browser.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.meta)
+                }
+
                 Text("Last updated \(LegalDocument.lastUpdated)")
                     .font(.caption)
                     .foregroundStyle(Theme.meta)
@@ -82,6 +99,46 @@ private struct LegalRow: View {
     }
 }
 
+/// Opens the published copy of a document at its exact harboursouth.us URL.
+struct LegalWebRow: View {
+    let document: LegalDocument
+
+    var body: some View {
+        if let url = document.webURL {
+            Link(destination: url) {
+                HStack(spacing: 12) {
+                    Image(systemName: "safari")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.primary)
+                        .frame(width: 32, height: 32)
+                        .background(Theme.primaryTint)
+                        .clipShape(.rect(cornerRadius: 8))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(document.title)
+                            .font(.body)
+                            .foregroundStyle(Theme.ink)
+                        Text(url.host().map { "\($0)\(url.path())" } ?? document.webURLString)
+                            .font(.caption)
+                            .foregroundStyle(Theme.meta)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.meta)
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
+                .frame(minHeight: Theme.minTap)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(document.title), opens harboursouth.us in your browser")
+            .accessibilityIdentifier("legal.web.\(document.rawValue)")
+        }
+    }
+}
+
 /// One legal document, rendered natively.
 struct LegalDocumentView: View {
     let document: LegalDocument
@@ -112,6 +169,16 @@ struct LegalDocumentView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                }
+
+                if let url = document.webURL {
+                    Link(destination: url) {
+                        Label("View the published version on harboursouth.us", systemImage: "safari")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Theme.primary)
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityIdentifier("legal.document.web")
                 }
             }
             .padding(.horizontal, Theme.margin)

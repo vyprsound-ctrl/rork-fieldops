@@ -2,8 +2,8 @@ import Foundation
 
 /// Harbour South FieldOps legal documents, shipped inside the app.
 ///
-/// These are the in-app source of truth — there is deliberately no external
-/// Harbour South privacy-policy URL. Nothing here invents a Harbour South
+/// The full text is readable natively in the app; each document also links to
+/// its published copy on harboursouth.us (`webURL`). Nothing here invents a Harbour South
 /// postal address, company number, phone number, website or jurisdiction:
 /// the only contact is `Brand.legalContactEmail` (configuration-driven), and
 /// where that is not configured the documents point to the support contact on
@@ -42,6 +42,19 @@ nonisolated enum LegalDocument: String, CaseIterable, Identifiable, Hashable, Se
         case .accountDeletion: return "person.crop.circle.badge.xmark"
         }
     }
+
+    /// The published copy of this document on harboursouth.us. These four
+    /// addresses are fixed and confirmed; do not derive or rewrite them.
+    var webURLString: String {
+        switch self {
+        case .privacyPolicy: return "https://harboursouth.us/privacy-policy"
+        case .termsOfService: return "https://harboursouth.us/terms-of-service"
+        case .smsTerms: return "https://harboursouth.us/sms-messaging-terms"
+        case .accountDeletion: return "https://harboursouth.us/account-data-deletion"
+        }
+    }
+
+    var webURL: URL? { URL(string: webURLString) }
 
     static let lastUpdated = "September 24, 2026"
 

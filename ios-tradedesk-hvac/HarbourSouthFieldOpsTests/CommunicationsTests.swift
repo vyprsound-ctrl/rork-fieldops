@@ -223,7 +223,7 @@ struct LegalDocumentTests {
         }
     }
 
-    @Test("No document says coming soon or links a Harbour South privacy website")
+    @Test("No document body says coming soon or embeds a URL")
     func noPlaceholders() {
         for document in LegalDocument.allCases {
             let text = document.fullText.lowercased()
@@ -264,6 +264,14 @@ struct LegalDocumentTests {
         #expect(text.contains("Stripe account"))
         #expect(text.contains("does not cancel an Apple subscription"))
         #expect(text.contains("retained, not deleted"))
+    }
+
+    @Test("Each document links its exact published harboursouth.us page")
+    func publishedURLs() {
+        #expect(LegalDocument.privacyPolicy.webURL?.absoluteString == "https://harboursouth.us/privacy-policy")
+        #expect(LegalDocument.termsOfService.webURL?.absoluteString == "https://harboursouth.us/terms-of-service")
+        #expect(LegalDocument.smsTerms.webURL?.absoluteString == "https://harboursouth.us/sms-messaging-terms")
+        #expect(LegalDocument.accountDeletion.webURL?.absoluteString == "https://harboursouth.us/account-data-deletion")
     }
 
     @Test("The contact sentence never invents an address")

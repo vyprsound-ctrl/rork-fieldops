@@ -47,6 +47,9 @@ struct DeleteAccountView: View {
                         .accessibilityIdentifier("deleteAccount.error")
                 }
 
+                LegalWebRow(document: .accountDeletion)
+                    .cardSurface()
+
                 LegalLinksView()
             }
             .padding(.horizontal, Theme.margin)

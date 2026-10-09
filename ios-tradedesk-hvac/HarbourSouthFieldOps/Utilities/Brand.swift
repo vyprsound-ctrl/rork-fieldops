@@ -34,8 +34,9 @@ nonisolated enum Brand {
     static let fallbackSymbolName = "point.topleft.down.to.point.bottomright.curvepath.fill"
 
     /// Harbour South's legal documents (Privacy Policy, Terms of Service, SMS &
-    /// Messaging Terms, Account & Data Deletion) are IN-APP documents — see
-    /// `LegalDocument`. There is deliberately no external privacy-policy URL.
+    /// Messaging Terms, Account & Data Deletion) are readable in the app and
+    /// link to their published copies on harboursouth.us — see
+    /// `LegalDocument.webURL`.
 
     /// The Info.plist key for Harbour South's legal/privacy contact email.
     static let legalContactInfoKey = "HarbourSouthLegalContactEmail"

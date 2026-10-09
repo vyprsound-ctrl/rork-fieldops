@@ -158,6 +158,13 @@ struct MoreView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("more.deleteAccount")
 
+                    VStack(spacing: 0) {
+                        LegalWebRow(document: .accountDeletion)
+                        Divider().padding(.leading, 58)
+                        LegalWebRow(document: .privacyPolicy)
+                    }
+                    .cardSurface()
+
                     LegalLinksView(documents: [.privacyPolicy, .termsOfService, .smsTerms])
                         .padding(.horizontal, 4)
                 }
