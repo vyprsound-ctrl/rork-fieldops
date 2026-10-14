@@ -6,8 +6,10 @@ import { corsHeaders, createAdminClient, jsonResponse } from "../_shared/auth.ts
 /// report is filed and every two minutes as a retry sweep. Each call carries an
 /// HMAC over a timestamp (key in Supabase Vault); anything unsigned is refused.
 ///
-/// Recipient: MODERATION_ALERT_EMAIL, falling back to the Harbour South operator
-/// address already configured as TWILIO_ISV_NOTIFICATION_EMAIL (read only).
+/// Recipient: MODERATION_ALERT_EMAIL only (blank or malformed = not configured;
+/// there is deliberately no fallback). The address is never logged, returned,
+/// or written to the database. When it is missing, alerts are marked failed so
+/// they retry and, after 10 attempts, surface in moderation_alerts_attention.
 /// Sender: RESEND_FROM_EMAIL over RESEND_API_KEY, the same transport as invoices.
 
 const REASONS: Record<string, string> = {
@@ -25,8 +27,32 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
+const RECIPIENT_MISSING = "Moderation recipient not configured";
+
+function moderationRecipient(): string | null {
+  const value = (Deno.env.get("MODERATION_ALERT_EMAIL") ?? "").trim();
+  if (!value) return null;
+  return /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(value) ? value : null;
+}
+
+// deno-lint-ignore no-explicit-any
+function composeTest(row: any): { subject: string; text: string } {
+  const lines = [
+    "TEST — no action needed.",
+    "",
+    "This confirms Harbour South FieldOps moderation alerts reach this inbox.",
+    "It is not a report, contains no customer or company data, and needs no reply.",
+    `Alert ID: ${row.alert_id}`,
+    `Queued: ${row.created_at}`,
+    `Attempt: ${row.attempt ?? 1}`,
+    row.note ? `Note: ${row.note}` : "",
+  ].filter((l) => l !== "");
+  return { subject: "[FieldOps moderation] TEST — no action needed", text: lines.join("\n") };
+}
+
 // deno-lint-ignore no-explicit-any
 function compose(row: any): { subject: string; text: string } {
+  if (row.kind === "test") return composeTest(row);
   const kind = row.source === "user" ? "Block" : row.source === "sms" ? "Customer SMS report" : "Office chat report";
   const reason = REASONS[row.reason] ?? row.reason;
   const reported = row.source === "sms"
@@ -92,7 +118,8 @@ Deno.serve(async (req) => {
   });
   if (valid !== true) return jsonResponse({ error: "Invalid signature" }, 403);
 
-  const recipient = (Deno.env.get("MODERATION_ALERT_EMAIL") ?? Deno.env.get("TWILIO_ISV_NOTIFICATION_EMAIL") ?? "").trim();
+  const recipient = moderationRecipient();
+  if (!recipient) console.error("[moderation-notify]", RECIPIENT_MISSING);
 
   const { data: rows, error } = await admin.rpc("moderation_claim_alerts", { p_limit: 20 });
   if (error) {
@@ -105,8 +132,13 @@ Deno.serve(async (req) => {
   // deno-lint-ignore no-explicit-any
   for (const row of (rows ?? []) as any[]) {
     const { subject, text } = compose(row);
-    const failure = recipient ? await sendEmail(recipient, subject, text) : "No moderation recipient configured";
-    await admin.rpc("moderation_mark_alert", { p_alert: row.alert_id, p_ok: failure === null, p_error: failure });
+    const failure = recipient ? await sendEmail(recipient, subject, text) : RECIPIENT_MISSING;
+    const { error: markError } = await admin.rpc("moderation_mark_alert", {
+      p_alert: row.alert_id,
+      p_ok: failure === null,
+      p_error: failure,
+    });
+    if (markError) console.error("[moderation-notify] mark failed", row.alert_id, markError.message);
     if (failure === null) sent += 1;
     else {
       failed += 1;
