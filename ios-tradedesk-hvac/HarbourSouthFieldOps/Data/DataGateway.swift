@@ -206,6 +206,27 @@ protocol DataGateway: Sendable {
 
     func markOfficeThreadRead(session: TenantSession, threadID: String) async throws
 
+    // MARK: Chat safety (reporting, blocking, moderation)
+    //
+    // Requirements with development defaults in `ChatSafetyWorkflow.swift`,
+    // overridden by the Supabase gateway. Every check — who may report what,
+    // who may moderate, and that nobody acts on a report about themselves — is
+    // enforced by the database functions, not here.
+
+    /// Reports one message. Idempotent: reporting the same message twice
+    /// returns the original report.
+    @discardableResult
+    func reportMessage(session: TenantSession, target: ReportTarget, reason: ReportReason, details: String?) async throws -> String
+    /// Blocks a team member for the signed-in person. Their messages are
+    /// hidden from the blocker, and the company's moderators are told.
+    func blockChatUser(session: TenantSession, userID: String, reason: ReportReason, details: String?) async throws
+    func unblockChatUser(session: TenantSession, userID: String) async throws
+    /// User ids (lowercased) the signed-in person has blocked.
+    func blockedChatUserIDs(session: TenantSession) async throws -> Set<String>
+    func chatSafetyOverview(session: TenantSession) async throws -> ChatSafetyOverview
+    /// Owner/Admin action on a report. `days` only applies to pausing chat.
+    func moderateReport(session: TenantSession, reportID: String, action: ModerationAction, note: String?, days: Int?) async throws
+
     // Quotes
     func quotes(session: TenantSession, filter: QuoteListFilter, query: String) async throws -> [QuoteRow]
     func quoteDetail(session: TenantSession, quoteID: String) async throws -> QuoteDetailProjection

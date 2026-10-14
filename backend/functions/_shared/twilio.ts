@@ -73,6 +73,26 @@ export function masterConfig(): MasterConfig | null {
   };
 }
 
+/// Why `masterConfig()` returned null, as a fixed code that never contains any
+/// part of a credential. Used only for server logs, so support can see which
+/// secret is malformed without anyone reading its value.
+export function masterConfigIssue(): string | null {
+  const accountSid = (Deno.env.get("TWILIO_MASTER_ACCOUNT_SID") ?? "").trim();
+  if (!accountSid) return "account_sid_missing";
+  if (!/^AC[0-9a-f]{32}$/i.test(accountSid)) return `account_sid_malformed(len=${accountSid.length},prefix_ok=${/^AC/i.test(accountSid)})`;
+  const apiKeySid = (Deno.env.get("TWILIO_MASTER_API_KEY_SID") ?? "").trim();
+  const apiKeySecret = (Deno.env.get("TWILIO_MASTER_API_KEY_SECRET") ?? "").trim();
+  if (apiKeySid && apiKeySecret) {
+    if (!/^SK[0-9a-f]{32}$/i.test(apiKeySid)) return `api_key_sid_malformed(len=${apiKeySid.length},prefix_ok=${/^SK/i.test(apiKeySid)})`;
+    if (apiKeySecret.length < 16) return `api_key_secret_too_short(len=${apiKeySecret.length})`;
+    return null;
+  }
+  if (apiKeySid || apiKeySecret) return "api_key_pair_incomplete_and_no_auth_token";
+  const authToken = (Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") ?? "").trim();
+  if (authToken.length < 16) return "auth_token_missing";
+  return null;
+}
+
 /// Public base URL that Twilio calls back. Signatures are computed over the
 /// exact URL Twilio was given, so this is the single source for building AND
 /// verifying callback URLs.

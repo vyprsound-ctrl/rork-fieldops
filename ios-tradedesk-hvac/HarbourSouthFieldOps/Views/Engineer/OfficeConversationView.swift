@@ -27,6 +27,15 @@ struct OfficeConversationView: View {
     @FocusState private var isComposerFocused: Bool
     /// The chat photo open full screen, if any.
     @State private var viewingPhoto: ViewedPhoto?
+    /// The message being reported, if the report sheet is open.
+    @State private var reportTarget: ReportTarget?
+    /// Team members (lowercased ids) the signed-in person has blocked.
+    @State private var blockedUserIDs: Set<String> = []
+    /// Hidden messages the person chose to show anyway, one at a time.
+    @State private var revealedMessageIDs: Set<String> = []
+    @State private var blockCandidate: ChatPerson?
+    @State private var safetyError: String?
+    @State private var safetyNotice: String?
 
     private var session: TenantSession? { env.activeSession }
 
@@ -41,7 +50,38 @@ struct OfficeConversationView: View {
         }
         .navigationTitle(viewModel.state.value?.subject ?? "Message")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: threadID) { await reload() }
+        .task(id: threadID) {
+            await reload()
+            await loadBlocks()
+        }
+        .toolbar {
+            if let people = viewModel.state.value.map(otherPeople), !people.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    safetyMenu(people)
+                }
+            }
+        }
+        .sheet(item: $reportTarget) { target in
+            ReportMessageSheet(target: target) { didBlock in
+                if didBlock, let id = target.senderUserID {
+                    blockedUserIDs.insert(id.lowercased())
+                }
+            }
+        }
+        .confirmationDialog(
+            "Block \(blockCandidate?.name ?? "this person")?",
+            isPresented: Binding(get: { blockCandidate != nil }, set: { if !$0 { blockCandidate = nil } }),
+            titleVisibility: .visible,
+            presenting: blockCandidate
+        ) { person in
+            Button("Block \(person.name)", role: .destructive) {
+                Task { await block(person) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Their chat messages will be hidden from you and your company's admins will be told so they can review. Job assignments still reach you. You can unblock any time.")
+        }
+        .sensoryFeedback(.success, trigger: safetyNotice)
         // The SAME viewer the job screen uses — one implementation, one
         // loading path (`jobMediaURL`), so a job-chat photo opened here is
         // byte-for-byte the image the job page shows.
@@ -74,8 +114,30 @@ struct OfficeConversationView: View {
                         jobContext(number: number, jobID: conversation.jobID)
                     }
 
+                    safetyHint
+
                     ForEach(conversation.messages) { message in
-                        bubble(message).id(message.id)
+                        messageView(message).id(message.id)
+                    }
+
+                    if let notice = safetyNotice {
+                        Label(notice, systemImage: "checkmark.shield.fill")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.green)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.green.opacity(0.08))
+                            .clipShape(.rect(cornerRadius: Theme.cardRadius))
+                    }
+
+                    if let error = safetyError {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.red)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.red.opacity(0.08))
+                            .clipShape(.rect(cornerRadius: Theme.cardRadius))
                     }
 
                     if let error = viewModel.actionError {
@@ -166,6 +228,174 @@ struct OfficeConversationView: View {
             .padding(.vertical, 7)
             .background(Theme.primaryTint)
             .clipShape(.capsule)
+    }
+
+    // MARK: - Safety (report / block)
+
+    /// A person in this conversation other than the signed-in user.
+    struct ChatPerson: Identifiable, Hashable {
+        let id: String
+        let name: String
+    }
+
+    private func otherPeople(_ conversation: OfficeConversation) -> [ChatPerson] {
+        var seen = Set<String>()
+        var people: [ChatPerson] = []
+        for message in conversation.messages where !message.isMine {
+            guard let id = message.senderUserID?.lowercased(), !seen.contains(id) else { continue }
+            seen.insert(id)
+            people.append(ChatPerson(id: id, name: message.senderName))
+        }
+        return people
+    }
+
+    private func isBlocked(_ message: OfficeMessageRow) -> Bool {
+        guard !message.isMine, let id = message.senderUserID?.lowercased() else { return false }
+        return blockedUserIDs.contains(id)
+    }
+
+    private var safetyHint: some View {
+        Label("Press and hold a message to report it or block the sender.", systemImage: "hand.raised")
+            .font(.caption2)
+            .foregroundStyle(Theme.meta)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityIdentifier("chat.safetyHint")
+    }
+
+    private func safetyMenu(_ people: [ChatPerson]) -> some View {
+        Menu {
+            ForEach(people) { person in
+                if blockedUserIDs.contains(person.id) {
+                    Button {
+                        Task { await unblock(person) }
+                    } label: {
+                        Label("Unblock \(person.name)", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                } else {
+                    Button(role: .destructive) {
+                        blockCandidate = person
+                    } label: {
+                        Label("Block \(person.name)", systemImage: "person.crop.circle.badge.xmark")
+                    }
+                }
+            }
+            Divider()
+            Text("To report a message, press and hold it.")
+        } label: {
+            Image(systemName: "exclamationmark.shield")
+        }
+        .tint(Theme.primary)
+        .accessibilityLabel("Report or block")
+        .accessibilityIdentifier("chat.safetyMenu")
+    }
+
+    @ViewBuilder
+    private func messageView(_ message: OfficeMessageRow) -> some View {
+        if isBlocked(message) && !revealedMessageIDs.contains(message.id) {
+            hiddenBubble(message)
+        } else if message.isMine {
+            bubble(message)
+        } else {
+            bubble(message)
+                .contextMenu {
+                    Button(role: .destructive) {
+                        reportTarget = target(for: message)
+                    } label: {
+                        Label("Report message", systemImage: "flag")
+                    }
+                    if let id = message.senderUserID?.lowercased() {
+                        let person = ChatPerson(id: id, name: message.senderName)
+                        if blockedUserIDs.contains(id) {
+                            Button {
+                                Task { await unblock(person) }
+                            } label: {
+                                Label("Unblock \(message.senderName)", systemImage: "person.crop.circle.badge.checkmark")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                blockCandidate = person
+                            } label: {
+                                Label("Block \(message.senderName)", systemImage: "person.crop.circle.badge.xmark")
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    private func hiddenBubble(_ message: OfficeMessageRow) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "eye.slash")
+                .font(.footnote)
+                .foregroundStyle(Theme.meta)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Message from someone you blocked")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.secondary)
+                Text(message.timeLabel)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.meta)
+            }
+            Spacer(minLength: 0)
+            Button("Show") {
+                withAnimation(.snappy) { _ = revealedMessageIDs.insert(message.id) }
+            }
+            .font(.caption.weight(.semibold))
+            .tint(Theme.primary)
+        }
+        .padding(12)
+        .background(Theme.canvas)
+        .clipShape(.rect(cornerRadius: Theme.cardRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        }
+        .padding(.trailing, 40)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("chat.hiddenMessage")
+    }
+
+    private func target(for message: OfficeMessageRow) -> ReportTarget {
+        ReportTarget(
+            messageID: message.id,
+            kind: .office,
+            excerpt: message.body,
+            senderUserID: message.senderUserID,
+            senderName: message.senderName
+        )
+    }
+
+    private func loadBlocks() async {
+        guard let session else { return }
+        blockedUserIDs = (try? await env.gateway.blockedChatUserIDs(session: session)) ?? []
+    }
+
+    private func block(_ person: ChatPerson) async {
+        guard let session else { return }
+        safetyError = nil
+        do {
+            try await env.gateway.blockChatUser(session: session, userID: person.id, reason: .other, details: nil)
+            withAnimation(.snappy) {
+                _ = blockedUserIDs.insert(person.id)
+                safetyNotice = "You blocked \(person.name). Their chat messages are hidden from you."
+            }
+        } catch {
+            safetyError = error.localizedDescription
+        }
+    }
+
+    private func unblock(_ person: ChatPerson) async {
+        guard let session else { return }
+        safetyError = nil
+        do {
+            try await env.gateway.unblockChatUser(session: session, userID: person.id)
+            withAnimation(.snappy) {
+                _ = blockedUserIDs.remove(person.id)
+                safetyNotice = "You unblocked \(person.name)."
+            }
+        } catch {
+            safetyError = error.localizedDescription
+        }
     }
 
     private func bubble(_ message: OfficeMessageRow) -> some View {

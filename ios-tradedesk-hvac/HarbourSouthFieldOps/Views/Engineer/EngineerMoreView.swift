@@ -66,6 +66,16 @@ struct EngineerMoreView: View {
                 availabilityCard(profile)
                 todayCard(profile)
                 sectionsCard
+
+                NavigationLink {
+                    ChatSafetyView()
+                } label: {
+                    Label("Safety & reports", systemImage: "checkmark.shield")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .accessibilityIdentifier("engineer.safety")
+
                 signOutButton
 
                 NavigationLink {

@@ -133,6 +133,32 @@ struct MoreView: View {
                         .sectionLabelStyle()
 
                     NavigationLink {
+                        ChatSafetyView()
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "checkmark.shield.fill")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.primary)
+                                .frame(width: 32, height: 32)
+                                .background(Theme.primaryTint)
+                                .clipShape(.rect(cornerRadius: 8))
+                            Text("Safety & reports")
+                                .font(.body)
+                                .foregroundStyle(Theme.ink)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Theme.meta)
+                        }
+                        .padding(.horizontal, 13)
+                        .frame(minHeight: Theme.minTap)
+                        .contentShape(.rect)
+                        .cardSurface()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("more.safety")
+
+                    NavigationLink {
                         DeleteAccountView()
                     } label: {
                         HStack(spacing: 12) {

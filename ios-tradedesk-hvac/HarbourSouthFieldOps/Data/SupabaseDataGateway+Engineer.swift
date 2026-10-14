@@ -613,7 +613,8 @@ extension SupabaseDataGateway {
                     senderInitials: Self.engineerInitials(sender?.name ?? "Office"),
                     timeLabel: Formatters.shortDayAndTime(message.createdAt),
                     isMine: isMine,
-                    photoReferences: (message.jobPhotoIDs ?? []).compactMap { references[$0.uuidString] }
+                    photoReferences: (message.jobPhotoIDs ?? []).compactMap { references[$0.uuidString] },
+                    senderUserID: message.senderUserID.uuidString
                 )
             },
             canReply: true

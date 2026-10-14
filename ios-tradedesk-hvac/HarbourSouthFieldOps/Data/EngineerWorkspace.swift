@@ -285,6 +285,9 @@ nonisolated struct OfficeMessageRow: Identifiable, Hashable, Sendable {
     /// `job_photos.storage_reference` values, resolved by the same thumbnail
     /// component the job screens use. No separate media pipeline.
     let photoReferences: [String]
+    /// The sender's user id, so a message can be reported or its sender
+    /// blocked. `nil` where the development store has no real user.
+    var senderUserID: String? = nil
 }
 
 nonisolated struct OfficeConversation: Identifiable, Hashable, Sendable {

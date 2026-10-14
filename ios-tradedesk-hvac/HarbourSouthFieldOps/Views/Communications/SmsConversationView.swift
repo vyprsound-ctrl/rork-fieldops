@@ -6,6 +6,7 @@ struct SmsConversationView: View {
 
     @Environment(AppEnvironment.self) private var env
     @State private var viewModel = SmsConversationViewModel()
+    @State private var reportTarget: ReportTarget?
 
     private var session: TenantSession? { env.activeSession }
 
@@ -25,6 +26,11 @@ struct SmsConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
         .task(id: conversationID) { await reload() }
+        .sheet(item: $reportTarget, onDismiss: {
+            Task { await reload(showLoading: false) }
+        }) { target in
+            ReportMessageSheet(target: target)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .communicationsPushReceived)) { _ in
             Task { await reload(showLoading: false) }
         }
@@ -40,8 +46,32 @@ struct SmsConversationView: View {
                             EmptyStateView(symbolName: "message", title: "No messages yet",
                                            message: "Messages to and from this number appear here.")
                         }
+                        if detail.messages.contains(where: { $0.direction == .inbound }) {
+                            Label("Press and hold a customer's text to report it.", systemImage: "hand.raised")
+                                .font(.caption2)
+                                .foregroundStyle(Theme.meta)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
                         ForEach(detail.messages) { message in
-                            SmsBubble(message: message).id(message.id)
+                            if message.direction == .inbound {
+                                SmsBubble(message: message)
+                                    .contextMenu {
+                                        Button(role: .destructive) {
+                                            reportTarget = ReportTarget(
+                                                messageID: message.id,
+                                                kind: .sms,
+                                                excerpt: message.body,
+                                                senderUserID: nil,
+                                                senderName: detail.recipientName
+                                            )
+                                        } label: {
+                                            Label("Report message", systemImage: "flag")
+                                        }
+                                    }
+                                    .id(message.id)
+                            } else {
+                                SmsBubble(message: message).id(message.id)
+                            }
                         }
                     }
                     .padding(.horizontal, Theme.margin)

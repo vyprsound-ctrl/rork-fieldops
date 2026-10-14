@@ -1,6 +1,6 @@
 import { AuthError, corsHeaders, createAdminClient, jsonResponse, requireAuth } from "../_shared/auth.ts";
 import { firstRow } from "../_shared/sms.ts";
-import { friendlyTwilioError, masterConfig, searchLocalNumbers } from "../_shared/twilio.ts";
+import { friendlyTwilioError, masterConfig, masterConfigIssue, searchLocalNumbers } from "../_shared/twilio.ts";
 import { advanceProvisioning, type BusinessDetails, defaultSampleMessages, detailsProblem } from "../_shared/provisioning.ts";
 
 /// Owner-only SMS setup. The company is ALWAYS the caller's own
@@ -48,7 +48,9 @@ Deno.serve(async (req) => {
     if (action === "status") {
       const status = await readStatus();
       if (!status) return jsonResponse({ error: "You don't have access to SMS settings." }, 403);
-      return jsonResponse({ status, providerAvailable: masterConfig() !== null });
+      const available = masterConfig() !== null;
+      if (!available) console.warn(`[sms-setup] provider unavailable: ${masterConfigIssue() ?? "unknown"}`);
+      return jsonResponse({ status, providerAvailable: available });
     }
 
     // Everything below is owner-only.
