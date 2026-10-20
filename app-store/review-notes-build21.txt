@@ -1,0 +1,50 @@
+Build 21 answers the questions in our Resolution Center reply and adds in-app reporting, blocking and moderation for messages. A screen recording from a physical iPhone is attached to this App Review Information.
+
+PURPOSE AND AUDIENCE
+Harbour South FieldOps is field-service management software for trade businesses (HVAC, plumbing, electrical). The office schedules and dispatches jobs and manages customers, quotes and invoices; field engineers run their jobs on site. For business owners, office staff and engineers. Not for children.
+
+SIGN-IN
+Demo credentials are in the Sign-In Information fields (Owner account with a demo company of fictional customers, jobs, quotes, invoices and engineers; no setup needed). Create an account: New company on the sign-in screen. Delete an account: More > Delete account (in-app, permanent).
+
+HOW TO REVIEW
+1. Sign in. Dashboard shows today's work and money owed.
+2. Jobs, Calendar and Customers tabs: open a job or customer for details and history.
+3. More > Quotes, Invoices, Dispatch, Reports.
+4. More > Subscription & Users: plans, prices, Restore purchases, Terms of Use (EULA) and Privacy Policy.
+5. More > Messages: report and block (below).
+
+USER-GENERATED CONTENT: REPORT, BLOCK, FILTER, MODERATE (NEW IN BUILD 21)
+Messages are private between members of the same company. There is no public content.
+- Report: in More > Messages open a conversation, press and hold a message from another person, tap Report message, pick a reason (harassment, hate, threats, sexual content, spam, illegal activity, self-harm, other), add optional details, optionally block the sender. Customer texts in More > Communications can be reported the same way.
+- Block: press and hold a message and tap Block, or use the shield button in the conversation. Blocked users' messages are hidden (tap Show to view). Unblock there or in More > Safety & reports.
+- Filter: messages containing objectionable language are rejected before sending.
+- Moderation: More > Safety & reports lists your reports and blocked people. Owners and Admins can remove a message, pause a person's messaging, suspend the account, or close the report. Reports about an Owner go to Harbour South.
+- Every report alerts Harbour South moderators by email. We act within 24 hours and remove offending content and users. Reporters stay anonymous.
+To test: open the Okafor install conversation and press and hold a message from Luis Ortega.
+
+IN-APP PURCHASES
+Auto-renewing subscriptions, Apple in-app purchase only, at More > Subscription & Users:
+- Starter: $19.99/month or $191.99/year
+- Team: $39.99/month or $384.99/year
+- Business: $69.99/month or $669.99/year
+14-day free trial for eligible new subscribers. Use a sandbox Apple Account to buy, switch or restore.
+
+EXTERNAL SERVICES
+- Supabase: accounts and data storage (name, email, company records).
+- Stripe Connect (optional): the trade business connects its own Stripe account to take card payments from its customers for completed real-world work. Harbour South holds no customer funds. Not connected in the demo company.
+- Twilio (optional): business texting to the trade's own customers from a dedicated US number. Not set up in the demo company.
+- Resend: transactional email (invoices, moderation alerts).
+- Apple: in-app purchase.
+
+REGIONAL DIFFERENCES
+Works the same in all regions. Business texting numbers are US numbers.
+
+REGULATED INDUSTRY
+Not applicable. No special licences required.
+
+PERMISSIONS
+- Notifications: job and message alerts (optional).
+- Camera / Photos: attach photos to jobs, equipment and messages (optional).
+- Location: engineer workflow only, when an engineer taps Start Travel; shared while travelling to a job. Demo engineers are fictional, so no live location appears.
+
+Contact: vyprsound@gmail.com
