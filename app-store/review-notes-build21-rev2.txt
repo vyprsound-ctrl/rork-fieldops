@@ -1,0 +1,54 @@
+Build 21 adds in-app reporting, blocking and moderation for messages. A screen recording from a physical iPhone is attached. Sandbox Apple Account purchases now unlock the workspace for the demo company and for any company you create (server change, same build).
+
+PURPOSE AND AUDIENCE
+Field-service management for trade businesses (HVAC, plumbing, electrical): the office schedules jobs and manages customers, quotes and invoices; engineers run jobs on site. Not for children.
+
+SIGN-IN AND SUBSCRIPTION (REQUIRED TO USE THE WORKSPACE)
+A subscription is required. The demo company has no active subscription, so the plan picker opens first.
+Option A - demo account: sign in with the Sign-In Information credentials (Owner; fictional customers, jobs, invoices and engineers). It has 3 active users, so choose Team or Business (Starter allows 1).
+Option B - new company: tap New company on the sign-in screen, confirm your email, sign in. Any plan works.
+Buy with your Sandbox Apple Account and the workspace opens. If not at once, tap Restore purchases on the same screen.
+Delete an account: More > Delete account (in-app, permanent).
+
+HOW TO REVIEW
+1. After subscribing, the Dashboard shows today's work and money owed.
+2. Jobs, Calendar and Customers tabs: open a job or customer for details and history.
+3. More > Quotes, Invoices, Dispatch, Reports.
+4. More > Subscription & Users: plans, prices, Restore purchases, Terms of Use (EULA) and Privacy Policy.
+5. More > Messages: report and block (below).
+
+USER-GENERATED CONTENT: REPORT, BLOCK, FILTER, MODERATE (NEW IN BUILD 21)
+Messages are private between members of the same company. There is no public content.
+- Report: in More > Messages open a conversation, press and hold another person's message, tap Report message, pick a reason, optionally block the sender. Customer texts in More > Communications too.
+- Block: press and hold a message and tap Block, or the shield button. Blocked users' messages are hidden. Unblock in More > Safety & reports.
+- Filter: messages containing objectionable language are rejected before sending.
+- Moderation: More > Safety & reports. Owners and Admins can remove a message, pause messaging, suspend the account or close the report. Reports about an Owner go to Harbour South.
+- Every report alerts Harbour South moderators by email; we act within 24 hours. Reporters stay anonymous.
+To test: open the Okafor install conversation and press and hold a message from Luis Ortega.
+
+IN-APP PURCHASES
+Auto-renewing subscriptions, Apple in-app purchase only, at More > Subscription & Users:
+- Starter: $19.99/month or $191.99/year
+- Team: $39.99/month or $384.99/year
+- Business: $69.99/month or $669.99/year
+14-day free trial for eligible new subscribers. Use a Sandbox Apple Account to buy, switch plans or restore. Sandbox purchases unlock the workspace only; they never unlock paid business texting.
+
+EXTERNAL SERVICES
+- Supabase: accounts and data storage (name, email, company records).
+- Stripe Connect (optional): the trade business connects its own Stripe account to take card payments from its customers for completed real-world work. Harbour South holds no customer funds. Not connected in the demo company.
+- Twilio (optional): business texting to the trade's own customers from a dedicated US number. Not set up in the demo company.
+- Resend: transactional email (invoices, moderation alerts).
+- Apple: in-app purchase.
+
+REGIONAL DIFFERENCES
+Works the same in all regions. Business texting numbers are US numbers.
+
+REGULATED INDUSTRY
+Not applicable. No special licences required.
+
+PERMISSIONS
+- Notifications: job and message alerts (optional).
+- Camera / Photos: attach photos to jobs, equipment and messages (optional).
+- Location: engineer workflow only, when an engineer taps Start Travel; shared while travelling to a job. Demo engineers are fictional, so no live location appears.
+
+Contact: vyprsound@gmail.com
