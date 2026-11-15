@@ -10,9 +10,12 @@ import { syncStripeSubscription } from "../_shared/webSubscriptions.ts";
 /// paid or part-paid.
 ///
 /// SECURITY MODEL
-///   1. Signature first. The body is verified against STRIPE_WEBHOOK_SECRET (or
-///      STRIPE_CONNECT_WEBHOOK_SECRET for connected-account events) before it is
-///      parsed. An unsigned or stale payload never reaches any logic.
+///   1. Signature first. The body is verified against STRIPE_WEBHOOK_SECRET,
+///      STRIPE_CONNECT_WEBHOOK_SECRET (connected-account events) or
+///      STRIPE_SUBSCRIPTIONS_WEBHOOK_SECRET (the separate Stripe endpoint for
+///      Harbour South's own web subscriptions) before it is parsed. Each Stripe
+///      endpoint signs with its own secret; any one matching is enough. An
+///      unsigned or stale payload never reaches any logic.
 ///   2. Company is resolved from the connected account id or from metadata
 ///      written by our own code at creation time — never from a company_id in
 ///      the event body.
@@ -43,15 +46,16 @@ Deno.serve(async (req) => {
 
   const platformSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   const connectSecret = Deno.env.get("STRIPE_CONNECT_WEBHOOK_SECRET") ?? platformSecret;
+  const subscriptionsSecret = Deno.env.get("STRIPE_SUBSCRIPTIONS_WEBHOOK_SECRET");
 
-  if (!platformSecret && !connectSecret) {
+  if (!platformSecret && !connectSecret && !subscriptionsSecret) {
     console.error("[stripe-webhook] no webhook secret configured — refusing every event");
     return jsonResponse({ error: "Webhook not configured" }, 500);
   }
 
   // --- 1. Verify before parsing ------------------------------------------
   let verified = false;
-  for (const secret of [platformSecret, connectSecret]) {
+  for (const secret of [platformSecret, connectSecret, subscriptionsSecret]) {
     if (!secret) continue;
     if (await verifyStripeSignature(payload, signature, secret)) {
       verified = true;

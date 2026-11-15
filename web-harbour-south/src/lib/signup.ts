@@ -13,14 +13,13 @@ export const TRADE_OPTIONS: { id: string; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
-/** Where the company works; sets the currency used on its quotes and invoices. */
+/** Where the company works; sets the currency used on its quotes and invoices. US only for now. */
 export const COUNTRY_OPTIONS: { code: string; label: string; currency: string }[] = [
   { code: "US", label: "United States", currency: "USD" },
-  { code: "CA", label: "Canada", currency: "CAD" },
-  { code: "GB", label: "United Kingdom", currency: "GBP" },
-  { code: "IE", label: "Ireland", currency: "EUR" },
-  { code: "AU", label: "Australia", currency: "AUD" },
-  { code: "NZ", label: "New Zealand", currency: "NZD" },
 ];
 
-export const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
+/** The browser's time zone when it's a US one, otherwise US Eastern (the owner can change it later). */
+export const localTimeZone = () => {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  return /^(America|Pacific\/Honolulu|US\/)/.test(tz) ? tz : "America/New_York";
+};
