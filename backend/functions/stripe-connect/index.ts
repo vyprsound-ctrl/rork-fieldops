@@ -32,7 +32,12 @@ interface ConnectRequest {
   /// claimed here during onboarding. Omitted or unrecognised means "we do not
   /// know", and Stripe asks the merchant itself rather than us guessing.
   businessType?: string;
+  /// "web" sends the owner back to the office web app instead of the iPhone
+  /// landing page. A fixed value, never a caller-supplied URL.
+  returnTo?: string;
 }
+
+const WEB_APP_BASE = "https://harboursouth.us/app";
 
 type StripeBusinessType = "individual" | "company";
 
@@ -249,8 +254,8 @@ Deno.serve(async (req) => {
       const link = await stripeRequest<{ url: string; expires_at: number }>("/account_links", {
         account: accountId,
         type: "account_onboarding",
-        refresh_url: `${returnBase()}/stripe/refresh`,
-        return_url: `${returnBase()}/stripe/return`,
+        refresh_url: body.returnTo === "web" ? `${WEB_APP_BASE}/settings/payments?stripe=refresh` : `${returnBase()}/stripe/refresh`,
+        return_url: body.returnTo === "web" ? `${WEB_APP_BASE}/settings/payments?stripe=return` : `${returnBase()}/stripe/return`,
       });
 
       return jsonResponse({

@@ -64,12 +64,23 @@ nonisolated enum BillingPeriod: String, Codable, Hashable, Sendable, CaseIterabl
 nonisolated enum BillingStore: String, Codable, Sendable {
     case apple
     case google
+    /// Paid outside the app by the account owner. The app never names where
+    /// or how, and never links there.
+    case stripe
     case none
+
+    /// An unknown store from a newer server decodes as `.none` instead of
+    /// failing the whole subscription row.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = BillingStore(rawValue: raw) ?? .none
+    }
 
     var title: String {
         switch self {
         case .apple: return "Apple In-App Purchase"
         case .google: return "Google Play Billing"
+        case .stripe: return "Managed by your account owner"
         case .none: return "Not linked"
         }
     }

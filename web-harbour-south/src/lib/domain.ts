@@ -17,51 +17,77 @@ export const ROLE_TITLE: Record<Role, string> = {
 };
 
 export type Permission =
-  | "jobsReadAll"
-  | "jobsManage"
-  | "assignmentsManage"
-  | "calendarReadAll"
+  | "companyProfileRead"
+  | "companyProfileManage"
+  | "companyDelete"
+  | "usersRead"
+  | "usersManage"
+  | "saasBillingRead"
+  | "saasBillingManage"
   | "customersReadAll"
   | "customersManage"
-  | "quotesRead"
-  | "quotesManage"
-  | "paymentsRead"
-  | "equipmentManage"
-  | "usersRead"
+  | "customerBillingDetailsRead"
+  | "jobsReadAll"
+  | "jobsManage"
+  | "jobStatusHistoryReadAll"
+  | "calendarReadAll"
+  | "assignmentsManage"
   | "jobNotesRead"
   | "jobNotesCreate"
   | "jobPhotosRead"
+  | "jobPhotosCreate"
+  | "equipmentRead"
+  | "equipmentManage"
   | "fieldWorkerLocationReadAll"
+  | "quotesRead"
+  | "quotesManage"
   | "quoteFinancialsRead"
   | "invoicesRead"
   | "invoicesManage"
+  | "paymentsRead"
   | "paymentsManage"
-  | "equipmentRead";
+  | "smsLedgerRead"
+  | "smsCreditsConsume"
+  | "smsCreditsPurchase"
+  | "reportsOperational"
+  | "reportsFinancial";
 
-/** The office-relevant slice of the iPhone app's PermissionMatrix (matches role_permissions). */
-const MANAGER: Permission[] = [
-  "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "customersManage", "usersRead",
-  "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quotesRead", "quotesManage",
-  "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsRead", "paymentsManage", "equipmentRead", "equipmentManage",
-];
+/** Copied exactly from the database's role_permissions table (office roles). */
 const MATRIX: Record<Role, Permission[]> = {
-  owner: MANAGER,
-  admin: MANAGER,
+  owner: [
+    "companyProfileRead", "companyProfileManage", "companyDelete", "usersRead", "usersManage", "saasBillingRead",
+    "saasBillingManage", "customersReadAll", "customersManage", "customerBillingDetailsRead", "jobsReadAll", "jobsManage",
+    "jobStatusHistoryReadAll", "calendarReadAll", "assignmentsManage", "jobNotesRead", "jobNotesCreate", "jobPhotosRead",
+    "jobPhotosCreate", "equipmentRead", "equipmentManage", "fieldWorkerLocationReadAll", "quotesRead", "quotesManage",
+    "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsRead", "paymentsManage", "smsLedgerRead",
+    "smsCreditsConsume", "smsCreditsPurchase", "reportsOperational", "reportsFinancial",
+  ],
+  admin: [
+    "companyProfileRead", "usersRead", "usersManage", "customersReadAll", "customersManage", "customerBillingDetailsRead",
+    "jobsReadAll", "jobsManage", "jobStatusHistoryReadAll", "calendarReadAll", "assignmentsManage", "jobNotesRead",
+    "jobNotesCreate", "jobPhotosRead", "jobPhotosCreate", "equipmentRead", "equipmentManage", "fieldWorkerLocationReadAll",
+    "quotesRead", "quotesManage", "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsRead", "paymentsManage",
+    "smsLedgerRead", "smsCreditsConsume", "reportsOperational", "reportsFinancial",
+  ],
   dispatcher: [
-    "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "customersManage", "usersRead",
-    "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quotesRead", "equipmentRead",
+    "companyProfileRead", "usersRead", "customersReadAll", "customersManage", "jobsReadAll", "jobsManage",
+    "jobStatusHistoryReadAll", "calendarReadAll", "assignmentsManage", "jobNotesRead", "jobNotesCreate", "jobPhotosRead",
+    "jobPhotosCreate", "equipmentRead", "fieldWorkerLocationReadAll", "quotesRead", "smsCreditsConsume", "reportsOperational",
   ],
   fieldWorker: [],
   accounts: [
-    "jobsReadAll", "customersReadAll", "usersRead", "quotesRead", "quoteFinancialsRead", "invoicesRead", "invoicesManage",
-    "paymentsRead", "paymentsManage",
+    "companyProfileRead", "usersRead", "customersReadAll", "customerBillingDetailsRead", "jobsReadAll", "quotesRead",
+    "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsRead", "paymentsManage", "smsLedgerRead",
+    "reportsFinancial",
   ],
 };
 
-/** What an owner keeps while the company has no active subscription. */
+/** What a role keeps while the company has no active subscription. */
 const READ_ONLY_KEEP: Permission[] = [
-  "jobsReadAll", "calendarReadAll", "customersReadAll", "usersRead", "jobNotesRead", "jobPhotosRead",
-  "fieldWorkerLocationReadAll", "quotesRead", "quoteFinancialsRead", "invoicesRead", "paymentsRead", "equipmentRead",
+  "companyProfileRead", "companyDelete", "saasBillingRead", "saasBillingManage", "usersRead",
+  "jobsReadAll", "jobStatusHistoryReadAll", "calendarReadAll", "customersReadAll", "customerBillingDetailsRead",
+  "jobNotesRead", "jobPhotosRead", "fieldWorkerLocationReadAll", "quotesRead", "quoteFinancialsRead", "invoicesRead",
+  "paymentsRead", "equipmentRead", "smsLedgerRead", "reportsOperational", "reportsFinancial",
 ];
 
 export function permissionsFor(role: Role, readOnly: boolean): Set<Permission> {

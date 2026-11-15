@@ -26,6 +26,8 @@ interface PurchaseRequest {
   action?: "bundles" | "checkout";
   bundleId?: string;
   credits?: number;
+  /// "web" returns to the office web app. A fixed value, never a URL.
+  returnTo?: string;
 }
 
 Deno.serve(async (req) => {
@@ -137,8 +139,12 @@ Deno.serve(async (req) => {
     try {
       const session = await stripeRequest<{ id: string; url: string }>("/checkout/sessions", {
         mode: "payment",
-        success_url: `${returnBase}/sms/success?purchase=${purchase.id}`,
-        cancel_url: `${returnBase}/sms/cancelled?purchase=${purchase.id}`,
+        success_url: request.returnTo === "web"
+          ? `https://harboursouth.us/app/messages?tab=credits&sms=success&purchase=${purchase.id}`
+          : `${returnBase}/sms/success?purchase=${purchase.id}`,
+        cancel_url: request.returnTo === "web"
+          ? `https://harboursouth.us/app/messages?tab=credits&sms=cancelled&purchase=${purchase.id}`
+          : `${returnBase}/sms/cancelled?purchase=${purchase.id}`,
         client_reference_id: purchase.id,
         // Metadata written by US, which is what the webhook trusts. A client
         // never supplies a company id anywhere in this flow.

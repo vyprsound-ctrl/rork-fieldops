@@ -5,8 +5,8 @@ import { Loader2 } from "lucide-react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppShell } from "@/components/hs/AppShell";
-import { SessionProvider, useSession, useWorkspace } from "@/lib/session";
+import { AppShell, canSeeMessages, canSeeReports, canSeeVehicles } from "@/components/hs/AppShell";
+import { SessionProvider, useSession, useWorkspace, type Workspace } from "@/lib/session";
 import type { Permission } from "@/lib/domain";
 import type { ReactNode } from "react";
 
@@ -22,6 +22,12 @@ import QuoteDetail from "./pages/QuoteDetail";
 import Invoices from "./pages/Invoices";
 import InvoiceDetail from "./pages/InvoiceDetail";
 import Billing from "./pages/Billing";
+import Team from "./pages/Team";
+import SettingsPage from "./pages/Settings";
+import Messages from "./pages/Messages";
+import Recurring from "./pages/Recurring";
+import Reports from "./pages/Reports";
+import Vehicles from "./pages/Vehicles";
 import SignIn from "./pages/auth/SignIn";
 import SignUp from "./pages/auth/SignUp";
 import CompanySetup from "./pages/auth/CompanySetup";
@@ -42,6 +48,12 @@ const queryClient = new QueryClient({
 function Allowed({ permission, children }: { permission: Permission; children: ReactNode }) {
   const ws = useWorkspace();
   return ws.can(permission) ? <>{children}</> : <Navigate to="/" replace />;
+}
+
+/** For pages open to any of several permissions (or tied to a trade). */
+function When({ test, children }: { test: (ws: Workspace) => boolean; children: ReactNode }) {
+  const ws = useWorkspace();
+  return test(ws) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 /** Billing is the owner's alone, and stays open while the workspace is read-only. */
@@ -106,6 +118,13 @@ function Gate() {
             <Route path="/invoices" element={<Allowed permission="invoicesRead"><Invoices /></Allowed>} />
             <Route path="/invoices/:id" element={<Allowed permission="invoicesRead"><InvoiceDetail /></Allowed>} />
             <Route path="/billing" element={<OwnerOnly><Billing /></OwnerOnly>} />
+            <Route path="/team" element={<Allowed permission="usersRead"><Team /></Allowed>} />
+            <Route path="/settings" element={<Allowed permission="companyProfileRead"><SettingsPage /></Allowed>} />
+            <Route path="/settings/:section" element={<Allowed permission="companyProfileRead"><SettingsPage /></Allowed>} />
+            <Route path="/messages" element={<When test={canSeeMessages}><Messages /></When>} />
+            <Route path="/recurring" element={<Allowed permission="customersReadAll"><Recurring /></Allowed>} />
+            <Route path="/reports" element={<When test={canSeeReports}><Reports /></When>} />
+            <Route path="/vehicles" element={<When test={canSeeVehicles}><Vehicles /></When>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

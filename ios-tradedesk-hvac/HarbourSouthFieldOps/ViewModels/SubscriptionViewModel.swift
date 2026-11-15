@@ -51,6 +51,12 @@ final class SubscriptionViewModel {
         return !deviceSubscriptionIDs.contains(original)
     }
 
+    /// The plan is paid by the account owner outside the app. Buying here
+    /// would charge the company twice, so no purchase is offered.
+    var isManagedByAccountOwner: Bool { commercial?.isManagedByAccountOwner ?? false }
+
+    static let managedByOwnerMessage = "Your plan is managed by your account owner. Everyone in your company has access, and there's nothing to buy here."
+
     static let billedElsewhereMessage = "Your company's plan is billed to the Apple ID of the person who subscribed. Change or cancel it from that Apple ID — everyone in your company keeps access in the meantime."
 
     func load(gateway: DataGateway, store: StoreBillingService, session: TenantSession, showLoading: Bool = true) async {
@@ -110,6 +116,10 @@ final class SubscriptionViewModel {
         }
         guard !isBilledToAnotherAppleID else {
             actionError = Self.billedElsewhereMessage
+            return
+        }
+        guard !isManagedByAccountOwner else {
+            actionError = Self.managedByOwnerMessage
             return
         }
         let productID = plan.productID(for: period)

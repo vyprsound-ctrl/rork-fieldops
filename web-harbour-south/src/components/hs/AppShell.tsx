@@ -14,9 +14,10 @@ import {
   MessageCircle,
   Plus,
   Receipt,
+  Repeat,
   Search,
   Settings,
-  Truck,
+  Car,
   Users,
   UsersRound,
 } from "lucide-react";
@@ -34,7 +35,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ROLE_TITLE, shortAddress, type Permission } from "@/lib/domain";
 import { useCustomers, useJobs } from "@/lib/queries";
-import { useSession, useWorkspace } from "@/lib/session";
+import { useSession, useWorkspace, type Workspace } from "@/lib/session";
 import { JobPanel } from "./JobPanel";
 import { NewJobDialog } from "./NewJobDialog";
 import { StatusBadge, WorkerAvatar, useJobPanel } from "./primitives";
@@ -45,7 +46,22 @@ interface ShellContextValue {
 const ShellContext = createContext<ShellContextValue>({ newJob: () => undefined });
 export const useShell = () => useContext(ShellContext);
 
-const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs?: Permission; ownerOnly?: boolean }[] = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: typeof Users;
+  end?: boolean;
+  needs?: Permission;
+  ownerOnly?: boolean;
+  show?: (ws: Workspace) => boolean;
+}
+
+/** Who sees Messages: anyone who can read jobs (office inbox) or use or audit customer texts. */
+export const canSeeMessages = (ws: Workspace) => ws.can("jobsReadAll") || ws.can("smsCreditsConsume") || ws.can("smsLedgerRead");
+export const canSeeReports = (ws: Workspace) => ws.can("reportsOperational") || ws.can("reportsFinancial");
+export const canSeeVehicles = (ws: Workspace) => ws.company.trade === "automotive" && ws.can("customersReadAll");
+
+const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
   { to: "/dispatch", label: "Dispatch", icon: ClipboardList },
@@ -54,21 +70,21 @@ const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs
   { to: "/customers", label: "Customers", icon: Users },
   { to: "/quotes", label: "Quotes", icon: FileText, needs: "quotesRead" },
   { to: "/invoices", label: "Invoices", icon: Receipt, needs: "invoicesRead" },
+  { to: "/recurring", label: "Recurring", icon: Repeat, needs: "customersReadAll" },
+  { to: "/vehicles", label: "Vehicles", icon: Car, show: canSeeVehicles },
+  { to: "/messages", label: "Messages", icon: MessageCircle, show: canSeeMessages },
+  { to: "/reports", label: "Reports", icon: BarChart3, show: canSeeReports },
+  { to: "/team", label: "Team", icon: UsersRound, needs: "usersRead" },
+  { to: "/settings", label: "Settings", icon: Settings, needs: "companyProfileRead" },
   { to: "/billing", label: "Billing", icon: CreditCard, ownerOnly: true },
 ];
 
 function useNav() {
   const ws = useWorkspace();
-  return NAV.filter((n) => (!n.needs || ws.can(n.needs)) && (!n.ownerOnly || ws.me.role === "owner"));
+  return NAV.filter(
+    (n) => (!n.needs || ws.can(n.needs)) && (!n.ownerOnly || ws.me.role === "owner") && (!n.show || n.show(ws)),
+  );
 }
-
-const SOON = [
-  { label: "Team", icon: UsersRound },
-  { label: "Messages", icon: MessageCircle },
-  { label: "Vehicles", icon: Truck },
-  { label: "Reports", icon: BarChart3 },
-  { label: "Settings", icon: Settings },
-];
 
 export function AppShell() {
   const ws = useWorkspace();
@@ -138,20 +154,6 @@ export function AppShell() {
                   </>
                 )}
               </NavLink>
-            ))}
-
-            <p className="px-3 pb-1.5 pt-6 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/45">
-              Coming to the web
-            </p>
-            {SOON.map((item) => (
-              <div
-                key={item.label}
-                className="flex cursor-default items-center gap-3 rounded-xl px-3 py-2 text-sm text-sidebar-foreground/40"
-                title="Available in the iPhone app today"
-              >
-                <item.icon className="h-[18px] w-[18px]" />
-                {item.label}
-              </div>
             ))}
           </nav>
 

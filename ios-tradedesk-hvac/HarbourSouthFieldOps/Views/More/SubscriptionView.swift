@@ -95,15 +95,27 @@ struct SubscriptionView: View {
                 unavailableCard(problem)
             }
 
-            plansSection(overview)
+            if viewModel.isManagedByAccountOwner {
+                managedByOwnerCard()
 
-            peopleCard(overview)
+                peopleCard(overview)
 
-            storeActions(overview)
+                paymentsLink()
 
-            paymentsLink()
+                LegalLinksView(documents: [.privacyPolicy, .termsOfService], includeAppleEULA: false)
+                    .font(.caption2)
+                    .foregroundStyle(Theme.meta)
+            } else {
+                plansSection(overview)
 
-            legalFooter(overview)
+                peopleCard(overview)
+
+                storeActions(overview)
+
+                paymentsLink()
+
+                legalFooter(overview)
+            }
         }
         .padding(.top, 4)
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.commercial)
@@ -317,6 +329,31 @@ struct SubscriptionView: View {
     }
 
     // MARK: - Small cards
+
+    /// Shown instead of the plans when the account owner pays outside the
+    /// app. No price, no link and no mention of where they pay.
+    private func managedByOwnerCard() -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "person.badge.shield.checkmark.fill")
+                .font(.title3)
+                .foregroundStyle(Theme.primary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Managed by your account owner")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                Text("Your plan is managed by your account owner. Everyone in your company has access, and there's nothing to buy in the app.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+        .accessibilityIdentifier("subscription.managedByOwner")
+    }
 
     private func noticeBanner(_ message: String) -> some View {
         HStack(spacing: 10) {

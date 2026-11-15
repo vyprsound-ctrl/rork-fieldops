@@ -445,7 +445,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
         case .gracePeriod:
             return "Payment problem — update your payment method"
         case .billingRetry:
-            return "Subscription paused — Apple couldn't take payment"
+            return billingStore == .stripe ? "Subscription paused — payment problem" : "Subscription paused — Apple couldn't take payment"
         case .expired:
             return "Subscription ended"
         case .revoked:
@@ -455,6 +455,7 @@ nonisolated struct CommercialState: Hashable, Sendable {
 
     /// The fuller explanation under the headline.
     var detail: String? {
+        if isManagedByAccountOwner { return managedDetail }
         switch entitlementState {
         case .none:
             return "Choose a plan to get started. Every plan starts with a 14-day free trial for new subscribers."
@@ -481,6 +482,24 @@ nonisolated struct CommercialState: Hashable, Sendable {
             return "Update your payment method in the App Store and Apple will try again."
         case .expired, .revoked:
             return "Choose a plan to keep adding people and working as a team."
+        }
+    }
+
+    /// The plan is paid outside the app by the account owner. The app then
+    /// offers no purchase, restore or plan change, and never says where or
+    /// how the owner pays.
+    var isManagedByAccountOwner: Bool {
+        billingStore == .stripe && (hasEntitlement || entitlementState == .gracePeriod || entitlementState == .billingRetry)
+    }
+
+    private var managedDetail: String? {
+        switch entitlementState {
+        case .gracePeriod, .billingRetry:
+            return "There's a problem with the last payment. Your account owner needs to update the payment method to keep your team working."
+        case .cancelling:
+            return "Your plan is managed by your account owner. It's set to end and won't renew."
+        default:
+            return "Your plan is managed by your account owner."
         }
     }
 
