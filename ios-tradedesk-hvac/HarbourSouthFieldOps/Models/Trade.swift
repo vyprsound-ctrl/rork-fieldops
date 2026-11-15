@@ -18,8 +18,25 @@ nonisolated enum Trade: String, Codable, CaseIterable, Sendable, Identifiable {
     case generalMaintenance
     case pestControl
     case other
+    case propertyServices
+    case automotive
 
     var id: String { rawValue }
+
+    /// The business types offered when a company is set up, in display order.
+    /// The older trades stay decodable so existing companies keep working.
+    static let setupOptions: [Trade] = [.hvac, .plumbing, .electrical, .propertyServices, .other, .automotive]
+
+    /// True when the company works on customers' vehicles — the only business
+    /// type that sees vehicle records.
+    var usesVehicles: Bool { self == .automotive }
+
+    /// An unknown value from a newer database reads as general field service
+    /// rather than failing to load the company.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Trade(rawValue: raw) ?? .other
+    }
 
     var title: String {
         switch self {
@@ -31,7 +48,9 @@ nonisolated enum Trade: String, Codable, CaseIterable, Sendable, Identifiable {
         case .locksmith: return "Locksmith"
         case .generalMaintenance: return "General maintenance"
         case .pestControl: return "Pest control"
-        case .other: return "Field service"
+        case .other: return "Field Services (General)"
+        case .propertyServices: return "Property Services"
+        case .automotive: return "Automotive"
         }
     }
 
@@ -63,6 +82,10 @@ nonisolated enum Trade: String, Codable, CaseIterable, Sendable, Identifiable {
             return Terminology(worker: "technician", workerPlural: "technicians", asset: "asset", assetPlural: "assets")
         case .pestControl:
             return Terminology(worker: "technician", workerPlural: "technicians", asset: "treatment area", assetPlural: "treatment areas")
+        case .propertyServices:
+            return Terminology(worker: "technician", workerPlural: "technicians", asset: "property", assetPlural: "properties")
+        case .automotive:
+            return Terminology(worker: "technician", workerPlural: "technicians", asset: "equipment", assetPlural: "equipment")
         }
     }
 }

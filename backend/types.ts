@@ -14,7 +14,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -157,11 +157,290 @@ export type Database = {
           },
         ]
       }
+      apple_notifications: {
+        Row: {
+          company_id: string | null
+          environment: string | null
+          notification_type: string
+          notification_uuid: string
+          original_transaction_id: string | null
+          outcome: string | null
+          received_at: string
+          signed_at: string | null
+          subtype: string | null
+        }
+        Insert: {
+          company_id?: string | null
+          environment?: string | null
+          notification_type: string
+          notification_uuid: string
+          original_transaction_id?: string | null
+          outcome?: string | null
+          received_at?: string
+          signed_at?: string | null
+          subtype?: string | null
+        }
+        Update: {
+          company_id?: string | null
+          environment?: string | null
+          notification_type?: string
+          notification_uuid?: string
+          original_transaction_id?: string | null
+          outcome?: string | null
+          received_at?: string
+          signed_at?: string | null
+          subtype?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "apple_notifications_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      apple_sandbox_companies: {
+        Row: {
+          added_at: string
+          company_id: string
+          note: string
+        }
+        Insert: {
+          added_at?: string
+          company_id: string
+          note?: string
+        }
+        Update: {
+          added_at?: string
+          company_id?: string
+          note?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "apple_sandbox_companies_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      apple_transactions: {
+        Row: {
+          company_id: string | null
+          created_at: string
+          environment: string
+          expires_at: string | null
+          offer_discount_type: string | null
+          offer_identifier: string | null
+          offer_type: number | null
+          original_transaction_id: string
+          product_id: string
+          purchase_at: string | null
+          revoked_at: string | null
+          signed_at: string | null
+          source: string
+          transaction_id: string
+          updated_at: string
+        }
+        Insert: {
+          company_id?: string | null
+          created_at?: string
+          environment: string
+          expires_at?: string | null
+          offer_discount_type?: string | null
+          offer_identifier?: string | null
+          offer_type?: number | null
+          original_transaction_id: string
+          product_id: string
+          purchase_at?: string | null
+          revoked_at?: string | null
+          signed_at?: string | null
+          source: string
+          transaction_id: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string | null
+          created_at?: string
+          environment?: string
+          expires_at?: string | null
+          offer_discount_type?: string | null
+          offer_identifier?: string | null
+          offer_type?: number | null
+          original_transaction_id?: string
+          product_id?: string
+          purchase_at?: string | null
+          revoked_at?: string | null
+          signed_at?: string | null
+          source?: string
+          transaction_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "apple_transactions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_blocked_terms: {
+        Row: {
+          active: boolean
+          category: string
+          created_at: string
+          term: string
+        }
+        Insert: {
+          active?: boolean
+          category?: string
+          created_at?: string
+          term: string
+        }
+        Update: {
+          active?: boolean
+          category?: string
+          created_at?: string
+          term?: string
+        }
+        Relationships: []
+      }
+      chat_blocks: {
+        Row: {
+          blocked_user_id: string
+          blocker_user_id: string
+          company_id: string
+          created_at: string
+          report_id: string | null
+        }
+        Insert: {
+          blocked_user_id: string
+          blocker_user_id: string
+          company_id: string
+          created_at?: string
+          report_id?: string | null
+        }
+        Update: {
+          blocked_user_id?: string
+          blocker_user_id?: string
+          company_id?: string
+          created_at?: string
+          report_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_blocks_blocked_user_id_fkey"
+            columns: ["blocked_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_blocks_blocker_user_id_fkey"
+            columns: ["blocker_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_blocks_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_blocks_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "message_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chat_restrictions: {
+        Row: {
+          company_id: string
+          created_at: string
+          expires_at: string | null
+          lifted_at: string | null
+          lifted_by_user_id: string | null
+          reason: string | null
+          report_id: string | null
+          restricted_by_user_id: string | null
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          expires_at?: string | null
+          lifted_at?: string | null
+          lifted_by_user_id?: string | null
+          reason?: string | null
+          report_id?: string | null
+          restricted_by_user_id?: string | null
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          expires_at?: string | null
+          lifted_at?: string | null
+          lifted_by_user_id?: string | null
+          reason?: string | null
+          report_id?: string | null
+          restricted_by_user_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_restrictions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_restrictions_lifted_by_user_id_fkey"
+            columns: ["lifted_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_restrictions_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "message_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_restrictions_restricted_by_user_id_fkey"
+            columns: ["restricted_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chat_restrictions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           address_line: string
           business_email: string | null
           city: string
+          closed_at: string | null
           country_code: string
           created_at: string
           currency_code: string
@@ -182,6 +461,7 @@ export type Database = {
           address_line?: string
           business_email?: string | null
           city?: string
+          closed_at?: string | null
           country_code: string
           created_at?: string
           currency_code: string
@@ -202,6 +482,7 @@ export type Database = {
           address_line?: string
           business_email?: string | null
           city?: string
+          closed_at?: string | null
           country_code?: string
           created_at?: string
           currency_code?: string
@@ -220,12 +501,265 @@ export type Database = {
         }
         Relationships: []
       }
+      company_messaging_accounts: {
+        Row: {
+          address_sid: string | null
+          auth_token_secret_id: string | null
+          billing_state: string
+          brand_identity_status: string | null
+          brand_sid: string | null
+          brand_status: string | null
+          business_details: Json
+          business_end_user_sid: string | null
+          callback_key: string
+          campaign_sid: string | null
+          campaign_status: string | null
+          closed_at: string | null
+          closing_started_at: string | null
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          customer_profile_sid: string | null
+          grace_started_at: string | null
+          id: string
+          last_error: string | null
+          last_error_at: string | null
+          messaging_service_sid: string | null
+          next_attempt_at: string | null
+          provisioning_step: string
+          registration_error: string | null
+          registration_route: string | null
+          registration_status: string
+          representative_end_user_sid: string | null
+          requested_area_code: string | null
+          requested_number: string | null
+          retention_until: string | null
+          retry_count: number
+          status: string
+          supporting_document_sid: string | null
+          suspended_at: string | null
+          suspended_reason: string | null
+          trust_end_user_sid: string | null
+          trust_product_sid: string | null
+          twilio_subaccount_sid: string | null
+          updated_at: string
+        }
+        Insert: {
+          address_sid?: string | null
+          auth_token_secret_id?: string | null
+          billing_state?: string
+          brand_identity_status?: string | null
+          brand_sid?: string | null
+          brand_status?: string | null
+          business_details?: Json
+          business_end_user_sid?: string | null
+          callback_key?: string
+          campaign_sid?: string | null
+          campaign_status?: string | null
+          closed_at?: string | null
+          closing_started_at?: string | null
+          company_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_profile_sid?: string | null
+          grace_started_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_error_at?: string | null
+          messaging_service_sid?: string | null
+          next_attempt_at?: string | null
+          provisioning_step?: string
+          registration_error?: string | null
+          registration_route?: string | null
+          registration_status?: string
+          representative_end_user_sid?: string | null
+          requested_area_code?: string | null
+          requested_number?: string | null
+          retention_until?: string | null
+          retry_count?: number
+          status?: string
+          supporting_document_sid?: string | null
+          suspended_at?: string | null
+          suspended_reason?: string | null
+          trust_end_user_sid?: string | null
+          trust_product_sid?: string | null
+          twilio_subaccount_sid?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address_sid?: string | null
+          auth_token_secret_id?: string | null
+          billing_state?: string
+          brand_identity_status?: string | null
+          brand_sid?: string | null
+          brand_status?: string | null
+          business_details?: Json
+          business_end_user_sid?: string | null
+          callback_key?: string
+          campaign_sid?: string | null
+          campaign_status?: string | null
+          closed_at?: string | null
+          closing_started_at?: string | null
+          company_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_profile_sid?: string | null
+          grace_started_at?: string | null
+          id?: string
+          last_error?: string | null
+          last_error_at?: string | null
+          messaging_service_sid?: string | null
+          next_attempt_at?: string | null
+          provisioning_step?: string
+          registration_error?: string | null
+          registration_route?: string | null
+          registration_status?: string
+          representative_end_user_sid?: string | null
+          requested_area_code?: string | null
+          requested_number?: string | null
+          retention_until?: string | null
+          retry_count?: number
+          status?: string
+          supporting_document_sid?: string | null
+          suspended_at?: string | null
+          suspended_reason?: string | null
+          trust_end_user_sid?: string | null
+          trust_product_sid?: string | null
+          twilio_subaccount_sid?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_messaging_accounts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_messaging_accounts_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_phone_numbers: {
+        Row: {
+          area_code: string | null
+          company_id: string
+          created_at: string
+          e164: string
+          id: string
+          is_primary: boolean
+          last_fee_charged_at: string | null
+          locality: string | null
+          messaging_account_id: string
+          monthly_fee_credits: number
+          next_fee_due_at: string | null
+          phone_number_sid: string | null
+          purchased_at: string | null
+          region: string | null
+          release_confirmed_at: string | null
+          release_confirmed_by: string | null
+          release_reason: string | null
+          released_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          area_code?: string | null
+          company_id: string
+          created_at?: string
+          e164: string
+          id?: string
+          is_primary?: boolean
+          last_fee_charged_at?: string | null
+          locality?: string | null
+          messaging_account_id: string
+          monthly_fee_credits?: number
+          next_fee_due_at?: string | null
+          phone_number_sid?: string | null
+          purchased_at?: string | null
+          region?: string | null
+          release_confirmed_at?: string | null
+          release_confirmed_by?: string | null
+          release_reason?: string | null
+          released_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          area_code?: string | null
+          company_id?: string
+          created_at?: string
+          e164?: string
+          id?: string
+          is_primary?: boolean
+          last_fee_charged_at?: string | null
+          locality?: string | null
+          messaging_account_id?: string
+          monthly_fee_credits?: number
+          next_fee_due_at?: string | null
+          phone_number_sid?: string | null
+          purchased_at?: string | null
+          region?: string | null
+          release_confirmed_at?: string | null
+          release_confirmed_by?: string | null
+          release_reason?: string | null
+          released_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_phone_numbers_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_phone_numbers_messaging_account_id_fkey"
+            columns: ["messaging_account_id"]
+            isOneToOne: false
+            referencedRelation: "company_messaging_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_phone_numbers_release_confirmed_by_fkey"
+            columns: ["release_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       company_subscriptions: {
         Row: {
           active_paid_users: number
           additional_user_cents: number
           additional_users: number
+          apple_auto_renew: boolean | null
+          apple_auto_renew_product_id: string | null
+          apple_environment: string | null
+          apple_expiration_intent: number | null
+          apple_expires_at: string | null
+          apple_grace_period_expires_at: string | null
+          apple_in_billing_retry: boolean
+          apple_is_free_offer: boolean
+          apple_last_transaction_id: string | null
+          apple_offer_discount_type: string | null
+          apple_offer_identifier: string | null
+          apple_offer_period: string | null
+          apple_offer_type: number | null
           apple_original_transaction_id: string | null
+          apple_product_id: string | null
+          apple_purchase_at: string | null
+          apple_renewal_signed_at: string | null
+          apple_revoked_at: string | null
+          apple_synced_at: string | null
           base_cents: number
           billing_period: Database["public"]["Enums"]["billing_period"]
           cancelled_at: string | null
@@ -259,7 +793,25 @@ export type Database = {
           active_paid_users?: number
           additional_user_cents?: number
           additional_users?: number
+          apple_auto_renew?: boolean | null
+          apple_auto_renew_product_id?: string | null
+          apple_environment?: string | null
+          apple_expiration_intent?: number | null
+          apple_expires_at?: string | null
+          apple_grace_period_expires_at?: string | null
+          apple_in_billing_retry?: boolean
+          apple_is_free_offer?: boolean
+          apple_last_transaction_id?: string | null
+          apple_offer_discount_type?: string | null
+          apple_offer_identifier?: string | null
+          apple_offer_period?: string | null
+          apple_offer_type?: number | null
           apple_original_transaction_id?: string | null
+          apple_product_id?: string | null
+          apple_purchase_at?: string | null
+          apple_renewal_signed_at?: string | null
+          apple_revoked_at?: string | null
+          apple_synced_at?: string | null
           base_cents?: number
           billing_period?: Database["public"]["Enums"]["billing_period"]
           cancelled_at?: string | null
@@ -293,7 +845,25 @@ export type Database = {
           active_paid_users?: number
           additional_user_cents?: number
           additional_users?: number
+          apple_auto_renew?: boolean | null
+          apple_auto_renew_product_id?: string | null
+          apple_environment?: string | null
+          apple_expiration_intent?: number | null
+          apple_expires_at?: string | null
+          apple_grace_period_expires_at?: string | null
+          apple_in_billing_retry?: boolean
+          apple_is_free_offer?: boolean
+          apple_last_transaction_id?: string | null
+          apple_offer_discount_type?: string | null
+          apple_offer_identifier?: string | null
+          apple_offer_period?: string | null
+          apple_offer_type?: number | null
           apple_original_transaction_id?: string | null
+          apple_product_id?: string | null
+          apple_purchase_at?: string | null
+          apple_renewal_signed_at?: string | null
+          apple_revoked_at?: string | null
+          apple_synced_at?: string | null
           base_cents?: number
           billing_period?: Database["public"]["Enums"]["billing_period"]
           cancelled_at?: string | null
@@ -904,6 +1474,7 @@ export type Database = {
           company_id: string
           created_at: string
           created_by_user_id: string
+          expires_at: string | null
           id: string
           invoice_id: string
           last_viewed_at: string | null
@@ -915,6 +1486,7 @@ export type Database = {
           company_id: string
           created_at?: string
           created_by_user_id: string
+          expires_at?: string | null
           id?: string
           invoice_id: string
           last_viewed_at?: string | null
@@ -926,6 +1498,7 @@ export type Database = {
           company_id?: string
           created_at?: string
           created_by_user_id?: string
+          expires_at?: string | null
           id?: string
           invoice_id?: string
           last_viewed_at?: string | null
@@ -1293,9 +1866,10 @@ export type Database = {
           captured_at: string
           company_id: string
           id: string
-          job_id: string
+          job_id: string | null
           kind: Database["public"]["Enums"]["job_photo_kind"]
           storage_reference: string
+          thread_id: string | null
           user_id: string
         }
         Insert: {
@@ -1303,9 +1877,10 @@ export type Database = {
           captured_at?: string
           company_id: string
           id?: string
-          job_id: string
+          job_id?: string | null
           kind?: Database["public"]["Enums"]["job_photo_kind"]
           storage_reference: string
+          thread_id?: string | null
           user_id: string
         }
         Update: {
@@ -1313,9 +1888,10 @@ export type Database = {
           captured_at?: string
           company_id?: string
           id?: string
-          job_id?: string
+          job_id?: string | null
           kind?: Database["public"]["Enums"]["job_photo_kind"]
           storage_reference?: string
+          thread_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -1331,6 +1907,13 @@ export type Database = {
             columns: ["job_id"]
             isOneToOne: false
             referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_photos_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "office_threads"
             referencedColumns: ["id"]
           },
           {
@@ -1455,6 +2038,7 @@ export type Database = {
           status: Database["public"]["Enums"]["job_status"]
           title: string
           updated_at: string
+          vehicle_id: string | null
         }
         Insert: {
           actual_end?: string | null
@@ -1477,6 +2061,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["job_status"]
           title?: string
           updated_at?: string
+          vehicle_id?: string | null
         }
         Update: {
           actual_end?: string | null
@@ -1499,6 +2084,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["job_status"]
           title?: string
           updated_at?: string
+          vehicle_id?: string | null
         }
         Relationships: [
           {
@@ -1564,6 +2150,373 @@ export type Database = {
             referencedRelation: "service_agreements"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "jobs_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      member_financial_permissions: {
+        Row: {
+          can_collect_payments: boolean
+          can_invoice: boolean
+          company_id: string
+          created_at: string
+          updated_at: string
+          updated_by_user_id: string | null
+          user_id: string
+        }
+        Insert: {
+          can_collect_payments?: boolean
+          can_invoice?: boolean
+          company_id: string
+          created_at?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          user_id: string
+        }
+        Update: {
+          can_collect_payments?: boolean
+          can_invoice?: boolean
+          company_id?: string
+          created_at?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_financial_permissions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_financial_permissions_updated_by_user_id_fkey"
+            columns: ["updated_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_financial_permissions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_reports: {
+        Row: {
+          company_id: string
+          created_at: string
+          details: string | null
+          escalated_to_platform: boolean
+          id: string
+          office_message_id: string | null
+          office_thread_id: string | null
+          reason: string
+          reported_user_id: string | null
+          reporter_user_id: string | null
+          resolution: string | null
+          resolution_note: string | null
+          resolved_at: string | null
+          resolved_by_user_id: string | null
+          sms_conversation_id: string | null
+          sms_message_id: string | null
+          snapshot_body: string | null
+          snapshot_meta: Json
+          snapshot_photo_ids: string[]
+          snapshot_sent_at: string | null
+          source: string
+          status: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          details?: string | null
+          escalated_to_platform?: boolean
+          id?: string
+          office_message_id?: string | null
+          office_thread_id?: string | null
+          reason: string
+          reported_user_id?: string | null
+          reporter_user_id?: string | null
+          resolution?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by_user_id?: string | null
+          sms_conversation_id?: string | null
+          sms_message_id?: string | null
+          snapshot_body?: string | null
+          snapshot_meta?: Json
+          snapshot_photo_ids?: string[]
+          snapshot_sent_at?: string | null
+          source: string
+          status?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          details?: string | null
+          escalated_to_platform?: boolean
+          id?: string
+          office_message_id?: string | null
+          office_thread_id?: string | null
+          reason?: string
+          reported_user_id?: string | null
+          reporter_user_id?: string | null
+          resolution?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by_user_id?: string | null
+          sms_conversation_id?: string | null
+          sms_message_id?: string | null
+          snapshot_body?: string | null
+          snapshot_meta?: Json
+          snapshot_photo_ids?: string[]
+          snapshot_sent_at?: string | null
+          source?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reports_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_office_message_id_fkey"
+            columns: ["office_message_id"]
+            isOneToOne: false
+            referencedRelation: "office_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_office_thread_id_fkey"
+            columns: ["office_thread_id"]
+            isOneToOne: false
+            referencedRelation: "office_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_reported_user_id_fkey"
+            columns: ["reported_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_reporter_user_id_fkey"
+            columns: ["reporter_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_resolved_by_user_id_fkey"
+            columns: ["resolved_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_sms_conversation_id_fkey"
+            columns: ["sms_conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_reports_sms_message_id_fkey"
+            columns: ["sms_message_id"]
+            isOneToOne: false
+            referencedRelation: "sms_inbound_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messaging_provisioning_events: {
+        Row: {
+          company_id: string
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          idempotency_key: string | null
+          messaging_account_id: string | null
+          operation: string
+          outcome: string
+          provider_reference: string | null
+          stage: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          idempotency_key?: string | null
+          messaging_account_id?: string | null
+          operation: string
+          outcome: string
+          provider_reference?: string | null
+          stage: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          idempotency_key?: string | null
+          messaging_account_id?: string | null
+          operation?: string
+          outcome?: string
+          provider_reference?: string | null
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messaging_provisioning_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messaging_provisioning_events_messaging_account_id_fkey"
+            columns: ["messaging_account_id"]
+            isOneToOne: false
+            referencedRelation: "company_messaging_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moderation_actions: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          company_id: string
+          created_at: string
+          id: string
+          note: string | null
+          report_id: string | null
+          target_user_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          note?: string | null
+          report_id?: string | null
+          target_user_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          note?: string | null
+          report_id?: string | null
+          target_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moderation_actions_actor_user_id_fkey"
+            columns: ["actor_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moderation_actions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moderation_actions_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "message_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moderation_actions_target_user_id_fkey"
+            columns: ["target_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moderation_alerts: {
+        Row: {
+          attempts: number
+          company_id: string | null
+          created_at: string
+          exhausted_at: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          next_attempt_at: string
+          note: string | null
+          report_id: string | null
+          sent_at: string | null
+        }
+        Insert: {
+          attempts?: number
+          company_id?: string | null
+          created_at?: string
+          exhausted_at?: string | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          next_attempt_at?: string
+          note?: string | null
+          report_id?: string | null
+          sent_at?: string | null
+        }
+        Update: {
+          attempts?: number
+          company_id?: string | null
+          created_at?: string
+          exhausted_at?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          next_attempt_at?: string
+          note?: string | null
+          report_id?: string | null
+          sent_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moderation_alerts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "moderation_alerts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "message_reports"
+            referencedColumns: ["id"]
+          },
         ]
       }
       notifications: {
@@ -1572,29 +2525,37 @@ export type Database = {
           channel: Database["public"]["Enums"]["notification_channel"]
           claimed_at: string | null
           company_id: string
+          conversation_id: string | null
           created_at: string
           credits_charged: number
           credits_refunded: number
           customer_id: string | null
           deep_link: string | null
           delivered_at: string | null
+          encoding: string | null
           failure_reason: string | null
           from_number: string | null
           id: string
           invoice_id: string | null
           job_id: string | null
+          messaging_account_id: string | null
           provider_error: string | null
+          provider_price_micros: number | null
           provider_reference: string | null
           provider_status: string | null
           push_device_id: string | null
+          quote_id: string | null
           recipient: string
+          scheduled_message_id: string | null
           segments: number | null
           sent_at: string | null
+          sent_by_user_id: string | null
           status: Database["public"]["Enums"]["notification_status"]
           target_user_id: string | null
           template: string
           title: string | null
           to_number: string | null
+          twilio_account_sid: string | null
           updated_at: string
         }
         Insert: {
@@ -1602,29 +2563,37 @@ export type Database = {
           channel: Database["public"]["Enums"]["notification_channel"]
           claimed_at?: string | null
           company_id: string
+          conversation_id?: string | null
           created_at?: string
           credits_charged?: number
           credits_refunded?: number
           customer_id?: string | null
           deep_link?: string | null
           delivered_at?: string | null
+          encoding?: string | null
           failure_reason?: string | null
           from_number?: string | null
           id?: string
           invoice_id?: string | null
           job_id?: string | null
+          messaging_account_id?: string | null
           provider_error?: string | null
+          provider_price_micros?: number | null
           provider_reference?: string | null
           provider_status?: string | null
           push_device_id?: string | null
+          quote_id?: string | null
           recipient?: string
+          scheduled_message_id?: string | null
           segments?: number | null
           sent_at?: string | null
+          sent_by_user_id?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           target_user_id?: string | null
           template?: string
           title?: string | null
           to_number?: string | null
+          twilio_account_sid?: string | null
           updated_at?: string
         }
         Update: {
@@ -1632,29 +2601,37 @@ export type Database = {
           channel?: Database["public"]["Enums"]["notification_channel"]
           claimed_at?: string | null
           company_id?: string
+          conversation_id?: string | null
           created_at?: string
           credits_charged?: number
           credits_refunded?: number
           customer_id?: string | null
           deep_link?: string | null
           delivered_at?: string | null
+          encoding?: string | null
           failure_reason?: string | null
           from_number?: string | null
           id?: string
           invoice_id?: string | null
           job_id?: string | null
+          messaging_account_id?: string | null
           provider_error?: string | null
+          provider_price_micros?: number | null
           provider_reference?: string | null
           provider_status?: string | null
           push_device_id?: string | null
+          quote_id?: string | null
           recipient?: string
+          scheduled_message_id?: string | null
           segments?: number | null
           sent_at?: string | null
+          sent_by_user_id?: string | null
           status?: Database["public"]["Enums"]["notification_status"]
           target_user_id?: string | null
           template?: string
           title?: string | null
           to_number?: string | null
+          twilio_account_sid?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1663,6 +2640,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
             referencedColumns: ["id"]
           },
           {
@@ -1694,10 +2678,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "notifications_messaging_account_id_fkey"
+            columns: ["messaging_account_id"]
+            isOneToOne: false
+            referencedRelation: "company_messaging_accounts"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "notifications_push_device_id_fkey"
             columns: ["push_device_id"]
             isOneToOne: false
             referencedRelation: "push_devices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes_operational"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_scheduled_message_id_fkey"
+            columns: ["scheduled_message_id"]
+            isOneToOne: false
+            referencedRelation: "scheduled_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_sent_by_user_id_fkey"
+            columns: ["sent_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
           {
@@ -2219,6 +3238,71 @@ export type Database = {
           },
         ]
       }
+      quote_share_tokens: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          last_viewed_at: string | null
+          quote_id: string
+          revoked_at: string | null
+          token: string
+          view_count: number
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          last_viewed_at?: string | null
+          quote_id: string
+          revoked_at?: string | null
+          token: string
+          view_count?: number
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          last_viewed_at?: string | null
+          quote_id?: string
+          revoked_at?: string | null
+          token?: string
+          view_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_share_tokens_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_share_tokens_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_share_tokens_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_share_tokens_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes_operational"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quotes: {
         Row: {
           accepted_at: string | null
@@ -2343,6 +3427,165 @@ export type Database = {
         }
         Relationships: []
       }
+      scheduled_messages: {
+        Row: {
+          attempts: number
+          body: string | null
+          cancelled_at: string | null
+          cancelled_by_user_id: string | null
+          claimed_at: string | null
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          customer_id: string
+          dedupe_key: string | null
+          eta_text: string | null
+          failure_reason: string | null
+          id: string
+          invoice_id: string | null
+          job_id: string | null
+          notification_id: string | null
+          quote_id: string | null
+          scheduled_for: string
+          sent_at: string | null
+          source: string
+          status: string
+          template_key: string
+          to_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          body?: string | null
+          cancelled_at?: string | null
+          cancelled_by_user_id?: string | null
+          claimed_at?: string | null
+          company_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_id: string
+          dedupe_key?: string | null
+          eta_text?: string | null
+          failure_reason?: string | null
+          id?: string
+          invoice_id?: string | null
+          job_id?: string | null
+          notification_id?: string | null
+          quote_id?: string | null
+          scheduled_for: string
+          sent_at?: string | null
+          source: string
+          status?: string
+          template_key: string
+          to_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          body?: string | null
+          cancelled_at?: string | null
+          cancelled_by_user_id?: string | null
+          claimed_at?: string | null
+          company_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_id?: string
+          dedupe_key?: string | null
+          eta_text?: string | null
+          failure_reason?: string | null
+          id?: string
+          invoice_id?: string | null
+          job_id?: string | null
+          notification_id?: string | null
+          quote_id?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          source?: string
+          status?: string
+          template_key?: string
+          to_number?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_messages_cancelled_by_user_id_fkey"
+            columns: ["cancelled_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_notification_id_fkey"
+            columns: ["notification_id"]
+            isOneToOne: false
+            referencedRelation: "notifications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes_operational"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_messages_template_key_fkey"
+            columns: ["template_key"]
+            isOneToOne: false
+            referencedRelation: "sms_template_defaults"
+            referencedColumns: ["template_key"]
+          },
+        ]
+      }
       service_agreements: {
         Row: {
           address_id: string
@@ -2456,6 +3699,52 @@ export type Database = {
           },
         ]
       }
+      sms_automation_settings: {
+        Row: {
+          company_id: string
+          enabled: boolean
+          template_key: string
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          company_id: string
+          enabled: boolean
+          template_key: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          enabled?: boolean
+          template_key?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_automation_settings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_automation_settings_template_key_fkey"
+            columns: ["template_key"]
+            isOneToOne: false
+            referencedRelation: "sms_template_defaults"
+            referencedColumns: ["template_key"]
+          },
+          {
+            foreignKeyName: "sms_automation_settings_updated_by_user_id_fkey"
+            columns: ["updated_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_bundles: {
         Row: {
           credits: number
@@ -2482,6 +3771,131 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      sms_conversation_reads: {
+        Row: {
+          company_id: string
+          conversation_id: string
+          last_read_at: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          conversation_id: string
+          last_read_at?: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          conversation_id?: string
+          last_read_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_conversation_reads_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversation_reads_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversation_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_conversations: {
+        Row: {
+          company_id: string
+          contact_id: string | null
+          created_at: string
+          customer_id: string | null
+          id: string
+          last_direction: string
+          last_job_id: string | null
+          last_message_at: string
+          last_preview: string
+          phone_e164: string
+        }
+        Insert: {
+          company_id: string
+          contact_id?: string | null
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          last_direction?: string
+          last_job_id?: string | null
+          last_message_at?: string
+          last_preview?: string
+          phone_e164: string
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string | null
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          last_direction?: string
+          last_job_id?: string | null
+          last_message_at?: string
+          last_preview?: string
+          phone_e164?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_conversations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "customer_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "site_contacts_operational"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversations_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversations_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_conversations_last_job_id_fkey"
+            columns: ["last_job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sms_credit_ledger: {
         Row: {
@@ -2628,6 +4042,266 @@ export type Database = {
           },
         ]
       }
+      sms_inbound_messages: {
+        Row: {
+          body: string
+          company_id: string
+          conversation_id: string
+          customer_id: string | null
+          from_number: string
+          id: string
+          job_id: string | null
+          keyword_type: string | null
+          messaging_account_id: string
+          provider_reference: string
+          received_at: string
+          to_number: string
+        }
+        Insert: {
+          body?: string
+          company_id: string
+          conversation_id: string
+          customer_id?: string | null
+          from_number: string
+          id?: string
+          job_id?: string | null
+          keyword_type?: string | null
+          messaging_account_id: string
+          provider_reference: string
+          received_at?: string
+          to_number: string
+        }
+        Update: {
+          body?: string
+          company_id?: string
+          conversation_id?: string
+          customer_id?: string | null
+          from_number?: string
+          id?: string
+          job_id?: string | null
+          keyword_type?: string | null
+          messaging_account_id?: string
+          provider_reference?: string
+          received_at?: string
+          to_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_inbound_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_inbound_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_inbound_messages_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_inbound_messages_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_inbound_messages_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_inbound_messages_messaging_account_id_fkey"
+            columns: ["messaging_account_id"]
+            isOneToOne: false
+            referencedRelation: "company_messaging_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_opt_outs: {
+        Row: {
+          company_id: string
+          contact_id: string | null
+          customer_id: string | null
+          id: string
+          keyword: string | null
+          last_message_sid: string | null
+          messaging_service_sid: string | null
+          opted_in_at: string | null
+          opted_out: boolean
+          opted_out_at: string | null
+          phone_e164: string
+          source: string
+          twilio_account_sid: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          contact_id?: string | null
+          customer_id?: string | null
+          id?: string
+          keyword?: string | null
+          last_message_sid?: string | null
+          messaging_service_sid?: string | null
+          opted_in_at?: string | null
+          opted_out?: boolean
+          opted_out_at?: string | null
+          phone_e164: string
+          source: string
+          twilio_account_sid?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          contact_id?: string | null
+          customer_id?: string | null
+          id?: string
+          keyword?: string | null
+          last_message_sid?: string | null
+          messaging_service_sid?: string | null
+          opted_in_at?: string | null
+          opted_out?: boolean
+          opted_out_at?: string | null
+          phone_e164?: string
+          source?: string
+          twilio_account_sid?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_opt_outs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_opt_outs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "customer_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_opt_outs_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "site_contacts_operational"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_opt_outs_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_opt_outs_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_template_defaults: {
+        Row: {
+          allowed_variables: string[]
+          automation_default: boolean
+          automation_description: string | null
+          body: string
+          category: string
+          context: string
+          is_automatable: boolean
+          sort_order: number
+          template_key: string
+          title: string
+        }
+        Insert: {
+          allowed_variables: string[]
+          automation_default?: boolean
+          automation_description?: string | null
+          body: string
+          category: string
+          context: string
+          is_automatable?: boolean
+          sort_order: number
+          template_key: string
+          title: string
+        }
+        Update: {
+          allowed_variables?: string[]
+          automation_default?: boolean
+          automation_description?: string | null
+          body?: string
+          category?: string
+          context?: string
+          is_automatable?: boolean
+          sort_order?: number
+          template_key?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      sms_templates: {
+        Row: {
+          body: string
+          company_id: string
+          template_key: string
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          body: string
+          company_id: string
+          template_key: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          body?: string
+          company_id?: string
+          template_key?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_templates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_templates_template_key_fkey"
+            columns: ["template_key"]
+            isOneToOne: false
+            referencedRelation: "sms_template_defaults"
+            referencedColumns: ["template_key"]
+          },
+          {
+            foreignKeyName: "sms_templates_updated_by_user_id_fkey"
+            columns: ["updated_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stripe_connect_accounts: {
         Row: {
           charges_enabled: boolean
@@ -2731,38 +4405,124 @@ export type Database = {
       subscription_tiers: {
         Row: {
           additional_user_cents: number
+          annual_cents: number | null
+          apple_product_annual: string | null
+          apple_product_monthly: string | null
           base_cents: number
           display_name: string
           id: string
+          included_users: number | null
           is_active: boolean
           max_users: number
           min_users: number
           sort_order: number
+          tagline: string
           updated_at: string
+          user_limit: number | null
         }
         Insert: {
           additional_user_cents: number
+          annual_cents?: number | null
+          apple_product_annual?: string | null
+          apple_product_monthly?: string | null
           base_cents: number
           display_name: string
           id: string
+          included_users?: number | null
           is_active?: boolean
           max_users: number
           min_users: number
           sort_order?: number
+          tagline?: string
           updated_at?: string
+          user_limit?: number | null
         }
         Update: {
           additional_user_cents?: number
+          annual_cents?: number | null
+          apple_product_annual?: string | null
+          apple_product_monthly?: string | null
           base_cents?: number
           display_name?: string
           id?: string
+          included_users?: number | null
           is_active?: boolean
           max_users?: number
           min_users?: number
           sort_order?: number
+          tagline?: string
           updated_at?: string
+          user_limit?: number | null
         }
         Relationships: []
+      }
+      vehicles: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          customer_id: string
+          id: string
+          make: string
+          model: string
+          registration: string
+          updated_at: string
+          vin: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_id: string
+          id?: string
+          make?: string
+          model?: string
+          registration?: string
+          updated_at?: string
+          vin?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          customer_id?: string
+          id?: string
+          make?: string
+          model?: string
+          registration?: string
+          updated_at?: string
+          vin?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicles_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicles_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicles_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "assigned_site_customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicles_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
@@ -2788,6 +4548,30 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      moderation_alerts_attention: {
+        Row: {
+          alert_id: string | null
+          attempts: number | null
+          company_name: string | null
+          created_at: string | null
+          escalated: boolean | null
+          exhausted_at: string | null
+          kind: string | null
+          last_error: string | null
+          reason: string | null
+          report_id: string | null
+          report_status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "moderation_alerts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "message_reports"
             referencedColumns: ["id"]
           },
         ]
@@ -2938,9 +4722,55 @@ export type Database = {
           },
         ]
       }
+      sms_thread_messages: {
+        Row: {
+          at: string | null
+          body: string | null
+          company_id: string | null
+          conversation_id: string | null
+          credits_charged: number | null
+          credits_refunded: number | null
+          customer_id: string | null
+          direction: string | null
+          failure_reason: string | null
+          id: string | null
+          invoice_id: string | null
+          job_id: string | null
+          quote_id: string | null
+          segments: number | null
+          sent_by_user_id: string | null
+          status: string | null
+          template: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string }
+      account_deletion_context: {
+        Args: never
+        Returns: {
+          company_name: string
+          has_membership: boolean
+          is_owner: boolean
+          is_sole_owner: boolean
+          other_active_members: number
+        }[]
+      }
+      adopt_harbour_south_payments: {
+        Args: { p_company: string }
+        Returns: boolean
+      }
+      apple_apply_transaction: {
+        Args: {
+          p_company: string
+          p_renewal?: Json
+          p_source?: string
+          p_transaction: Json
+        }
+        Returns: string
+      }
+      apple_ms: { Args: { p: string }; Returns: string }
       apply_job_status: {
         Args: {
           p_job: string
@@ -2962,9 +4792,48 @@ export type Database = {
         }
         Returns: undefined
       }
-      claim_founding_member_slot: {
-        Args: { p_company?: string }
-        Returns: number
+      block_chat_user: {
+        Args: { p_details?: string; p_reason?: string; p_user: string }
+        Returns: string
+      }
+      cancel_scheduled_sms: { Args: { p_id: string }; Returns: boolean }
+      chat_content_violation: { Args: { p_text: string }; Returns: string }
+      chat_normalize: { Args: { p_text: string }; Returns: string }
+      chat_user_is_restricted: { Args: { p_user: string }; Returns: boolean }
+      claim_due_scheduled_sms: {
+        Args: { p_limit?: number }
+        Returns: {
+          attempts: number
+          body: string | null
+          cancelled_at: string | null
+          cancelled_by_user_id: string | null
+          claimed_at: string | null
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          customer_id: string
+          dedupe_key: string | null
+          eta_text: string | null
+          failure_reason: string | null
+          id: string
+          invoice_id: string | null
+          job_id: string | null
+          notification_id: string | null
+          quote_id: string | null
+          scheduled_for: string
+          sent_at: string | null
+          source: string
+          status: string
+          template_key: string
+          to_number: string | null
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "scheduled_messages"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       claim_push_batch: {
         Args: { p_limit?: number }
@@ -2982,6 +4851,17 @@ export type Database = {
         }[]
       }
       commerce_company_scope: { Args: { p_company?: string }; Returns: string }
+      communications_unread: {
+        Args: never
+        Returns: {
+          customer_unread: number
+          latest_at: string
+          latest_body: string
+          latest_link: string
+          latest_title: string
+          office_unread: number
+        }[]
+      }
       company_active_paid_users: {
         Args: { p_company?: string }
         Returns: number
@@ -2997,26 +4877,39 @@ export type Database = {
       company_commercial_state: {
         Args: { p_company?: string }
         Returns: {
-          activity_month_start: string
+          active_users: number
+          apple_environment: string
+          apple_original_transaction_id: string
+          billing_period: string
+          billing_store: string
           business_email: string
+          can_add_user: boolean
           charges_enabled: boolean
           details_submitted: boolean
           disabled_reason: string
           effective_monthly_cents: number
+          entitlement_state: string
           external_payment_url: string
-          founding_benefit_active: boolean
-          founding_claimed_at: string
-          founding_member_number: number
-          founding_offer_open: boolean
-          founding_places_claimed: number
-          founding_places_remaining: number
+          grace_period_ends_at: string
+          has_entitlement: boolean
+          is_free_offer: boolean
           is_trial_active: boolean
-          last_qualifying_payment_at: string
+          offer_identifier: string
+          offer_type: number
+          open_invitations: number
           payment_model: string
           payouts_enabled: boolean
+          pending_user_limit: number
+          period_ends_at: string
+          plan_included_users: number
+          plan_price_cents: number
+          plan_user_limit: number
           platform_fee_bps: number
-          qualifying_payments_this_month: number
+          renews_to_period: string
+          renews_to_tier_id: string
           requirements_due: string[]
+          seat_limits_enforced: boolean
+          seats_over_limit: boolean
           stripe_account_id: string
           stripe_connected: boolean
           subscription_monthly_cents: number
@@ -3025,9 +4918,45 @@ export type Database = {
           tier_name: string
           trial_days_remaining: number
           trial_ends_at: string
+          users_to_deactivate: number
+          will_auto_renew: boolean
         }[]
       }
       company_currency_code: { Args: never; Returns: string }
+      company_entitlement_for: {
+        Args: { p_company: string }
+        Returns: {
+          active_users: number
+          annual_cents: number
+          billing_period: string
+          entitlement_state: string
+          has_entitlement: boolean
+          included_users: number
+          monthly_cents: number
+          open_invitations: number
+          pending_tier_id: string
+          pending_user_limit: number
+          seat_ceiling: number
+          seats_over_limit: boolean
+          tier_id: string
+          tier_name: string
+          user_limit: number
+        }[]
+      }
+      company_seat_refusal: { Args: { p_company: string }; Returns: string }
+      company_workspace_access: {
+        Args: never
+        Returns: {
+          active_users: number
+          has_active_subscription: boolean
+          plan_name: string
+          seats_over_limit: boolean
+          subscription_state: string
+          user_limit: number
+          users_to_deactivate: number
+        }[]
+      }
+      confirm_sms_number_release: { Args: never; Returns: boolean }
       consume_sms_credit: {
         Args: {
           p_credits?: number
@@ -3162,11 +5091,97 @@ export type Database = {
         Args: { p_invoice: string; p_line: string }
         Returns: undefined
       }
+      delete_my_account: {
+        Args: { p_close_company?: boolean }
+        Returns: string
+      }
       delete_quote_line_item: {
         Args: { p_line: string; p_quote: string }
         Returns: undefined
       }
       dispatch_push_tick: { Args: never; Returns: number }
+      engineer_create_invoice_from_job: {
+        Args: { p_job: string }
+        Returns: string
+      }
+      engineer_delete_invoice_line: {
+        Args: { p_invoice: string; p_line: string }
+        Returns: undefined
+      }
+      engineer_invoice_email_prepare: {
+        Args: { p_invoice: string; p_recipient: string }
+        Returns: Json
+      }
+      engineer_invoice_email_settle: {
+        Args: {
+          p_delivered: boolean
+          p_failure?: string
+          p_notification: string
+          p_reference?: string
+        }
+        Returns: undefined
+      }
+      engineer_invoice_payment_link: {
+        Args: { p_invoice: string }
+        Returns: string
+      }
+      engineer_issue_invoice: {
+        Args: { p_invoice: string }
+        Returns: undefined
+      }
+      engineer_job_invoice: { Args: { p_job: string }; Returns: Json }
+      engineer_save_invoice_line: {
+        Args: {
+          p_description: string
+          p_invoice: string
+          p_line: string
+          p_quantity: number
+          p_unit_price: number
+        }
+        Returns: undefined
+      }
+      engineer_scoped_invoice: {
+        Args: { p_invoice: string }
+        Returns: {
+          address_id: string | null
+          amount_paid: number
+          balance: number
+          billing_contact_id: string | null
+          company_id: string
+          created_at: string
+          created_by_user_id: string | null
+          currency_code: string
+          customer_id: string
+          due_date: string
+          id: string
+          issue_date: string
+          job_id: string | null
+          number: string
+          paid_at: string | null
+          payment_terms_label: string
+          quote_id: string | null
+          scope_of_work: string
+          sent_at: string | null
+          status: Database["public"]["Enums"]["invoice_status"]
+          subtotal: number
+          tax: number
+          title: string
+          total: number
+          updated_at: string
+          viewed_at: string | null
+          voided_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "invoices"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      engineer_share_token: {
+        Args: { p_company: string; p_invoice: string }
+        Returns: string
+      }
       enqueue_push: {
         Args: {
           p_body: string
@@ -3179,13 +5194,14 @@ export type Database = {
         }
         Returns: number
       }
-      founding_activity: {
-        Args: { p_company?: string }
-        Returns: {
-          last_qualifying_payment_at: string
-          month_start: string
-          qualifying_payments: number
-        }[]
+      finish_scheduled_sms: {
+        Args: {
+          p_id: string
+          p_notification: string
+          p_reason: string
+          p_status: string
+        }
+        Returns: undefined
       }
       generate_due_recurring_jobs: {
         Args: { p_company?: string; p_horizon_days?: number }
@@ -3196,6 +5212,10 @@ export type Database = {
           service_agreement_id: string
         }[]
       }
+      has_engineer_financial_grant: {
+        Args: { p_kind: string }
+        Returns: boolean
+      }
       has_perm: {
         Args: { p: Database["public"]["Enums"]["app_permission"] }
         Returns: boolean
@@ -3205,6 +5225,15 @@ export type Database = {
       is_office_user: { Args: never; Returns: boolean }
       issue_invoice_share_token: {
         Args: { p_invoice: string; p_rotate?: boolean }
+        Returns: string
+      }
+      issue_invoice_share_token_service: {
+        Args: { p_company: string; p_invoice: string }
+        Returns: string
+      }
+      issue_quote_share_token: { Args: { p_quote: string }; Returns: string }
+      issue_quote_share_token_service: {
+        Args: { p_company: string; p_quote: string }
         Returns: string
       }
       make_invoice: {
@@ -3224,6 +5253,96 @@ export type Database = {
       mark_office_thread_read: {
         Args: { p_thread: string }
         Returns: undefined
+      }
+      mark_sms_conversation_read: {
+        Args: { p_conversation: string }
+        Returns: undefined
+      }
+      messaging_store_subaccount_token: {
+        Args: { p_account: string; p_token: string }
+        Returns: undefined
+      }
+      messaging_subaccount_token: {
+        Args: { p_account: string }
+        Returns: string
+      }
+      messaging_webhook_context: {
+        Args: { p_callback_key: string }
+        Returns: {
+          auth_token: string
+          company_id: string
+          messaging_account_id: string
+          messaging_service_sid: string
+          twilio_subaccount_sid: string
+        }[]
+      }
+      moderate_message_report: {
+        Args: {
+          p_action: string
+          p_days?: number
+          p_note?: string
+          p_report: string
+        }
+        Returns: string
+      }
+      moderation_claim_alerts: {
+        Args: { p_limit?: number }
+        Returns: {
+          alert_id: string
+          attempt: number
+          company_name: string
+          created_at: string
+          details: string
+          escalated: boolean
+          kind: string
+          note: string
+          photo_count: number
+          reason: string
+          report_id: string
+          reported_name: string
+          reported_role: string
+          reporter_name: string
+          reporter_role: string
+          snapshot_body: string
+          snapshot_meta: Json
+          source: string
+          status: string
+        }[]
+      }
+      moderation_dispatch_tick: { Args: never; Returns: number }
+      moderation_flag_stalled_alerts: { Args: never; Returns: number }
+      moderation_mark_alert: {
+        Args: { p_alert: string; p_error?: string; p_ok: boolean }
+        Returns: undefined
+      }
+      moderation_post_dispatch: { Args: never; Returns: number }
+      moderation_queue_test_alert: {
+        Args: { p_note?: string }
+        Returns: string
+      }
+      moderation_record_report: {
+        Args: {
+          p_body: string
+          p_company: string
+          p_details: string
+          p_meta: Json
+          p_office_message: string
+          p_office_thread: string
+          p_photos: string[]
+          p_reason: string
+          p_reported: string
+          p_reporter: string
+          p_sent_at: string
+          p_sms_conversation: string
+          p_sms_message: string
+          p_source: string
+        }
+        Returns: string
+      }
+      moderation_retry_alert: { Args: { p_alert: string }; Returns: boolean }
+      moderation_verify_signature: {
+        Args: { p_signature: string; p_timestamp: string }
+        Returns: boolean
       }
       next_document_number: {
         Args: { p_kind: Database["public"]["Enums"]["document_kind"] }
@@ -3269,6 +5388,11 @@ export type Database = {
           notification_id: string
           outcome: string
         }[]
+      }
+      quote_public_view: { Args: { p_token: string }; Returns: Json }
+      quote_share_token_for: {
+        Args: { p_company: string; p_quote: string; p_user: string }
+        Returns: string
       }
       recalculate_invoice_totals: {
         Args: { p_invoice: string }
@@ -3331,6 +5455,14 @@ export type Database = {
         Args: { p_ids: string[]; p_quote: string }
         Returns: undefined
       }
+      report_office_message: {
+        Args: { p_details?: string; p_message: string; p_reason: string }
+        Returns: string
+      }
+      report_sms_message: {
+        Args: { p_details?: string; p_message: string; p_reason: string }
+        Returns: string
+      }
       reschedule_job: {
         Args: {
           p_acknowledges_conflict?: boolean
@@ -3340,6 +5472,59 @@ export type Database = {
         }
         Returns: undefined
       }
+      reserve_sms_send: {
+        Args: {
+          p_body: string
+          p_customer: string
+          p_invoice: string
+          p_job: string
+          p_quote: string
+          p_template: string
+          p_to: string
+        }
+        Returns: {
+          balance_after: number
+          conversation_id: string
+          credits_charged: number
+          encoding: string
+          from_number: string
+          messaging_account_id: string
+          messaging_service_sid: string
+          notification_id: string
+          outcome: string
+          segments: number
+          to_number: string
+          twilio_account_sid: string
+        }[]
+      }
+      reserve_sms_send_service: {
+        Args: {
+          p_body: string
+          p_company: string
+          p_customer: string
+          p_invoice: string
+          p_job: string
+          p_quote: string
+          p_scheduled: string
+          p_template: string
+          p_to: string
+        }
+        Returns: {
+          balance_after: number
+          conversation_id: string
+          credits_charged: number
+          encoding: string
+          from_number: string
+          messaging_account_id: string
+          messaging_service_sid: string
+          notification_id: string
+          outcome: string
+          segments: number
+          to_number: string
+          twilio_account_sid: string
+        }[]
+      }
+      reset_sms_template: { Args: { p_key: string }; Returns: undefined }
       resolve_due_date: {
         Args: { p_label: string; p_reference?: string }
         Returns: string
@@ -3375,6 +5560,24 @@ export type Database = {
         }
         Returns: undefined
       }
+      save_sms_template: {
+        Args: { p_body: string; p_key: string }
+        Returns: undefined
+      }
+      schedule_sms: {
+        Args: {
+          p_body: string
+          p_customer: string
+          p_invoice: string
+          p_job: string
+          p_quote: string
+          p_scheduled_for: string
+          p_template: string
+          p_to: string
+        }
+        Returns: string
+      }
+      seat_limits_enforced: { Args: never; Returns: boolean }
       send_office_message: {
         Args: {
           p_body?: string
@@ -3390,8 +5593,20 @@ export type Database = {
         Args: { p_model: Database["public"]["Enums"]["company_payment_model"] }
         Returns: undefined
       }
+      set_job_vehicle: {
+        Args: { p_job: string; p_vehicle: string }
+        Returns: undefined
+      }
+      set_member_financial_permissions: {
+        Args: { p_can_collect: boolean; p_can_invoice: boolean; p_user: string }
+        Returns: undefined
+      }
       set_my_duty_state: {
         Args: { p_state: Database["public"]["Enums"]["worker_duty_state"] }
+        Returns: undefined
+      }
+      set_sms_automation: {
+        Args: { p_enabled: boolean; p_key: string }
         Returns: undefined
       }
       settle_notification: {
@@ -3417,12 +5632,298 @@ export type Database = {
         }
         Returns: string
       }
+      sms_apply_status: {
+        Args: {
+          p_account_sid: string
+          p_callback_key: string
+          p_error_code: string
+          p_error_message: string
+          p_message_sid: string
+          p_price_micros?: number
+          p_status: string
+        }
+        Returns: {
+          credits_refunded: number
+          outcome: string
+        }[]
+      }
+      sms_can_administer: { Args: never; Returns: boolean }
+      sms_cancel_automations: {
+        Args: {
+          p_invoice: string
+          p_job: string
+          p_keys: string[]
+          p_quote: string
+          p_reason: string
+        }
+        Returns: number
+      }
+      sms_charge_number_fee: { Args: { p_number: string }; Returns: string }
+      sms_company_entitled: { Args: { p_company: string }; Returns: boolean }
+      sms_conversation_list: {
+        Args: { p_limit?: number }
+        Returns: {
+          conversation_id: string
+          customer_id: string
+          customer_name: string
+          job_id: string
+          job_number: string
+          last_direction: string
+          last_message_at: string
+          last_preview: string
+          opted_out: boolean
+          phone_e164: string
+          unread: number
+        }[]
+      }
       sms_credit_balance: { Args: { p_company?: string }; Returns: number }
       sms_credit_balance_for: { Args: { p_company: string }; Returns: number }
       sms_credits_per_message: { Args: never; Returns: number }
+      sms_credits_per_segment: { Args: never; Returns: number }
+      sms_keyword_type: {
+        Args: { p_body: string; p_opt_out_type?: string }
+        Returns: string
+      }
+      sms_maintenance_tick: { Args: never; Returns: number }
+      sms_maintenance_work_waiting: { Args: never; Returns: boolean }
+      sms_messaging_status: {
+        Args: never
+        Returns: {
+          attention: string
+          balance: number
+          billing_state: string
+          business_name: string
+          can_manage: boolean
+          credits_per_segment: number
+          friendly_status: string
+          grace_days: number
+          has_subscription: boolean
+          needs_number_choice: boolean
+          next_fee_due_at: string
+          number_fee_cents: number
+          number_fee_credits: number
+          number_status: string
+          phone_number: string
+          provisioning_step: string
+          registration_route: string
+          registration_status: string
+          requested_number: string
+          retention_days: number
+          setup_fee_cents: number
+          sole_prop_verification_pending: boolean
+          status: string
+        }[]
+      }
+      sms_normalise_phone: { Args: { p: string }; Returns: string }
+      sms_number_monthly_fee_credits: { Args: never; Returns: number }
+      sms_number_release_allowed: {
+        Args: { p_number: string }
+        Returns: boolean
+      }
+      sms_queue_automation: {
+        Args: {
+          p_company: string
+          p_customer: string
+          p_dedupe: string
+          p_invoice: string
+          p_job: string
+          p_key: string
+          p_quote: string
+          p_when: string
+        }
+        Returns: string
+      }
+      sms_rate_card: {
+        Args: never
+        Returns: {
+          cost_basis_micros_per_segment: number
+          credits_per_segment: number
+          grace_days: number
+          margin_bps: number
+          max_numbers: number
+          number_monthly_fee_cents: number
+          number_monthly_fee_credits: number
+          retention_days: number
+          setup_fee_cents: number
+          target_retail_micros_per_segment: number
+        }[]
+      }
+      sms_record_inbound: {
+        Args: {
+          p_account_sid: string
+          p_body: string
+          p_callback_key: string
+          p_from: string
+          p_message_sid: string
+          p_messaging_service_sid: string
+          p_opt_out_type?: string
+          p_to: string
+        }
+        Returns: {
+          company_id: string
+          conversation_id: string
+          customer_id: string
+          job_id: string
+          keyword: string
+          notified: number
+          outcome: string
+        }[]
+      }
+      sms_record_number_purchase: {
+        Args: {
+          p_account: string
+          p_area: string
+          p_e164: string
+          p_locality: string
+          p_region: string
+          p_sid: string
+        }
+        Returns: string
+      }
+      sms_record_provider_result: {
+        Args: {
+          p_accepted: boolean
+          p_error: string
+          p_error_code: string
+          p_from: string
+          p_notification: string
+          p_price_micros: number
+          p_segments: number
+          p_sid: string
+          p_status: string
+        }
+        Returns: {
+          balance_after: number
+          credits_refunded: number
+          outcome: string
+        }[]
+      }
+      sms_reserve_internal: {
+        Args: {
+          p_body: string
+          p_company: string
+          p_customer: string
+          p_invoice: string
+          p_job: string
+          p_quote: string
+          p_scheduled: string
+          p_template: string
+          p_to: string
+          p_user: string
+        }
+        Returns: {
+          balance_after: number
+          conversation_id: string
+          credits_charged: number
+          encoding: string
+          from_number: string
+          messaging_account_id: string
+          messaging_service_sid: string
+          notification_id: string
+          outcome: string
+          segments: number
+          to_number: string
+          twilio_account_sid: string
+        }[]
+      }
+      sms_segment_info: {
+        Args: { p_body: string }
+        Returns: {
+          encoding: string
+          segments: number
+          units: number
+        }[]
+      }
+      sms_send_blocker: {
+        Args: { p_company: string; p_to: string }
+        Returns: string
+      }
+      sms_send_readiness: { Args: { p_to?: string }; Returns: string }
+      sms_set_opt_out: {
+        Args: {
+          p_account: string
+          p_company: string
+          p_keyword: string
+          p_opted_out: boolean
+          p_phone: string
+          p_service: string
+          p_sid: string
+          p_source: string
+        }
+        Returns: undefined
+      }
+      sms_setting_int: {
+        Args: { p_default: number; p_key: string }
+        Returns: number
+      }
+      sms_template_catalog: {
+        Args: never
+        Returns: {
+          allowed_variables: string[]
+          automation_description: string
+          automation_enabled: boolean
+          body: string
+          category: string
+          context: string
+          default_body: string
+          is_automatable: boolean
+          is_customised: boolean
+          sort_order: number
+          template_key: string
+          title: string
+        }[]
+      }
+      sms_template_problem: {
+        Args: { p_body: string; p_key: string }
+        Returns: string
+      }
+      sms_usage_summary: {
+        Args: never
+        Returns: {
+          balance: number
+          fees: number
+          messages_failed_30d: number
+          messages_received_30d: number
+          messages_sent_30d: number
+          purchased: number
+          refunded: number
+          segments_30d: number
+          used: number
+        }[]
+      }
+      sms_verify_maintenance_signature: {
+        Args: { p_signature: string; p_timestamp: string }
+        Returns: boolean
+      }
       snapshot_quote_lines: {
         Args: { p_invoice: string; p_quote: string }
         Returns: number
+      }
+      subscription_entitlement_state: {
+        Args: {
+          p_auto_renew: boolean
+          p_expires: string
+          p_free_offer: boolean
+          p_grace: string
+          p_now?: string
+          p_offer_type: number
+          p_retry: boolean
+          p_revoked: string
+          p_store: string
+        }
+        Returns: string
+      }
+      subscription_plan_change_check: {
+        Args: { p_company?: string; p_tier_id: string }
+        Returns: {
+          active_users: number
+          allowed: boolean
+          message: string
+          tier_id: string
+          tier_name: string
+          user_limit: number
+          users_to_deactivate: number
+        }[]
       }
       subscription_quote: {
         Args: { p_users?: number }
@@ -3440,6 +5941,10 @@ export type Database = {
           tier_name: string
         }[]
       }
+      subscription_state_is_entitled: {
+        Args: { p_state: string }
+        Returns: boolean
+      }
       sync_subscription_seats: {
         Args: { p_company?: string }
         Returns: {
@@ -3452,6 +5957,7 @@ export type Database = {
         Args: { p_job: string; p_to: Database["public"]["Enums"]["job_status"] }
         Returns: boolean
       }
+      unblock_chat_user: { Args: { p_user: string }; Returns: undefined }
       unregister_push_device: { Args: { p_token: string }; Returns: boolean }
       update_invoice_status: {
         Args: {
@@ -3529,6 +6035,8 @@ export type Database = {
         | "generalMaintenance"
         | "pestControl"
         | "other"
+        | "propertyServices"
+        | "automotive"
       app_user_status: "active" | "invited" | "suspended"
       billing_period: "monthly" | "annual"
       billing_store: "apple" | "google" | "none"
@@ -3552,7 +6060,17 @@ export type Database = {
         | "overdue"
         | "void"
       job_kind: "callOut" | "install" | "maintenance" | "warranty"
-      job_photo_kind: "before" | "after" | "part" | "proof" | "signature"
+      job_photo_kind:
+        | "before"
+        | "after"
+        | "part"
+        | "proof"
+        | "signature"
+        | "during"
+        | "equipment"
+        | "damage"
+        | "property"
+        | "other"
       job_priority: "standard" | "urgent"
       job_status:
         | "scheduled"
@@ -3792,6 +6310,8 @@ export const Constants = {
         "generalMaintenance",
         "pestControl",
         "other",
+        "propertyServices",
+        "automotive",
       ],
       app_user_status: ["active", "invited", "suspended"],
       billing_period: ["monthly", "annual"],
@@ -3819,7 +6339,18 @@ export const Constants = {
         "void",
       ],
       job_kind: ["callOut", "install", "maintenance", "warranty"],
-      job_photo_kind: ["before", "after", "part", "proof", "signature"],
+      job_photo_kind: [
+        "before",
+        "after",
+        "part",
+        "proof",
+        "signature",
+        "during",
+        "equipment",
+        "damage",
+        "property",
+        "other",
+      ],
       job_priority: ["standard", "urgent"],
       job_status: [
         "scheduled",

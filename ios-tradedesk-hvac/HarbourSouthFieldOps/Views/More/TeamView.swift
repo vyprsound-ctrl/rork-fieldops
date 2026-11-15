@@ -42,7 +42,11 @@ struct TeamView: View {
             }
         }
         .sheet(item: $editingMember) { member in
-            TeamMemberSheet(member: member, terms: terms) { name, phone, role, status in
+            TeamMemberSheet(
+                member: member,
+                terms: terms,
+                canEditFinancial: viewModel.state.value?.canManage == true
+            ) { name, phone, role, status, grants in
                 guard let session else { return }
                 Task {
                     await viewModel.setDetails(
@@ -54,6 +58,14 @@ struct TeamView: View {
                     )
                     if role != member.role {
                         await viewModel.setRole(gateway: env.gateway, session: session, userID: member.id, role: role)
+                    }
+                    if let grants {
+                        await viewModel.setFinancialPermissions(
+                            gateway: env.gateway,
+                            session: session,
+                            userID: member.id,
+                            permissions: grants
+                        )
                     }
                     if status != member.status {
                         await viewModel.setStatus(
@@ -249,6 +261,18 @@ struct TeamView: View {
                         Text(member.name)
                             .font(.body.weight(.medium))
                             .foregroundStyle(Theme.ink)
+                        if member.role == .fieldWorker, member.financial.canInvoice {
+                            Image(systemName: "doc.text")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.primary)
+                                .accessibilityLabel("Can invoice")
+                        }
+                        if member.role == .fieldWorker, member.financial.canCollectPayments {
+                            Image(systemName: "creditcard")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.primary)
+                                .accessibilityLabel("Can collect payments")
+                        }
                         if member.isSelf {
                             Text("You")
                                 .font(.caption2.weight(.bold))

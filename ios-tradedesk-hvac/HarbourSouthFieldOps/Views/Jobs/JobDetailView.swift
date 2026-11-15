@@ -111,6 +111,12 @@ struct JobDetailView: View {
                 customerSection(job)
                 map(job)
                 descriptionSection(job)
+                // Automotive companies only; renders nothing otherwise.
+                JobVehicleCard(
+                    jobID: job.id,
+                    customerID: job.customerID,
+                    canChange: session?.can(.jobsManage) == true
+                )
                 scheduleSection(job)
                 if let equipment = job.equipment { equipmentSection(equipment) }
                 billingSection(job)

@@ -225,8 +225,8 @@ struct ProductionSignInView: View {
 
                 Divider().padding(.leading, 14)
 
-                Picker("Trade", selection: $trade) {
-                    ForEach(Trade.allCases) { item in
+                Picker("Business type", selection: $trade) {
+                    ForEach(Trade.setupOptions) { item in
                         Text(item.title).tag(item)
                     }
                 }

@@ -219,24 +219,46 @@ struct TeamInviteCodeSheet: View {
 struct TeamMemberSheet: View {
     let member: TeamMember
     let terms: Terminology
-    let onSave: (String, String, Role, UserStatus) -> Void
+    /// The last argument carries new invoicing/payment grants, or nil when they
+    /// are unchanged or don't apply. It is applied after any role change so a
+    /// person made a field worker in the same save can receive them.
+    let onSave: (String, String, Role, UserStatus, FinancialPermissions?) -> Void
+    /// Whether the viewer may change financial grants (owner, or admin with
+    /// user management).
+    let canEditFinancial: Bool
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var phone: String
     @State private var role: Role
     @State private var isActive: Bool
+    @State private var canInvoice: Bool
+    @State private var canCollectPayments: Bool
 
     private var assignableRoles: [Role] { [.fieldWorker, .dispatcher, .accounts, .admin] }
 
-    init(member: TeamMember, terms: Terminology, onSave: @escaping (String, String, Role, UserStatus) -> Void) {
+    /// Grants apply to field workers only; office roles already invoice
+    /// through their role.
+    private var showsFinancialSection: Bool {
+        canEditFinancial && !member.isSelf && role == .fieldWorker
+    }
+
+    init(
+        member: TeamMember,
+        terms: Terminology,
+        canEditFinancial: Bool = false,
+        onSave: @escaping (String, String, Role, UserStatus, FinancialPermissions?) -> Void
+    ) {
         self.member = member
         self.terms = terms
+        self.canEditFinancial = canEditFinancial
         self.onSave = onSave
         _name = State(initialValue: member.name)
         _phone = State(initialValue: member.phone ?? "")
         _role = State(initialValue: member.role)
         _isActive = State(initialValue: member.status == .active)
+        _canInvoice = State(initialValue: member.financial.canInvoice)
+        _canCollectPayments = State(initialValue: member.financial.canCollectPayments)
     }
 
     var body: some View {
@@ -265,6 +287,23 @@ struct TeamMemberSheet: View {
                             .foregroundStyle(Theme.secondary)
                     } header: {
                         Text("What they can do")
+                    }
+
+                    if showsFinancialSection {
+                        Section {
+                            Toggle(isOn: $canInvoice) {
+                                Label("Generate & Send Invoices", systemImage: "doc.text")
+                            }
+                            .tint(Theme.primary)
+                            Toggle(isOn: $canCollectPayments) {
+                                Label("Collect Customer Payments", systemImage: "creditcard")
+                            }
+                            .tint(Theme.primary)
+                        } header: {
+                            Text("Invoicing & Payment Permissions")
+                        } footer: {
+                            Text("Applies only to this \(terms.worker), on jobs assigned to them. Invoices lets them raise, edit and email an invoice after completing a job. Payments lets them show the customer a secure payment link. Turning either off takes effect immediately; customers can still pay invoices already sent.")
+                        }
                     }
 
                     Section {
@@ -299,7 +338,9 @@ struct TeamMemberSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(name, phone, role, isActive ? .active : .suspended)
+                        let grants = FinancialPermissions(canInvoice: canInvoice, canCollectPayments: canCollectPayments)
+                        let changedGrants = (showsFinancialSection && grants != member.financial) ? grants : nil
+                        onSave(name, phone, role, isActive ? .active : .suspended, changedGrants)
                         dismiss()
                     }
                     .disabled(name.tidied.isEmpty)

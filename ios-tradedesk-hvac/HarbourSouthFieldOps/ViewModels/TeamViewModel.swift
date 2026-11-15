@@ -62,6 +62,17 @@ final class TeamViewModel {
         }
     }
 
+    func setFinancialPermissions(
+        gateway: DataGateway,
+        session: TenantSession,
+        userID: String,
+        permissions: FinancialPermissions
+    ) async {
+        await perform(gateway: gateway, session: session) {
+            try await gateway.setFinancialPermissions(session: session, userID: userID, permissions: permissions)
+        }
+    }
+
     private func perform(
         gateway: DataGateway,
         session: TenantSession,

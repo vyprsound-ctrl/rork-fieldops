@@ -98,6 +98,39 @@ protocol DataGateway: Sendable {
     func updateTeamMemberRole(session: TenantSession, userID: String, role: Role) async throws
     func updateTeamMemberDetails(session: TenantSession, userID: String, name: String, phone: String) async throws
 
+    /// Switches an engineer's invoicing and payment-collection grants. Owner or
+    /// admin with `usersManage` only; never for the caller themselves.
+    func setFinancialPermissions(
+        session: TenantSession,
+        userID: String,
+        permissions: FinancialPermissions
+    ) async throws
+
+    // MARK: Engineer billing (per-engineer grants, enforced in the database)
+
+    func engineerJobBilling(session: TenantSession, jobID: String) async throws -> EngineerJobBilling
+    func engineerCreateInvoice(session: TenantSession, jobID: String) async throws -> String
+    func engineerSaveInvoiceLine(
+        session: TenantSession,
+        invoiceID: String,
+        lineID: String?,
+        description: String,
+        quantity: Decimal,
+        unitPrice: Decimal
+    ) async throws
+    func engineerDeleteInvoiceLine(session: TenantSession, invoiceID: String, lineID: String) async throws
+    func engineerIssueInvoice(session: TenantSession, invoiceID: String) async throws
+    func engineerEmailInvoice(session: TenantSession, invoiceID: String, recipient: String) async throws -> InvoiceSendOutcome
+    func engineerPaymentLink(session: TenantSession, invoiceID: String) async throws -> String
+
+    // MARK: Vehicles (Automotive)
+
+    func vehicles(session: TenantSession, customerID: String) async throws -> [Vehicle]
+    func saveVehicle(session: TenantSession, customerID: String, vehicleID: String?, draft: VehicleDraft) async throws -> Vehicle
+    func vehicleJobs(session: TenantSession, vehicleID: String) async throws -> [VehicleJobEntry]
+    func jobVehicle(session: TenantSession, jobID: String) async throws -> Vehicle?
+    func setJobVehicle(session: TenantSession, jobID: String, vehicleID: String?) async throws
+
     // MARK: Job completion and media
 
     /// Records the completion — work performed, parts, labour, signature,

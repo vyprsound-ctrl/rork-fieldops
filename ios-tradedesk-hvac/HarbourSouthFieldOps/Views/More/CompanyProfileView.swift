@@ -206,7 +206,7 @@ struct CompanyProfileView: View {
             Text("Set when the company was created").sectionLabelStyle()
 
             VStack(spacing: 0) {
-                factRow("Trade", settings.trade.title, "Decides what your field staff are called throughout the app.")
+                factRow("Business type", settings.trade.title, "Decides what your field staff are called throughout the app.")
                 Divider().padding(.leading, 14)
                 factRow("Country", settings.countryCode, "Sets address format and distance units.")
                 Divider().padding(.leading, 14)

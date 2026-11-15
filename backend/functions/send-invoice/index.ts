@@ -229,6 +229,145 @@ async function sendInvoiceSms(
   };
 }
 
+type EmailCompany = {
+  name?: string | null;
+  phone?: string | null;
+  address_line?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  business_email?: string | null;
+} | null;
+
+type EmailInvoice = {
+  number: string;
+  title?: string | null;
+  currency_code: string;
+  due_date: string;
+  balance: number | string | null;
+};
+
+/// The customer-facing invoice email. Shared by the office path and the
+/// engineer path so both send exactly the same message.
+function composeInvoiceEmail(company: EmailCompany, invoice: EmailInvoice, viewUrl: string) {
+  const companyName = company?.name ?? "Your contractor";
+  const businessEmail = (company?.business_email ?? "").trim() || null;
+  const sender = resolveSender(companyName, businessEmail);
+  const amount = money(invoice.balance, invoice.currency_code);
+  const subject = `Invoice ${invoice.number} from ${companyName} — ${amount} due`;
+
+  // The business's own contact block, as a customer expects to see it on a
+  // bill. Empty parts are dropped rather than printed as blanks.
+  const companyAddress = [company?.address_line, company?.city, company?.state, company?.postal_code]
+    .filter((part) => part && String(part).trim().length > 0)
+    .join(", ");
+
+  const contactLines = [
+    company?.phone ? `Call ${company.phone}` : null,
+    businessEmail,
+  ].filter((line): line is string => Boolean(line));
+
+  const text =
+    `${companyName}\n${companyAddress ? `${companyAddress}\n` : ""}` +
+    `\nInvoice ${invoice.number}${invoice.title ? ` — ${invoice.title}` : ""}\n` +
+    `Amount due: ${amount}\nDue date: ${invoice.due_date}\n\nView and pay your invoice:\n${viewUrl}\n\n` +
+    `${contactLines.length > 0 ? `Questions? ${contactLines.join(" · ")}\n` : ""}` +
+    `\nThis invoice was sent by ${companyName} using Harbour South FieldOps.\n`;
+
+  // Branded as the TRADE BUSINESS. The business's mark is its own initial on
+  // its brand colours — an <img> is deliberately not used, because a hosted
+  // logo would be blocked by most mail clients by default and leave a broken
+  // image where the business's identity should be.
+  const initial = escapeHtml((companyName.trim()[0] ?? "·").toUpperCase());
+  const html =
+    `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;` +
+    `color:#0F1B2A;line-height:1.6;max-width:560px">` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr>` +
+    `<td style="width:44px;height:44px;background:#14367A;border-radius:11px;color:#fff;` +
+    `font-size:20px;font-weight:700;text-align:center;vertical-align:middle">${initial}</td>` +
+    `<td style="padding-left:12px">` +
+    `<div style="font-size:17px;font-weight:700;color:#0F1B2A">${escapeHtml(companyName)}</div>` +
+    `${companyAddress ? `<div style="font-size:13px;color:#5B6675">${escapeHtml(companyAddress)}</div>` : ""}` +
+    `</td></tr></table>` +
+    `<p style="margin:0 0 6px;color:#5B6675">Invoice <strong style="color:#0F1B2A">${escapeHtml(invoice.number)}</strong>${
+      invoice.title ? ` — ${escapeHtml(invoice.title)}` : ""
+    }</p>` +
+    `<p style="font-size:30px;font-weight:700;margin:12px 0 4px;color:#0F1B2A">${escapeHtml(amount)}</p>` +
+    `<p style="margin:0 0 22px;color:#5B6675">due ${escapeHtml(String(invoice.due_date))}</p>` +
+    `<p style="margin:0 0 22px"><a href="${escapeHtml(viewUrl)}" style="background:#E1691A;color:#fff;` +
+    `text-decoration:none;padding:14px 24px;border-radius:11px;font-weight:700;display:inline-block">` +
+    `View &amp; pay invoice</a></p>` +
+    `${
+      contactLines.length > 0
+        ? `<p style="color:#5B6675;margin:0 0 6px;font-size:14px">Questions? ${
+          escapeHtml(contactLines.join(" · "))
+        }</p>`
+        : ""
+    }` +
+    `<p style="color:#8A94A3;margin:18px 0 0;font-size:12px">Sent by ${escapeHtml(companyName)} ` +
+    `using Harbour South FieldOps.</p>` +
+    `</div>`;
+
+  return { companyName, sender, amount, subject, text, html };
+}
+
+type EngineerPrepared = {
+  notification_id: string;
+  token: string;
+  invoice: EmailInvoice & { id: string };
+  company: EmailCompany;
+};
+
+async function sendAsEngineer(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  invoiceId: string,
+  channels: readonly string[],
+  email: string | undefined,
+): Promise<Response> {
+  if (channels.length !== 1 || channels[0] !== "email") {
+    return jsonResponse({ error: "rejected", message: "Engineers can send invoices by email only." }, 422);
+  }
+  const recipient = (email ?? "").trim();
+  if (!EMAIL_PATTERN.test(recipient)) {
+    return jsonResponse({ error: "rejected", message: "Enter a valid email address for the customer." }, 422);
+  }
+
+  const { data, error } = await supabase.rpc("engineer_invoice_email_prepare", {
+    p_invoice: invoiceId,
+    p_recipient: recipient,
+  });
+  if (error || !data) {
+    if (error?.code === "TD404") return jsonResponse({ error: "notFound" }, 404);
+    return jsonResponse({ error: "rejected", message: error?.message ?? "Couldn't prepare this invoice." }, 422);
+  }
+  const prepared = data as EngineerPrepared;
+
+  const pageBase = (Deno.env.get("EXPO_PUBLIC_RORK_FUNCTIONS_URL") || PAGE_BASE_FALLBACK).replace(/\/+$/, "");
+  const viewUrl = `${pageBase}/i?t=${prepared.token}`;
+  const { sender, subject, text, html } = composeInvoiceEmail(prepared.company, prepared.invoice, viewUrl);
+  const result = await sendEmail(recipient, subject, html, text, sender);
+
+  const { error: settleError } = await supabase.rpc("engineer_invoice_email_settle", {
+    p_notification: prepared.notification_id,
+    p_delivered: result.status === "sent",
+    p_reference: result.reference ?? null,
+    p_failure: result.status === "failed" ? result.detail : null,
+  });
+  if (settleError) console.error("[send-invoice] engineer settle failed", settleError.message);
+
+  const outcome: ChannelOutcome = {
+    channel: "email",
+    recipient,
+    status: result.status,
+    configured: result.configured,
+    detail: result.detail,
+    creditsCharged: 0,
+    smsCreditBalance: null,
+  };
+  return jsonResponse({ invoiceId, viewUrl, results: [outcome] });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
@@ -261,6 +400,13 @@ Deno.serve(async (req) => {
       .eq("permission", "invoicesManage");
 
     if (!grants || grants.length === 0) {
+      // Engineers never hold invoicesManage. One whose Owner/Admin turned on
+      // "Generate & Send Invoices" may email an invoice for a job assigned to
+      // them; the database re-checks the grant, the company and the
+      // assignment on every call. Email only - no SMS credit is spent.
+      if (caller.role === "fieldWorker") {
+        return await sendAsEngineer(supabase, invoiceId, channels, payload.email);
+      }
       return jsonResponse({ error: "notPermitted", permission: "invoicesManage" }, 403);
     }
 
@@ -339,63 +485,7 @@ Deno.serve(async (req) => {
     const pageBase = (Deno.env.get("EXPO_PUBLIC_RORK_FUNCTIONS_URL") || PAGE_BASE_FALLBACK)
       .replace(/\/+$/, "");
     const viewUrl = `${pageBase}/i?t=${token}`;
-    const companyName = company?.name ?? "Your contractor";
-    const businessEmail = (company?.business_email ?? "").trim() || null;
-    const sender = resolveSender(companyName, businessEmail);
-    const amount = money(invoice.balance, invoice.currency_code);
-    const subject = `Invoice ${invoice.number} from ${companyName} — ${amount} due`;
-
-    // The business's own contact block, as a customer expects to see it on a
-    // bill. Empty parts are dropped rather than printed as blanks.
-    const companyAddress = [company?.address_line, company?.city, company?.state, company?.postal_code]
-      .filter((part) => part && String(part).trim().length > 0)
-      .join(", ");
-
-    const contactLines = [
-      company?.phone ? `Call ${company.phone}` : null,
-      businessEmail,
-    ].filter((line): line is string => Boolean(line));
-
-    const text =
-      `${companyName}\n${companyAddress ? `${companyAddress}\n` : ""}` +
-      `\nInvoice ${invoice.number}${invoice.title ? ` — ${invoice.title}` : ""}\n` +
-      `Amount due: ${amount}\nDue date: ${invoice.due_date}\n\nView and pay your invoice:\n${viewUrl}\n\n` +
-      `${contactLines.length > 0 ? `Questions? ${contactLines.join(" · ")}\n` : ""}` +
-      `\nThis invoice was sent by ${companyName} using Harbour South FieldOps.\n`;
-
-    // Branded as the TRADE BUSINESS. The business's mark is its own initial on
-    // its brand colours — an <img> is deliberately not used, because a hosted
-    // logo would be blocked by most mail clients by default and leave a broken
-    // image where the business's identity should be.
-    const initial = escapeHtml((companyName.trim()[0] ?? "·").toUpperCase());
-    const html =
-      `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;` +
-      `color:#0F1B2A;line-height:1.6;max-width:560px">` +
-      `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr>` +
-      `<td style="width:44px;height:44px;background:#14367A;border-radius:11px;color:#fff;` +
-      `font-size:20px;font-weight:700;text-align:center;vertical-align:middle">${initial}</td>` +
-      `<td style="padding-left:12px">` +
-      `<div style="font-size:17px;font-weight:700;color:#0F1B2A">${escapeHtml(companyName)}</div>` +
-      `${companyAddress ? `<div style="font-size:13px;color:#5B6675">${escapeHtml(companyAddress)}</div>` : ""}` +
-      `</td></tr></table>` +
-      `<p style="margin:0 0 6px;color:#5B6675">Invoice <strong style="color:#0F1B2A">${escapeHtml(invoice.number)}</strong>${
-        invoice.title ? ` — ${escapeHtml(invoice.title)}` : ""
-      }</p>` +
-      `<p style="font-size:30px;font-weight:700;margin:12px 0 4px;color:#0F1B2A">${escapeHtml(amount)}</p>` +
-      `<p style="margin:0 0 22px;color:#5B6675">due ${escapeHtml(String(invoice.due_date))}</p>` +
-      `<p style="margin:0 0 22px"><a href="${escapeHtml(viewUrl)}" style="background:#E1691A;color:#fff;` +
-      `text-decoration:none;padding:14px 24px;border-radius:11px;font-weight:700;display:inline-block">` +
-      `View &amp; pay invoice</a></p>` +
-      `${
-        contactLines.length > 0
-          ? `<p style="color:#5B6675;margin:0 0 6px;font-size:14px">Questions? ${
-            escapeHtml(contactLines.join(" · "))
-          }</p>`
-          : ""
-      }` +
-      `<p style="color:#8A94A3;margin:18px 0 0;font-size:12px">Sent by ${escapeHtml(companyName)} ` +
-      `using Harbour South FieldOps.</p>` +
-      `</div>`;
+    const { companyName, sender, amount, subject, text, html } = composeInvoiceEmail(company, invoice, viewUrl);
 
     const smsBody =
       `${companyName}: invoice ${invoice.number}, ${amount} due ${invoice.due_date}. View and pay: ${viewUrl} Reply STOP to opt out.`;

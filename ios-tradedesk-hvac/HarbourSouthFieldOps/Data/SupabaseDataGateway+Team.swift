@@ -137,6 +137,13 @@ extension SupabaseDataGateway {
                 }
         }
 
+        // Grants are read only for a viewer who may change them. A failure
+        // here (for example an older database) must never hide the team.
+        var grants: [String: FinancialPermissions] = [:]
+        if canManage {
+            grants = (try? await financialPermissionsByUser()) ?? [:]
+        }
+
         let members = people
             .sorted { lhs, rhs in
                 if lhs.status != rhs.status { return lhs.status == .active }
@@ -156,7 +163,8 @@ extension SupabaseDataGateway {
                     statusTitle: row.status.title,
                     statusTone: Self.tone(for: row.status),
                     lastActiveLabel: row.lastActiveAt.map { "Last active \(Formatters.shortDayAndTime($0))" },
-                    isSelf: key == session.userID
+                    isSelf: key == session.userID,
+                    financial: grants[key.lowercased()] ?? .none
                 )
             }
 

@@ -20,6 +20,9 @@ nonisolated struct TeamMember: Identifiable, Hashable, Sendable {
     /// True for the signed-in user's own row. Their own role and status are not
     /// editable here — nobody locks themselves out of their own company.
     let isSelf: Bool
+    /// The engineer's invoicing and payment grants. Only loaded for a viewer
+    /// who may manage users; everyone else sees `.none` and no toggles.
+    var financial: FinancialPermissions = .none
 
     var isActive: Bool { status == .active }
 }

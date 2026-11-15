@@ -176,6 +176,17 @@ actor SupabaseDataGateway: DataGateway {
         return id
     }
 
+    /// Calls a database function that returns a JSON document and decodes it.
+    func performDecoding<T: Decodable>(_ type: T.Type, _ name: String, _ params: [String: AnyJSON]) async throws -> T {
+        let data = try await performReturningData(name, params)
+        do {
+            return try SupabaseCoding.decoder.decode(T.self, from: data)
+        } catch let error as DecodingError {
+            print("[data] could not decode \(T.self) from \(name): \(Self.describe(error))")
+            throw DataError.unexpected("This screen couldn't read the server's answer. Nothing was changed.")
+        }
+    }
+
     private func performReturningData(_ name: String, _ params: [String: AnyJSON]) async throws -> Data {
         do {
             let response: PostgrestResponse<Void> = try await client.rpc(name, params: params).execute()

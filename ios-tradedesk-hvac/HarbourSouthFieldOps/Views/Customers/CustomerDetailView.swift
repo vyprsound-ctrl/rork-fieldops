@@ -189,6 +189,8 @@ struct CustomerDetailView: View {
                 if let notes = profile.notes { notesCard(notes) }
                 contactsSection(profile)
                 sitesSection(profile)
+                // Automotive companies only; renders nothing otherwise.
+                CustomerVehiclesSection(customerID: customerID, canManage: profile.canManage)
                 equipmentSection(profile)
                 jobsSection(profile)
                 CommunicationHistorySection(

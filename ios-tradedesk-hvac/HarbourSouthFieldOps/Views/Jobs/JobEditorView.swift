@@ -10,6 +10,12 @@ struct JobEditorView: View {
     @Environment(AppEnvironment.self) private var env
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = JobEditorViewModel()
+    /// Automotive only: the selected customer's vehicles and the one chosen.
+    @State private var customerVehicles: [Vehicle] = []
+    @State private var vehicleID: String = ""
+    @State private var isAddingVehicle: Bool = false
+
+    private var usesVehicles: Bool { session?.trade.usesVehicles == true }
 
     private var session: TenantSession? { env.activeSession }
     private var terms: Terminology { env.terms }
@@ -61,6 +67,37 @@ struct JobEditorView: View {
                 viewModel.kind = .install
             }
         }
+        .task(id: viewModel.customerID) { await loadVehicles() }
+        .sheet(isPresented: $isAddingVehicle) {
+            VehicleEditorSheet(context: VehicleEditorContext(vehicle: nil)) { draft in
+                guard let session else { return "Sign in again to continue." }
+                do {
+                    let saved = try await env.gateway.saveVehicle(
+                        session: session,
+                        customerID: viewModel.customerID,
+                        vehicleID: nil,
+                        draft: draft
+                    )
+                    customerVehicles.append(saved)
+                    vehicleID = saved.id
+                    return nil
+                } catch {
+                    return DataError.wrap(error).errorDescription ?? "The vehicle couldn't be saved."
+                }
+            }
+        }
+    }
+
+    private func loadVehicles() async {
+        guard usesVehicles, let session, !viewModel.customerID.isEmpty else {
+            customerVehicles = []
+            vehicleID = ""
+            return
+        }
+        customerVehicles = (try? await env.gateway.vehicles(session: session, customerID: viewModel.customerID)) ?? []
+        if !customerVehicles.contains(where: { $0.id == vehicleID }) {
+            vehicleID = customerVehicles.count == 1 ? customerVehicles[0].id : ""
+        }
     }
 
     private var form: some View {
@@ -90,6 +127,28 @@ struct JobEditorView: View {
                             Text(unit.name).tag(unit.id)
                         }
                     }
+                }
+            }
+
+            if usesVehicles, !viewModel.customerID.isEmpty {
+                Section {
+                    Picker("Vehicle", selection: $vehicleID) {
+                        Text("None").tag("")
+                        ForEach(customerVehicles) { vehicle in
+                            Text([vehicle.title, vehicle.subtitle].compactMap { $0 }.joined(separator: " · ")).tag(vehicle.id)
+                        }
+                    }
+                    if session?.can(.customersManage) == true {
+                        Button {
+                            isAddingVehicle = true
+                        } label: {
+                            Label("Add a vehicle", systemImage: "plus.circle.fill")
+                        }
+                    }
+                } header: {
+                    Text("Vehicle")
+                } footer: {
+                    Text("Optional. The job appears in this vehicle's history.")
                 }
             }
 
@@ -180,6 +239,11 @@ struct JobEditorView: View {
         Task {
             await viewModel.save(gateway: env.gateway, session: session)
             if let jobID = viewModel.createdJobID {
+                // The job exists either way; a vehicle that fails to link can
+                // be added from the job screen.
+                if usesVehicles, !vehicleID.isEmpty {
+                    try? await env.gateway.setJobVehicle(session: session, jobID: jobID, vehicleID: vehicleID)
+                }
                 onCreated(jobID)
                 dismiss()
             }

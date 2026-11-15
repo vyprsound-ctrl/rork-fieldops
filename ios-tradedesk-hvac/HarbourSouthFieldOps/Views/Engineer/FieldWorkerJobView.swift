@@ -162,6 +162,11 @@ struct FieldWorkerJobView: View {
 
                 siteCard(job)
                 descriptionCard(job)
+                // Automotive companies only; renders nothing otherwise.
+                JobVehicleCard(jobID: jobID)
+                // Only appears when the office has granted this engineer
+                // invoicing or payment collection.
+                EngineerBillingCard(jobID: jobID, jobStatus: job.status)
                 officeCard(job)
                 if let equipment = job.equipment { equipmentCard(equipment) }
                 JobNotesSection(notes: job.notes, canAdd: true) { isAddingNote = true }
