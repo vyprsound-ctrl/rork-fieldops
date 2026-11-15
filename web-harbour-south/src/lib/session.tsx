@@ -40,10 +40,66 @@ interface SessionContextValue {
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
+/** Same metadata keys the iPhone app parks at sign-up (PendingCompanySetup). */
+export interface CompanySetupInput {
+  company_name: string;
+  trade: string;
+  country_code: string;
+  currency_code: string;
+  time_zone_identifier: string;
+  owner_name: string;
+}
+
+const TRADES = new Set([
+  "hvac", "plumbing", "electrical", "roofing", "applianceRepair", "locksmith",
+  "generalMaintenance", "pestControl", "other", "propertyServices", "automotive",
+]);
+
+function pendingSetup(metadata: Record<string, unknown> | undefined): CompanySetupInput | null {
+  if (!metadata || metadata.pending_company_setup !== true) return null;
+  const s = (k: string) => (typeof metadata[k] === "string" ? (metadata[k] as string).trim() : "");
+  const input = {
+    company_name: s("company_name"),
+    trade: s("trade"),
+    country_code: s("country_code").toUpperCase(),
+    currency_code: s("currency_code").toUpperCase(),
+    time_zone_identifier: s("time_zone_identifier") || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    owner_name: s("owner_name"),
+  };
+  if (!input.company_name || !TRADES.has(input.trade) || input.country_code.length !== 2 || input.currency_code.length !== 3) return null;
+  return input;
+}
+
+let provisioning: Promise<void> | null = null;
+
+/** Creates the company with this login as owner, then clears the pending flag so it never runs twice. */
+export function createCompany(input: CompanySetupInput): Promise<void> {
+  provisioning ??= (async () => {
+    const { error } = await supabase.rpc("create_company_and_owner", {
+      p_name: input.company_name,
+      p_trade: input.trade,
+      p_country_code: input.country_code,
+      p_currency_code: input.currency_code,
+      p_time_zone_identifier: input.time_zone_identifier,
+      p_owner_name: input.owner_name,
+    });
+    if (error) throw new Error("Couldn't create your company. Try again, or contact help@harboursouth.us.");
+    await supabase.auth.updateUser({ data: { pending_company_setup: false } });
+  })().finally(() => {
+    provisioning = null;
+  });
+  return provisioning;
+}
+
 async function resolve(session: Session | null): Promise<SessionState> {
   if (!session) return { kind: "signedOut" };
   const email = session.user.email ?? "";
-  const me = await loadMembership(session.user.id);
+  let me = await loadMembership(session.user.id);
+  const pending = me ? null : pendingSetup(session.user.user_metadata);
+  if (pending) {
+    await createCompany(pending);
+    me = await loadMembership(session.user.id);
+  }
   if (!me) return { kind: "noMembership", email };
   if (me.status !== "active") return { kind: "inactive", email };
   if (!OFFICE_ROLES.includes(me.role)) return { kind: "fieldWorker", name: me.name };

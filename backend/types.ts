@@ -782,9 +782,13 @@ export type Database = {
           seats_synced_at: string | null
           status: Database["public"]["Enums"]["subscription_status"]
           store: Database["public"]["Enums"]["billing_store"]
+          stripe_cancel_at_period_end: boolean
+          stripe_current_period_end: string | null
           stripe_customer_id: string | null
           stripe_price_id: string | null
+          stripe_status: string | null
           stripe_subscription_id: string | null
+          stripe_synced_at: string | null
           tier_id: string | null
           trial_ends_at: string | null
           updated_at: string
@@ -834,9 +838,13 @@ export type Database = {
           seats_synced_at?: string | null
           status?: Database["public"]["Enums"]["subscription_status"]
           store?: Database["public"]["Enums"]["billing_store"]
+          stripe_cancel_at_period_end?: boolean
+          stripe_current_period_end?: string | null
           stripe_customer_id?: string | null
           stripe_price_id?: string | null
+          stripe_status?: string | null
           stripe_subscription_id?: string | null
+          stripe_synced_at?: string | null
           tier_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
@@ -886,9 +894,13 @@ export type Database = {
           seats_synced_at?: string | null
           status?: Database["public"]["Enums"]["subscription_status"]
           store?: Database["public"]["Enums"]["billing_store"]
+          stripe_cancel_at_period_end?: boolean
+          stripe_current_period_end?: string | null
           stripe_customer_id?: string | null
           stripe_price_id?: string | null
+          stripe_status?: string | null
           stripe_subscription_id?: string | null
+          stripe_synced_at?: string | null
           tier_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
@@ -4780,6 +4792,21 @@ export type Database = {
         }
         Returns: undefined
       }
+      apply_stripe_subscription: {
+        Args: {
+          p_cancel_at_end: boolean
+          p_company: string
+          p_customer: string
+          p_period: string
+          p_period_end: string
+          p_period_start: string
+          p_price: string
+          p_status: string
+          p_subscription: string
+          p_tier: string
+        }
+        Returns: string
+      }
       apply_tenant_rls: {
         Args: { p_read_perm?: string; p_table: string; p_write_perm?: string }
         Returns: undefined
@@ -5899,6 +5926,15 @@ export type Database = {
         Args: { p_invoice: string; p_quote: string }
         Returns: number
       }
+      stripe_entitlement_state: {
+        Args: {
+          p_cancel_at_end: boolean
+          p_now?: string
+          p_period_end: string
+          p_status: string
+        }
+        Returns: string
+      }
       subscription_entitlement_state: {
         Args: {
           p_auto_renew: boolean
@@ -6039,7 +6075,7 @@ export type Database = {
         | "automotive"
       app_user_status: "active" | "invited" | "suspended"
       billing_period: "monthly" | "annual"
-      billing_store: "apple" | "google" | "none"
+      billing_store: "apple" | "google" | "none" | "stripe"
       company_payment_model:
         | "undecided"
         | "harbourSouthPayments"
@@ -6315,7 +6351,7 @@ export const Constants = {
       ],
       app_user_status: ["active", "invited", "suspended"],
       billing_period: ["monthly", "annual"],
-      billing_store: ["apple", "google", "none"],
+      billing_store: ["apple", "google", "none", "stripe"],
       company_payment_model: [
         "undecided",
         "harbourSouthPayments",

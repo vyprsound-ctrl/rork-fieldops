@@ -20,7 +20,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { APP_STORE_URL, LEGAL_PATHS } from "@/lib/site";
+import { APP_BASE, APP_STORE_URL, LEGAL_PATHS } from "@/lib/site";
 import { AppStoreButton, SitePage, loginHref, usePageTitle } from "./SiteChrome";
 
 /* ------------------------------------------------------------------ */
@@ -101,7 +101,13 @@ function Hero() {
               See pricing
             </a>
           </div>
-          <p className="mt-5 text-sm text-white/60">Start with a 14-day free trial · Cancel any time</p>
+          <p className="mt-5 text-sm text-white/60">
+            14-day free trial in the iPhone app ·{" "}
+            <a href={`${APP_BASE}/signup`} className="font-semibold text-white/85 underline-offset-2 hover:underline">
+              or start on the web
+            </a>{" "}
+            · Cancel any time
+          </p>
         </div>
 
         <HeroVisual />
@@ -425,15 +431,24 @@ function Pricing() {
                   {plan.users}
                 </div>
                 <a
-                  href={APP_STORE_URL}
-                  target="_blank"
-                  rel="noreferrer"
+                  href={`${APP_BASE}/signup`}
                   className={cn(
                     "press mt-6 rounded-xl py-3 text-center text-[15px] font-semibold transition",
                     highlight ? "bg-brand-orange text-white shadow-lg shadow-brand-orange/30 hover:brightness-110" : "bg-brand-navy text-white hover:bg-brand-navy/90",
                   )}
                 >
-                  Start 14-day free trial
+                  Get started on the web
+                </a>
+                <a
+                  href={APP_STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(
+                    "mt-3 text-center text-sm font-medium underline-offset-2 hover:underline",
+                    highlight ? "text-white/70" : "text-primary",
+                  )}
+                >
+                  or start a 14-day free trial on iPhone
                 </a>
               </div>
             );
@@ -456,9 +471,11 @@ function Pricing() {
         </div>
 
         <p className="mx-auto mt-6 max-w-3xl text-center text-[13px] leading-relaxed text-muted-foreground">
-          Prices in US dollars. Subscriptions are billed by Apple through the App Store, start with a free trial where offered,
-          and renew automatically unless cancelled at least 24 hours before the period ends. Your local App Store price may
-          differ. *Customer texting is optional and uses prepaid SMS credits and a monthly number fee, separate from your plan —
+          Prices in US dollars. On the web, plans are paid by card through Stripe, start straight away with no free trial, and
+          renew automatically until you cancel in Billing. In the iPhone app, subscriptions are billed by Apple through the App
+          Store, start with a free trial where offered, and renew automatically unless cancelled at least 24 hours before the
+          period ends; your local App Store price may differ. Pay in one place only: one plan covers the web and the iPhone
+          app. *Customer texting is optional and uses prepaid SMS credits and a monthly number fee, separate from your plan —
           see the{" "}
           <a href={LEGAL_PATHS.sms} className="font-medium text-primary underline-offset-2 hover:underline">
             SMS &amp; Messaging Terms
@@ -475,7 +492,7 @@ function Pricing() {
 const FAQS = [
   {
     q: "How do I get started?",
-    a: "Download Harbour South FieldOps from the App Store, create your company and choose a plan. Your free trial starts straight away, and you can invite your team from the app.",
+    a: "Create your company on the web and pay by card, or download Harbour South FieldOps from the App Store and start a free trial there. Either way, one plan covers your whole team on the web and on iPhone.",
   },
   {
     q: "Is there a web version?",
@@ -483,7 +500,7 @@ const FAQS = [
   },
   {
     q: "How does the free trial work?",
-    a: "New subscribers get a 14-day free trial through the App Store. If you cancel before it ends you won't be charged; otherwise it continues on the plan you chose.",
+    a: "New subscribers get a 14-day free trial through the App Store. If you cancel before it ends you won't be charged; otherwise it continues on the plan you chose. Plans bought on the web start straight away and don't include a trial.",
   },
   {
     q: "Can I change plans as my team grows?",

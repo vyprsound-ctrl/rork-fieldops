@@ -5,6 +5,7 @@ import {
   Briefcase,
   CalendarDays,
   ClipboardList,
+  CreditCard,
   FileText,
   LayoutDashboard,
   Lock,
@@ -44,7 +45,7 @@ interface ShellContextValue {
 const ShellContext = createContext<ShellContextValue>({ newJob: () => undefined });
 export const useShell = () => useContext(ShellContext);
 
-const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs?: Permission }[] = [
+const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs?: Permission; ownerOnly?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
   { to: "/dispatch", label: "Dispatch", icon: ClipboardList },
@@ -53,11 +54,12 @@ const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs
   { to: "/customers", label: "Customers", icon: Users },
   { to: "/quotes", label: "Quotes", icon: FileText, needs: "quotesRead" },
   { to: "/invoices", label: "Invoices", icon: Receipt, needs: "invoicesRead" },
+  { to: "/billing", label: "Billing", icon: CreditCard, ownerOnly: true },
 ];
 
 function useNav() {
   const ws = useWorkspace();
-  return NAV.filter((n) => !n.needs || ws.can(n.needs));
+  return NAV.filter((n) => (!n.needs || ws.can(n.needs)) && (!n.ownerOnly || ws.me.role === "owner"));
 }
 
 const SOON = [
@@ -204,13 +206,22 @@ export function AppShell() {
 }
 
 function ReadOnlyBanner() {
+  const ws = useWorkspace();
+  const owner = ws.me.role === "owner";
   return (
     <div className="flex items-center gap-3 bg-brand-orange-tint px-6 py-2.5 text-sm text-brand-orange-text">
       <Lock className="h-4 w-4 shrink-0" />
-      <p>
-        <span className="font-semibold">Your workspace is read-only.</span> The company subscription isn't active. The
-        owner can renew it in the iPhone app under Settings → Subscription.
+      <p className="flex-1">
+        <span className="font-semibold">Your workspace is read-only.</span> The company subscription isn't active.{" "}
+        {owner
+          ? "Choose a plan here on the web, or in the iPhone app under Settings → Subscription."
+          : "The owner can subscribe on the web under Billing, or in the iPhone app."}
       </p>
+      {owner && (
+        <NavLink to="/billing" className="shrink-0 rounded-lg bg-brand-orange px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-orange/90">
+          Choose a plan
+        </NavLink>
+      )}
     </div>
   );
 }

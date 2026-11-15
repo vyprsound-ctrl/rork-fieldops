@@ -90,7 +90,14 @@ export default function SignIn() {
         </Button>
       </form>
 
-      <p className="mt-10 text-center text-xs text-muted-foreground">
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        New to Harbour South?{" "}
+        <Link to="/signup" className="font-medium text-primary hover:underline">
+          Create your company
+        </Link>
+      </p>
+
+      <p className="mt-6 text-center text-xs text-muted-foreground">
         For owners, admins, dispatchers and accounts. Engineers use the iPhone app.
       </p>
     </AuthLayout>

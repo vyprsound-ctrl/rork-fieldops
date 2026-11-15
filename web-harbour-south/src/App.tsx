@@ -21,7 +21,10 @@ import Quotes from "./pages/Quotes";
 import QuoteDetail from "./pages/QuoteDetail";
 import Invoices from "./pages/Invoices";
 import InvoiceDetail from "./pages/InvoiceDetail";
+import Billing from "./pages/Billing";
 import SignIn from "./pages/auth/SignIn";
+import SignUp from "./pages/auth/SignUp";
+import CompanySetup from "./pages/auth/CompanySetup";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import Blocked from "./pages/auth/Blocked";
@@ -39,6 +42,12 @@ const queryClient = new QueryClient({
 function Allowed({ permission, children }: { permission: Permission; children: ReactNode }) {
   const ws = useWorkspace();
   return ws.can(permission) ? <>{children}</> : <Navigate to="/" replace />;
+}
+
+/** Billing is the owner's alone, and stays open while the workspace is read-only. */
+function OwnerOnly({ children }: { children: ReactNode }) {
+  const ws = useWorkspace();
+  return ws.me.role === "owner" ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 function Gate() {
@@ -59,12 +68,19 @@ function Gate() {
         <Routes>
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/signup" element={<SignUp />} />
           <Route path="*" element={<SignIn />} />
         </Routes>
       );
     case "error":
       return <Blocked kind="error" />;
     case "noMembership":
+      return (
+        <Routes>
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<CompanySetup email={state.email} />} />
+        </Routes>
+      );
     case "inactive":
     case "fieldWorker":
       return (
@@ -89,6 +105,7 @@ function Gate() {
             <Route path="/quotes/:id" element={<Allowed permission="quotesRead"><QuoteDetail /></Allowed>} />
             <Route path="/invoices" element={<Allowed permission="invoicesRead"><Invoices /></Allowed>} />
             <Route path="/invoices/:id" element={<Allowed permission="invoicesRead"><InvoiceDetail /></Allowed>} />
+            <Route path="/billing" element={<OwnerOnly><Billing /></OwnerOnly>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

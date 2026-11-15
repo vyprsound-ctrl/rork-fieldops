@@ -1,5 +1,6 @@
 import { corsHeaders, createAdminClient, jsonResponse } from "../_shared/auth.ts";
 import { isStripeConfigured, StripeError, stripeRequest, verifyStripeSignature } from "../_shared/stripe.ts";
+import { syncStripeSubscription } from "../_shared/webSubscriptions.ts";
 
 /// The authoritative source of payment truth.
 ///
@@ -148,24 +149,30 @@ Deno.serve(async (req) => {
         outcome = await handleAccountUpdated(admin, object, companyId);
         break;
 
-      // ---------- SMS credit purchase (platform-side) ---------------------
+      // ---------- Platform checkout: web subscription or SMS credits -------
       case "checkout.session.completed":
-        outcome = await handleCheckoutCompleted(admin, object);
+        if (!event.account && object.mode === "subscription") {
+          outcome = await handleSubscriptionEvent(admin, object.subscription, companyId);
+        } else {
+          outcome = await handleCheckoutCompleted(admin, object);
+        }
         break;
 
-      // ---------- FLOW A: Harbour South's own subscription ----------------
+      // ---------- FLOW A: Harbour South's own subscription (web) ----------
+      // Every subscription event re-reads the subscription from Stripe and
+      // applies it through apply_stripe_subscription(), which never touches a
+      // company that is on a live Apple plan.
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        outcome = await handleSubscriptionChanged(admin, object, event.type, companyId);
+        if (event.account) { outcome = "ignoredConnectedAccount"; break; }
+        outcome = await handleSubscriptionEvent(admin, object.id, companyId);
         break;
 
       case "invoice.payment_failed":
-        outcome = await handleSubscriptionPaymentFailed(admin, object, companyId);
-        break;
-
       case "invoice.payment_succeeded":
-        outcome = await handleSubscriptionPaymentSucceeded(admin, object, companyId);
+        if (event.account) { outcome = "ignoredConnectedAccount"; break; }
+        outcome = await handleSubscriptionInvoice(admin, object, event.type === "invoice.payment_failed", companyId);
         break;
 
       default:
@@ -576,106 +583,45 @@ async function handleCheckoutCompleted(admin: any, session: Record<string, unkno
 // ---------------------------------------------------------------------------
 
 // deno-lint-ignore no-explicit-any
-async function handleSubscriptionChanged(
-  admin: any,
-  subscription: Record<string, unknown>,
-  eventType: string,
-  companyId: string | null,
-): Promise<string> {
-  if (!companyId) return "unknownCompany";
-
-  const cancelled = eventType === "customer.subscription.deleted";
-  const stripeStatus = String(subscription.status ?? "");
-
-  // Stripe's vocabulary mapped onto ours. `incomplete_expired` and `unpaid`
-  // both mean the company is not entitled, which is not the same as cancelled.
-  const status = cancelled
-    ? "cancelled"
-    : stripeStatus === "trialing"
-    ? "trialing"
-    : stripeStatus === "active"
-    ? "active"
-    : stripeStatus === "past_due"
-    ? "pastDue"
-    : stripeStatus === "canceled"
-    ? "cancelled"
-    : "expired";
-
-  const periodStart = subscription.current_period_start
-    ? new Date(Number(subscription.current_period_start) * 1000).toISOString()
-    : null;
-  const periodEnd = subscription.current_period_end
-    ? new Date(Number(subscription.current_period_end) * 1000).toISOString()
-    : null;
-
-  const update: Record<string, unknown> = {
-    status,
-    stripe_subscription_id: String(subscription.id),
-    store: "none",
-    updated_at: new Date().toISOString(),
-  };
-  if (periodStart) update.current_period_start = periodStart;
-  if (periodEnd) {
-    update.current_period_end = periodEnd;
-    update.renewal_date = periodEnd;
-  }
-  if (cancelled || stripeStatus === "canceled") {
-    update.cancelled_at = new Date().toISOString();
-  }
-  if (status === "active") {
-    update.past_due_since = null;
-    update.last_payment_failure = null;
-  }
-
-  const { error } = await admin.from("company_subscriptions").update(update).eq("company_id", companyId);
-  if (error) throw new Error(error.message);
-
-  // Re-derive the seat count and price from the roster, so the stored price is
-  // never a stale copy of what Stripe last billed.
-  await admin.rpc("sync_subscription_seats", { p_company: companyId });
-
-  return `subscription:${status}`;
+async function handleSubscriptionEvent(admin: any, subscription: unknown, companyId: string | null): Promise<string> {
+  const id = typeof subscription === "string"
+    ? subscription
+    : subscription && typeof subscription === "object"
+    ? String((subscription as { id?: string }).id ?? "")
+    : "";
+  if (!id.startsWith("sub_")) return "noSubscription";
+  if (!isStripeConfigured()) return "stripeNotConfigured";
+  const result = await syncStripeSubscription(admin, id, companyId);
+  return result.outcome;
 }
 
+/// A subscription invoice was paid or failed. The subscription itself is the
+/// source of truth, so it is re-read and re-applied. A failed payment is also
+/// noted for the owner, but only on a company that is billed through Stripe:
+/// an Apple company's row is never written from here.
 // deno-lint-ignore no-explicit-any
-async function handleSubscriptionPaymentFailed(
+async function handleSubscriptionInvoice(
   admin: any,
   invoice: Record<string, unknown>,
+  failed: boolean,
   companyId: string | null,
 ): Promise<string> {
-  if (!companyId) return "unknownCompany";
+  // Newer Stripe API versions moved the field under `parent`.
+  const parent = (invoice.parent ?? {}) as { subscription_details?: { subscription?: unknown } };
+  const subscription = invoice.subscription ?? parent.subscription_details?.subscription;
+  if (!subscription) return "notASubscriptionInvoice";
+  const outcome = await handleSubscriptionEvent(admin, subscription, companyId);
 
-  const { error } = await admin.from("company_subscriptions").update({
-    status: "pastDue",
-    past_due_since: new Date().toISOString(),
-    last_payment_failure: String(
-      (invoice.last_finalization_error as { message?: string } | undefined)?.message ??
-        "The card on file was declined.",
-    ),
-    last_payment_failed_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq("company_id", companyId);
-
-  if (error) throw new Error(error.message);
-  return "subscriptionPastDue";
-}
-
-// deno-lint-ignore no-explicit-any
-async function handleSubscriptionPaymentSucceeded(
-  admin: any,
-  _invoice: Record<string, unknown>,
-  companyId: string | null,
-): Promise<string> {
-  if (!companyId) return "unknownCompany";
-
-  const { error } = await admin.from("company_subscriptions").update({
-    status: "active",
-    past_due_since: null,
-    last_payment_failure: null,
-    updated_at: new Date().toISOString(),
-  }).eq("company_id", companyId);
-
-  if (error) throw new Error(error.message);
-  await admin.rpc("sync_subscription_seats", { p_company: companyId });
-  return "subscriptionPaid";
+  const subscriptionId = typeof subscription === "string" ? subscription : String((subscription as { id?: string }).id ?? "");
+  if (failed && subscriptionId) {
+    const lastError = (invoice.last_finalization_error as { message?: string } | undefined)?.message;
+    await admin.from("company_subscriptions").update({
+      last_payment_failure: lastError ?? "The card on file was declined.",
+      last_payment_failed_at: new Date().toISOString(),
+    }).eq("stripe_subscription_id", subscriptionId).eq("store", "stripe");
+  } else if (subscriptionId) {
+    await admin.from("company_subscriptions").update({ last_payment_failure: null })
+      .eq("stripe_subscription_id", subscriptionId).eq("store", "stripe");
+  }
+  return outcome;
 }
