@@ -6,13 +6,21 @@ import { Loader2 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppShell } from "@/components/hs/AppShell";
-import { SessionProvider, useSession } from "@/lib/session";
+import { SessionProvider, useSession, useWorkspace } from "@/lib/session";
+import type { Permission } from "@/lib/domain";
+import type { ReactNode } from "react";
 
 import Dashboard from "./pages/Dashboard";
 import Jobs from "./pages/Jobs";
 import Dispatch from "./pages/Dispatch";
 import CalendarPage from "./pages/Calendar";
 import LiveMap from "./pages/LiveMap";
+import Customers from "./pages/Customers";
+import CustomerDetail from "./pages/CustomerDetail";
+import Quotes from "./pages/Quotes";
+import QuoteDetail from "./pages/QuoteDetail";
+import Invoices from "./pages/Invoices";
+import InvoiceDetail from "./pages/InvoiceDetail";
 import SignIn from "./pages/auth/SignIn";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
@@ -26,6 +34,12 @@ import { APP_BASE, CONTACT_PATH, isAppPath } from "@/lib/site";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 20_000 } },
 });
+
+/** Pages a role can't use send people back to the dashboard. */
+function Allowed({ permission, children }: { permission: Permission; children: ReactNode }) {
+  const ws = useWorkspace();
+  return ws.can(permission) ? <>{children}</> : <Navigate to="/" replace />;
+}
 
 function Gate() {
   const { state } = useSession();
@@ -69,6 +83,12 @@ function Gate() {
             <Route path="/dispatch" element={<Dispatch />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/map" element={<LiveMap />} />
+            <Route path="/customers" element={<Customers />} />
+            <Route path="/customers/:id" element={<CustomerDetail />} />
+            <Route path="/quotes" element={<Allowed permission="quotesRead"><Quotes /></Allowed>} />
+            <Route path="/quotes/:id" element={<Allowed permission="quotesRead"><QuoteDetail /></Allowed>} />
+            <Route path="/invoices" element={<Allowed permission="invoicesRead"><Invoices /></Allowed>} />
+            <Route path="/invoices/:id" element={<Allowed permission="invoicesRead"><InvoiceDetail /></Allowed>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

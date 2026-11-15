@@ -31,8 +31,8 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ROLE_TITLE, shortAddress } from "@/lib/domain";
-import { useJobs } from "@/lib/queries";
+import { ROLE_TITLE, shortAddress, type Permission } from "@/lib/domain";
+import { useCustomers, useJobs } from "@/lib/queries";
 import { useSession, useWorkspace } from "@/lib/session";
 import { JobPanel } from "./JobPanel";
 import { NewJobDialog } from "./NewJobDialog";
@@ -44,18 +44,23 @@ interface ShellContextValue {
 const ShellContext = createContext<ShellContextValue>({ newJob: () => undefined });
 export const useShell = () => useContext(ShellContext);
 
-const NAV = [
+const NAV: { to: string; label: string; icon: typeof Users; end?: boolean; needs?: Permission }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
   { to: "/dispatch", label: "Dispatch", icon: ClipboardList },
   { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/map", label: "Live map", icon: MapIcon },
+  { to: "/customers", label: "Customers", icon: Users },
+  { to: "/quotes", label: "Quotes", icon: FileText, needs: "quotesRead" },
+  { to: "/invoices", label: "Invoices", icon: Receipt, needs: "invoicesRead" },
 ];
 
+function useNav() {
+  const ws = useWorkspace();
+  return NAV.filter((n) => !n.needs || ws.can(n.needs));
+}
+
 const SOON = [
-  { label: "Customers", icon: Users },
-  { label: "Quotes", icon: FileText },
-  { label: "Invoices", icon: Receipt },
   { label: "Team", icon: UsersRound },
   { label: "Messages", icon: MessageCircle },
   { label: "Vehicles", icon: Truck },
@@ -69,6 +74,7 @@ export function AppShell() {
   const [search, setSearch] = useState(false);
   const [newJob, setNewJob] = useState(false);
   const canCreate = ws.can("jobsManage");
+  const nav = useNav();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -111,7 +117,7 @@ export function AppShell() {
           </button>
 
           <nav className="relative flex-1 space-y-0.5 overflow-y-auto px-3 scroll-thin">
-            {NAV.map((item) => (
+            {nav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -211,9 +217,10 @@ function ReadOnlyBanner() {
 
 function MobileBar({ onSearch }: { onSearch: () => void }) {
   const navigate = useNavigate();
+  const nav = useNav();
   return (
     <div className="flex items-center gap-2 overflow-x-auto bg-brand-navy px-3 py-2 md:hidden">
-      {NAV.map((n) => (
+      {nav.map((n) => (
         <button key={n.to} onClick={() => navigate(n.to)} className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-white/80">
           {n.label}
         </button>
@@ -228,8 +235,10 @@ function MobileBar({ onSearch }: { onSearch: () => void }) {
 function QuickSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const ws = useWorkspace();
   const { data: jobs = [] } = useJobs();
+  const { data: customers = [] } = useCustomers();
   const panel = useJobPanel();
   const navigate = useNavigate();
+  const nav = useNav();
 
   const go = (fn: () => void) => {
     onOpenChange(false);
@@ -242,10 +251,18 @@ function QuickSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: 
       <CommandList className="max-h-[420px]">
         <CommandEmpty>No matches.</CommandEmpty>
         <CommandGroup heading="Go to">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <CommandItem key={n.to} value={`go ${n.label}`} onSelect={() => go(() => navigate(n.to))}>
               <n.icon className="mr-2 h-4 w-4 text-primary" />
               {n.label}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+        <CommandGroup heading="Customers">
+          {customers.slice(0, 300).map((c) => (
+            <CommandItem key={c.id} value={`customer ${c.name}`} onSelect={() => go(() => navigate(`/customers/${c.id}`))}>
+              <Users className="mr-2 h-4 w-4 text-primary" />
+              {c.name}
             </CommandItem>
           ))}
         </CommandGroup>

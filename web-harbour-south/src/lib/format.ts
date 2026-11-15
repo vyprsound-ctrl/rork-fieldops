@@ -35,6 +35,20 @@ export const money = (value: number, currency: string) => {
   }
 };
 
+/** Exact amounts for quotes, invoices and payments. */
+export const money2 = (value: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(2)}`;
+  }
+};
+
+/** A YYYY-MM-DD date shown without timezone drift. */
+export const dateOnly = (ymd: string | null) => (ymd ? format(new Date(`${ymd.slice(0, 10)}T12:00:00`), "d MMM yyyy") : "—");
+
+export const todayYmd = () => format(new Date(), "yyyy-MM-dd");
+
 /** For a datetime-local input. */
 export const toLocalInput = (iso: string | null) => (iso ? format(new Date(iso), "yyyy-MM-dd'T'HH:mm") : "");
 

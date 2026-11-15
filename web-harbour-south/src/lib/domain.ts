@@ -22,6 +22,11 @@ export type Permission =
   | "assignmentsManage"
   | "calendarReadAll"
   | "customersReadAll"
+  | "customersManage"
+  | "quotesRead"
+  | "quotesManage"
+  | "paymentsRead"
+  | "equipmentManage"
   | "usersRead"
   | "jobNotesRead"
   | "jobNotesCreate"
@@ -33,30 +38,30 @@ export type Permission =
   | "paymentsManage"
   | "equipmentRead";
 
-/** The office-relevant slice of the iPhone app's PermissionMatrix. */
+/** The office-relevant slice of the iPhone app's PermissionMatrix (matches role_permissions). */
+const MANAGER: Permission[] = [
+  "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "customersManage", "usersRead",
+  "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quotesRead", "quotesManage",
+  "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsRead", "paymentsManage", "equipmentRead", "equipmentManage",
+];
 const MATRIX: Record<Role, Permission[]> = {
-  owner: [
-    "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "usersRead",
-    "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quoteFinancialsRead",
-    "invoicesRead", "invoicesManage", "paymentsManage", "equipmentRead",
-  ],
-  admin: [
-    "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "usersRead",
-    "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quoteFinancialsRead",
-    "invoicesRead", "invoicesManage", "paymentsManage", "equipmentRead",
-  ],
+  owner: MANAGER,
+  admin: MANAGER,
   dispatcher: [
-    "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "usersRead",
-    "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "equipmentRead",
+    "jobsReadAll", "jobsManage", "assignmentsManage", "calendarReadAll", "customersReadAll", "customersManage", "usersRead",
+    "jobNotesRead", "jobNotesCreate", "jobPhotosRead", "fieldWorkerLocationReadAll", "quotesRead", "equipmentRead",
   ],
   fieldWorker: [],
-  accounts: ["jobsReadAll", "customersReadAll", "usersRead", "quoteFinancialsRead", "invoicesRead", "invoicesManage", "paymentsManage"],
+  accounts: [
+    "jobsReadAll", "customersReadAll", "usersRead", "quotesRead", "quoteFinancialsRead", "invoicesRead", "invoicesManage",
+    "paymentsRead", "paymentsManage",
+  ],
 };
 
 /** What an owner keeps while the company has no active subscription. */
 const READ_ONLY_KEEP: Permission[] = [
   "jobsReadAll", "calendarReadAll", "customersReadAll", "usersRead", "jobNotesRead", "jobPhotosRead",
-  "fieldWorkerLocationReadAll", "quoteFinancialsRead", "invoicesRead", "equipmentRead",
+  "fieldWorkerLocationReadAll", "quotesRead", "quoteFinancialsRead", "invoicesRead", "paymentsRead", "equipmentRead",
 ];
 
 export function permissionsFor(role: Role, readOnly: boolean): Set<Permission> {

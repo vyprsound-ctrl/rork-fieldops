@@ -26,7 +26,7 @@ import { timeRange } from "./format";
 
 export class AppError extends Error {}
 
-function translate(error: PostgrestError | Error | null | undefined): AppError {
+export function translate(error: PostgrestError | Error | null | undefined): AppError {
   if (!error) return new AppError("Something went wrong talking to the server.");
   const pg = error as PostgrestError;
   const code = pg.code ?? "";
@@ -56,13 +56,13 @@ function translate(error: PostgrestError | Error | null | undefined): AppError {
   return new AppError("The server refused that request.");
 }
 
-async function rows<T>(query: PromiseLike<{ data: unknown; error: PostgrestError | null }>): Promise<T[]> {
+export async function rows<T>(query: PromiseLike<{ data: unknown; error: PostgrestError | null }>): Promise<T[]> {
   const { data, error } = await query;
   if (error) throw translate(error);
   return (data ?? []) as T[];
 }
 
-async function rpc<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T> {
+export async function rpc<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.rpc(name, params);
   if (error) throw translate(error);
   return data as T;
@@ -71,7 +71,7 @@ async function rpc<T = unknown>(name: string, params?: Record<string, unknown>):
 const chunk = <T,>(items: T[], size = 150) =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, i * size + size));
 
-async function inIds<T>(table: string, columns: string, column: string, ids: string[]): Promise<T[]> {
+export async function inIds<T>(table: string, columns: string, column: string, ids: string[]): Promise<T[]> {
   const unique = Array.from(new Set(ids.filter(Boolean)));
   if (!unique.length) return [];
   const parts = await Promise.all(
