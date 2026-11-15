@@ -3,13 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Harbour South FieldOps — Office</title>
-    <meta name="description" content="Jobs, dispatch, calendar and live engineer map for the Harbour South office team." />
+    <title>Harbour South FieldOps — Field service software for trade businesses</title>
+    <meta name="description" content="Jobs, dispatch, quotes, invoices, card payments and customer texting for HVAC, plumbing, electrical and other trade businesses. iPhone app for engineers, web app for the office." />
     <meta name="theme-color" content="#0A2447" />
-    <meta name="robots" content="noindex" />
+    <script>
+      // The office app is private; only the public site on harboursouth.us is indexed.
+      (function () {
+        var h = location.hostname;
+        if (h !== "harboursouth.us" && h !== "www.harboursouth.us") {
+          var m = document.createElement("meta");
+          m.name = "robots";
+          m.content = "noindex";
+          document.head.appendChild(m);
+        }
+      })();
+    </script>
 
-    <meta property="og:title" content="Harbour South FieldOps — Office" />
-    <meta property="og:description" content="Jobs, dispatch, calendar and live engineer map for the Harbour South office team." />
+    <meta property="og:title" content="Harbour South FieldOps" />
+    <meta property="og:description" content="Field service software for trade businesses: jobs, dispatch, quotes, invoices, payments and customer texting." />
     <meta property="og:type" content="website" />
 
     <link rel="icon" type="image/png" href="/favicon.png" />

@@ -16,6 +16,10 @@ import SignIn from "./pages/auth/SignIn";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import ResetPassword from "./pages/auth/ResetPassword";
 import Blocked from "./pages/auth/Blocked";
+import Landing from "./pages/site/Landing";
+import LegalPage from "./pages/site/LegalPage";
+import { LEGAL_DOCS } from "@/lib/legal";
+import { isMarketingHost } from "@/lib/site";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 20_000 } },
@@ -70,13 +74,32 @@ function Gate() {
   }
 }
 
+/**
+ * Public pages (legal documents, and the landing page on harboursouth.us)
+ * render regardless of sign-in; everything else goes through the app gate.
+ * The iPhone app links to the four legal paths, so they must always resolve.
+ */
+function Site() {
+  const marketing = isMarketingHost();
+  return (
+    <Routes>
+      {LEGAL_DOCS.map((doc) => (
+        <Route key={doc.key} path={doc.path} element={<LegalPage doc={doc} />} />
+      ))}
+      <Route path="/welcome" element={<Landing />} />
+      {marketing && <Route path="/" element={<Landing />} />}
+      <Route path="*" element={<Gate />} />
+    </Routes>
+  );
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster position="bottom-left" richColors />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <SessionProvider>
-          <Gate />
+          <Site />
         </SessionProvider>
       </BrowserRouter>
     </TooltipProvider>
