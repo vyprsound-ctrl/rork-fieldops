@@ -6,8 +6,8 @@
       "path": "ios-tradedesk-hvac",
       "framework": "swift",
       "settings": {
-        "iosBundleId": "com.harboursouth.fieldservice",
-        "displayName": "Harbour South FieldOps"
+        "displayName": "Harbour South FieldOps",
+        "iosBundleId": "com.harboursouth.fieldservice"
       }
     },
     {
@@ -19,6 +19,11 @@
       "name": "Functions",
       "path": "functions",
       "framework": "cloudflare"
+    },
+    {
+      "name": "Harbour South Web",
+      "path": "web-harbour-south",
+      "framework": "web"
     }
   ]
 }

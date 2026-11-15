@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Harbour South design system — the same tokens as the iPhone app's Theme.swift.
+ * Royal blue owns structure and primary actions, orange is the action/selected
+ * colour, and green / amber / red keep their status meanings everywhere.
+ */
+@layer base {
+  :root {
+    --background: 216 38% 97%; /* canvas */
+    --foreground: 213 47% 11%; /* ink */
+
+    --card: 0 0% 100%;
+    --card-foreground: 213 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 213 47% 11%;
+
+    --primary: 225 72% 38%;
+    --primary-foreground: 0 0% 100%;
+    --primary-tint: 220 75% 95%;
+    --primary-deep: 224 73% 29%;
+
+    --secondary: 220 43% 96%;
+    --secondary-foreground: 213 47% 11%;
+
+    --muted: 220 43% 96%;
+    --muted-foreground: 215 12% 41%;
+    --meta: 216 12% 59%;
+
+    --accent: 220 43% 96%;
+    --accent-foreground: 213 47% 11%;
+
+    --brand-orange: 24 79% 49%;
+    --brand-orange-tint: 29 85% 95%;
+    --brand-orange-text: 23 88% 35%;
+    --navy: 214 75% 16%;
+
+    --success: 147 81% 31%;
+    --warning: 38 100% 36%;
+    --destructive: 6 73% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 219 30% 91%;
+    --input: 219 30% 88%;
+    --ring: 225 72% 38%;
+
+    --radius: 0.875rem;
+
+    --sidebar-background: 214 75% 16%;
+    --sidebar-foreground: 216 38% 86%;
+    --sidebar-primary: 24 79% 49%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 55% 22%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 214 50% 22%;
+    --sidebar-ring: 24 79% 49%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial,
+      sans-serif;
+    font-feature-settings: "tnum" 1, "cv11" 1;
+  }
+}
+
+@layer components {
+  .section-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-meta;
+  }
+
+  .card-surface {
+    @apply rounded-[14px] border border-border bg-card;
+  }
+
+  .press {
+    @apply transition-transform duration-100 active:scale-[0.98];
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+}
+
+/* Leaflet sits inside rounded cards. */
+.leaflet-container {
+  font-family: inherit;
+  background: hsl(var(--secondary));
+}
+
+.worker-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9999px;
+  border: 3px solid white;
+  color: white;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 6px 16px -4px rgba(10, 36, 71, 0.45);
+}
+
+.worker-pin.recent {
+  background: hsl(var(--brand-orange));
+}
+
+.worker-pin.stale {
+  background: hsl(var(--meta));
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 hsl(24 79% 49% / 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 14px hsl(24 79% 49% / 0);
+  }
+}
+
+.worker-pin.recent {
+  animation: pulse-ring 1.8s ease-out infinite;
+}
