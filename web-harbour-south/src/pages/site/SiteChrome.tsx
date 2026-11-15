@@ -2,10 +2,10 @@ import { useEffect, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
-import { APP_STORE_URL, LEGAL_PATHS, OFFICE_APP_URL, isMarketingHost } from "@/lib/site";
+import { APP_STORE_URL, CONTACT_PATH, LEGAL_PATHS, OFFICE_APP_URL } from "@/lib/site";
 
-/** "Log in" goes to the office app: its own host from harboursouth.us, or "/" when already on it. */
-export const loginHref = () => (isMarketingHost() ? OFFICE_APP_URL : "/");
+/** "Log in" goes to the office app on this same domain (a full page load into its own router). */
+export const loginHref = () => OFFICE_APP_URL;
 
 export function usePageTitle(title: string) {
   useEffect(() => {
@@ -54,7 +54,7 @@ export function SiteHeader({ tone = "dark" }: { tone?: "dark" | "light" }) {
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5">
         <Link to="/" className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-white shadow-sm">
-            <img src="/brand-logo.png" alt="" className="h-8 w-8 object-contain" />
+            <img src="/hs-favicon-512.png" alt="Harbour South" className="h-8 w-8 rounded-md object-contain" />
           </span>
           <span className="leading-tight">
             <span className="block text-[15px] font-bold">Harbour South</span>
@@ -66,6 +66,7 @@ export function SiteHeader({ tone = "dark" }: { tone?: "dark" | "light" }) {
           <a href="/#how" className={dark ? "hover:text-white" : "hover:text-foreground"}>How it works</a>
           <a href="/#pricing" className={dark ? "hover:text-white" : "hover:text-foreground"}>Pricing</a>
           <a href="/#faq" className={dark ? "hover:text-white" : "hover:text-foreground"}>FAQ</a>
+          <Link to={CONTACT_PATH} className={dark ? "hover:text-white" : "hover:text-foreground"}>Contact</Link>
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <a
@@ -98,7 +99,7 @@ export function SiteFooter() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-white">
-              <img src="/brand-logo.png" alt="" className="h-8 w-8 object-contain" />
+              <img src="/hs-favicon-512.png" alt="Harbour South" className="h-8 w-8 rounded-md object-contain" />
             </span>
             <span className="text-[15px] font-bold text-white">Harbour South FieldOps</span>
           </div>
@@ -113,7 +114,8 @@ export function SiteFooter() {
             { label: "Features", href: "/#features" },
             { label: "Pricing", href: "/#pricing" },
             { label: "FAQ", href: "/#faq" },
-            { label: "Office web app", href: loginHref() },
+            { label: "Contact us", href: CONTACT_PATH },
+            { label: "Office log in", href: loginHref() },
           ]}
         />
         <FooterCol

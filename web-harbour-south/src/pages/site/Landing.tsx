@@ -77,31 +77,31 @@ function Hero() {
   return (
     <section className="relative -mt-16 overflow-hidden bg-brand-navy pt-16 text-white">
       {/* Harbour arch, echoing the logo */}
-      <div className="pointer-events-none absolute -right-72 top-[58%] h-[820px] w-[820px] rounded-full border-[56px] border-brand-orange/90" />
-      <div className="pointer-events-none absolute -right-20 top-[52%] h-[560px] w-[560px] rounded-full border border-white/10" />
+      <div className="pointer-events-none absolute left-1/2 top-[640px] hidden h-[1100px] w-[1100px] -translate-x-1/2 rounded-full border-[56px] border-brand-orange/90 md:block" />
+      <div className="pointer-events-none absolute left-1/2 top-[720px] hidden h-[900px] w-[900px] -translate-x-1/2 rounded-full border border-white/10 md:block" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,hsl(225_72%_38%/0.6),transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.07] [background-image:linear-gradient(white_1px,transparent_1px),linear-gradient(90deg,white_1px,transparent_1px)] [background-size:56px_56px] [mask-image:linear-gradient(to_bottom,black,transparent_80%)]" />
 
-      <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 pb-24 pt-16 lg:grid-cols-[1fr_1.05fr] lg:pb-32 lg:pt-24">
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="relative z-10 mx-auto max-w-6xl px-5 pb-20 pt-16 lg:pt-24">
+        <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
           <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-white/80">
             <span className="h-1.5 w-1.5 rounded-full bg-brand-orange" />
-            Field service software for the trades
+            Software for the trades
           </span>
-          <h1 className="mt-6 text-[44px] font-bold leading-[1.02] tracking-tight sm:text-[56px]">
+          <h1 className="mt-6 text-[40px] font-bold leading-[1.04] tracking-tight sm:text-[60px]">
             Every job, every engineer, <span className="text-brand-orange">every invoice.</span>
           </h1>
-          <p className="mt-6 max-w-lg text-lg leading-relaxed text-white/70">
+          <p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
             Harbour South FieldOps runs your trade business from the first call to the paid invoice — an iPhone app for your
             engineers and a web app for your office, working from the same live schedule.
           </p>
-          <div className="mt-9 flex flex-wrap items-center gap-3">
+          <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
             <AppStoreButton className="bg-white text-black hover:bg-white/90 [&_svg]:text-black" />
             <a href="#pricing" className="press rounded-xl border border-white/20 px-5 py-3 text-[15px] font-semibold text-white transition-colors hover:bg-white/10">
               See pricing
             </a>
           </div>
-          <p className="mt-5 text-sm text-white/50">Start with a 14-day free trial · Cancel any time in the App Store</p>
+          <p className="mt-5 text-sm text-white/60">Start with a 14-day free trial · Cancel any time</p>
         </div>
 
         <HeroVisual />
@@ -125,7 +125,7 @@ const TONE: Record<string, string> = {
 
 function HeroVisual() {
   return (
-    <div className="relative animate-in fade-in slide-in-from-bottom-6 duration-1000">
+    <div className="relative mx-auto mt-16 max-w-4xl sm:pb-16 sm:pl-32">
       {/* Office web app */}
       <div className="overflow-hidden rounded-2xl border border-white/15 bg-white text-foreground shadow-[0_40px_80px_-20px_rgba(0,0,0,0.55)]">
         <div className="flex items-center gap-1.5 border-b border-border bg-secondary/70 px-4 py-2.5">
@@ -178,7 +178,7 @@ function HeroVisual() {
       </div>
 
       {/* iPhone */}
-      <div className="absolute -bottom-24 -left-4 w-[190px] lg:-left-20 rounded-[34px] border-[6px] border-[#0b1220] bg-[#0b1220] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] sm:-left-10 sm:w-[210px]">
+      <div className="absolute bottom-0 left-0 hidden w-[210px] rounded-[34px] border-[6px] border-[#0b1220] bg-[#0b1220] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] sm:block">
         <div className="overflow-hidden rounded-[28px] bg-background">
           <div className="flex justify-center pt-2">
             <span className="h-[18px] w-[70px] rounded-full bg-[#0b1220]" />
@@ -209,7 +209,7 @@ function HeroVisual() {
       </div>
 
       {/* Floating paid chip */}
-      <div className="absolute -right-2 -top-5 hidden items-center gap-2 rounded-xl bg-white px-3 py-2 text-foreground shadow-xl sm:flex">
+      <div className="absolute -top-5 right-4 hidden items-center gap-2 rounded-xl bg-white px-3 py-2 text-foreground shadow-xl sm:flex">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[hsl(147_60%_94%)]">
           <Check className="h-4 w-4 text-success" />
         </span>
@@ -227,7 +227,7 @@ function HeroVisual() {
 function Trades() {
   return (
     <section className="border-b border-border bg-white">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-5 pb-8 pt-24 text-sm font-semibold text-muted-foreground lg:pt-20">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-5 py-8 text-sm font-semibold text-muted-foreground">
         <span className="section-label">Built for</span>
         {["HVAC", "Plumbing", "Electrical", "and other trades"].map((t) => (
           <span key={t}>{t}</span>

@@ -7,10 +7,18 @@
     <meta name="description" content="Jobs, dispatch, quotes, invoices, card payments and customer texting for HVAC, plumbing, electrical and other trade businesses. iPhone app for engineers, web app for the office." />
     <meta name="theme-color" content="#0A2447" />
     <script>
-      // The office app is private; only the public site on harboursouth.us is indexed.
       (function () {
         var h = location.hostname;
-        if (h !== "harboursouth.us" && h !== "www.harboursouth.us") {
+        var p = location.pathname;
+        // The old address forwards to the same page on harboursouth.us.
+        if (h === "field-ops.rork.app") {
+          var pub = /^\/(privacy-policy|terms-of-service|sms-messaging-terms|account-data-deletion|contact|app)(\/|$)/.test(p);
+          location.replace("https://harboursouth.us" + (pub ? p : "/app" + (p === "/" ? "" : p)) + location.search + location.hash);
+          return;
+        }
+        // The office app is private; only the public site on harboursouth.us is indexed.
+        var marketing = h === "harboursouth.us" || h === "www.harboursouth.us";
+        if (!marketing || /^\/app(\/|$)/.test(p)) {
           var m = document.createElement("meta");
           m.name = "robots";
           m.content = "noindex";
@@ -23,8 +31,10 @@
     <meta property="og:description" content="Field service software for trade businesses: jobs, dispatch, quotes, invoices, payments and customer texting." />
     <meta property="og:type" content="website" />
 
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/hs-favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/hs-favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/hs-favicon-512.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/hs-apple-touch-180.png" />
   </head>
 
   <body>

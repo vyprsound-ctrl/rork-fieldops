@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 
 import { Toaster } from "@/components/ui/sonner";
@@ -18,8 +19,9 @@ import ResetPassword from "./pages/auth/ResetPassword";
 import Blocked from "./pages/auth/Blocked";
 import Landing from "./pages/site/Landing";
 import LegalPage from "./pages/site/LegalPage";
+import Contact from "./pages/site/Contact";
 import { LEGAL_DOCS } from "@/lib/legal";
-import { isMarketingHost } from "@/lib/site";
+import { APP_BASE, CONTACT_PATH, isAppPath } from "@/lib/site";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 20_000 } },
@@ -74,34 +76,52 @@ function Gate() {
   }
 }
 
+/** Anything outside the public pages (old bookmarks like /jobs, /login) belongs to the office app. */
+function ToOfficeApp() {
+  const { pathname, search, hash } = useLocation();
+  useEffect(() => {
+    const rest = pathname === "/" || pathname === "/login" ? "" : pathname;
+    window.location.replace(`${APP_BASE}${rest}${search}${hash}`);
+  }, [pathname, search, hash]);
+  return null;
+}
+
 /**
- * Public pages (legal documents, and the landing page on harboursouth.us)
- * render regardless of sign-in; everything else goes through the app gate.
- * The iPhone app links to the four legal paths, so they must always resolve.
+ * The public website: landing, contact and the four legal pages the iPhone
+ * app links to. These never depend on sign-in.
  */
-function Site() {
-  const marketing = isMarketingHost();
+function PublicSite() {
   return (
     <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/welcome" element={<Navigate to="/" replace />} />
+      <Route path={CONTACT_PATH} element={<Contact />} />
       {LEGAL_DOCS.map((doc) => (
         <Route key={doc.key} path={doc.path} element={<LegalPage doc={doc} />} />
       ))}
-      <Route path="/welcome" element={<Landing />} />
-      {marketing && <Route path="/" element={<Landing />} />}
-      <Route path="*" element={<Gate />} />
+      <Route path="*" element={<ToOfficeApp />} />
     </Routes>
   );
 }
 
+const router = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
+
+/** harboursouth.us/app/* is the office web app; everything else is the public website. */
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster position="bottom-left" richColors />
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <SessionProvider>
-          <Site />
-        </SessionProvider>
-      </BrowserRouter>
+      {isAppPath(window.location.pathname) ? (
+        <BrowserRouter basename={APP_BASE} future={router}>
+          <SessionProvider>
+            <Gate />
+          </SessionProvider>
+        </BrowserRouter>
+      ) : (
+        <BrowserRouter future={router}>
+          <PublicSite />
+        </BrowserRouter>
+      )}
     </TooltipProvider>
   </QueryClientProvider>
 );

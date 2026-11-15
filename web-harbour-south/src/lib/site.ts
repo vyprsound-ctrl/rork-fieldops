@@ -1,20 +1,20 @@
 /**
- * Which face of the site to show. harboursouth.us (and www) is the public
- * marketing site; every other host (app.harboursouth.us, field-ops.rork.app,
- * previews) is the office web app.
+ * harboursouth.us serves both faces of Harbour South from one site:
+ *  - the public website (landing, pricing, contact, legal) at the root, and
+ *  - the office web app under /app.
  */
-const MARKETING_HOSTS = new Set(["harboursouth.us", "www.harboursouth.us"]);
+export const APP_BASE = "/app";
 
-export const isMarketingHost = (): boolean =>
-  typeof window !== "undefined" && MARKETING_HOSTS.has(window.location.hostname);
+export const isAppPath = (pathname: string): boolean => pathname === APP_BASE || pathname.startsWith(`${APP_BASE}/`);
 
-/** Where the office web app lives. Switch to https://app.harboursouth.us once its DNS record is live. */
-export const OFFICE_APP_URL = "https://field-ops.rork.app";
+/** Where "Log in" goes: the office app on this same domain. */
+export const OFFICE_APP_URL = APP_BASE;
 
 export const APP_STORE_URL = "https://apps.apple.com/app/id6809271972";
 
-/** Mirrors HarbourSouthLegalContactEmail in the iPhone app's Info.plist. */
-export const LEGAL_CONTACT_EMAIL = "noreply@harboursouth.us";
+/** Public support and legal contact. */
+export const CONTACT_EMAIL = "help@harboursouth.us";
+export const LEGAL_CONTACT_EMAIL = CONTACT_EMAIL;
 
 export const LEGAL_LAST_UPDATED = "September 24, 2026";
 
@@ -24,3 +24,5 @@ export const LEGAL_PATHS = {
   sms: "/sms-messaging-terms",
   deletion: "/account-data-deletion",
 } as const;
+
+export const CONTACT_PATH = "/contact";
