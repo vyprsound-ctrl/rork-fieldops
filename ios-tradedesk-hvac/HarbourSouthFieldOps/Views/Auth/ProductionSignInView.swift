@@ -8,20 +8,24 @@ import SwiftUI
 struct ProductionSignInView: View {
     @Environment(AppEnvironment.self) private var env
 
-    private enum Flow: String, CaseIterable, Identifiable {
-        case signIn
-        case join
-        case createCompany
+    /// The route chosen on Welcome. Setting it to `nil` returns there.
+    @Binding var entry: AuthEntry?
+    /// The route this form is showing.
+    let flow: AuthEntry
 
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .signIn: return "Sign in"
-            case .join: return "Join"
-            case .createCompany: return "New company"
-            }
-        }
+    init(entry: Binding<AuthEntry?>, flow: AuthEntry) {
+        self._entry = entry
+        self.flow = flow
     }
+
+    private enum Field: Hashable {
+        case email, password, ownerName, companyName, joinName, joinCode
+    }
+
+    @FocusState private var focused: Field?
+    /// Fields the person has left at least once. Problems are only pointed
+    /// out after that, so an empty form doesn't open covered in red.
+    @State private var touched: Set<Field> = []
 
     /// ISSUE #15 — the currencies a new company may be created in.
     ///
@@ -35,7 +39,6 @@ struct ProductionSignInView: View {
             .filter { seen.insert($0).inserted }
     }()
 
-    @State private var flow: Flow = .signIn
     @State private var email: String = ""
     @State private var password: String = ""
     @State private var ownerName: String = ""
@@ -50,36 +53,73 @@ struct ProductionSignInView: View {
     @State private var joinName: String = ""
     @State private var joinCode: String = ""
 
-    private var canSubmit: Bool {
-        guard !env.authPhase.isBusy else { return false }
-        let hasCredentials = email.contains("@") && password.count >= 6
+    // MARK: - Validation
+
+    private static let minimumPassword = AuthError.minimumPasswordLength
+
+    private var trimmedEmail: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var emailIsValid: Bool {
+        trimmedEmail.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) != nil
+    }
+
+    /// Sign-in only needs a password; length rules apply to new passwords.
+    private var passwordIsValid: Bool {
+        flow == .signIn ? !password.isEmpty : password.count >= Self.minimumPassword
+    }
+
+    private func isBlank(_ value: String) -> Bool {
+        value.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var joinCodeIsValid: Bool {
+        joinCode.trimmingCharacters(in: .whitespaces).count >= 6
+    }
+
+    /// What still stops the form being sent, in the order the fields appear.
+    private var missing: [String] {
+        var items: [String] = []
+        if trimmedEmail.isEmpty {
+            items.append("your email")
+        } else if !emailIsValid {
+            items.append("a valid email address")
+        }
+        if flow == .signIn {
+            if password.isEmpty { items.append("your password") }
+        } else if password.count < Self.minimumPassword {
+            items.append("a password of at least \(Self.minimumPassword) characters")
+        }
         switch flow {
         case .signIn:
-            return hasCredentials
+            break
         case .join:
-            return hasCredentials
-                && !joinName.trimmingCharacters(in: .whitespaces).isEmpty
-                && joinCode.trimmingCharacters(in: .whitespaces).count >= 6
+            if isBlank(joinName) { items.append("your name") }
+            if !joinCodeIsValid { items.append("the join code from your invitation") }
         case .createCompany:
-            // The market picker cannot produce an invalid country, and the
-            // currency picker is seeded from it, so neither needs a length check
-            // any more — both are now closed sets rather than typed strings.
-            return hasCredentials
-                && !ownerName.trimmingCharacters(in: .whitespaces).isEmpty
-                && !companyName.trimmingCharacters(in: .whitespaces).isEmpty
+            // The market and currency pickers are closed sets, so neither can
+            // be missing or invalid.
+            if isBlank(ownerName) { items.append("your name") }
+            if isBlank(companyName) { items.append("your company name") }
         }
+        return items
+    }
+
+    private var missingSummary: String {
+        "To continue, add \(ListFormatter.localizedString(byJoining: missing))."
+    }
+
+    private var canSubmit: Bool {
+        !env.authPhase.isBusy && missing.isEmpty
+    }
+
+    private var isNetworkFailure: Bool {
+        env.authPhase.errorMessage == AuthError.network.errorDescription
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if env.isProductionAvailable {
-                Picker("Flow", selection: $flow) {
-                    ForEach(Flow.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: flow) { _, _ in env.clearAuthError() }
+                header
 
                 credentialFields
 
@@ -125,16 +165,34 @@ struct ProductionSignInView: View {
                 }
 
                 if let error = env.authPhase.errorMessage {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.red)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("signIn.error")
+                        if isNetworkFailure {
+                            Button {
+                                Task { await submit() }
+                            } label: {
+                                Label("Try again", systemImage: "arrow.clockwise")
+                                    .font(.footnote.weight(.semibold))
+                            }
+                            .foregroundStyle(Theme.primary)
+                            .disabled(!canSubmit)
+                        }
+                    }
                 }
-
-                footnote
             } else {
+                backButton
                 notConfigured
             }
+        }
+        .onChange(of: focused) { previous, _ in
+            if let previous { touched.insert(previous) }
+        }
+        .onChange(of: flow) { _, _ in
+            touched = []
         }
         // An invitation tapped in an email lands here. The code is copied into
         // the form once and then released, so a later redraw never overwrites
@@ -155,7 +213,7 @@ struct ProductionSignInView: View {
 
     private func adopt(_ payload: InvitationLink.Payload?) {
         guard let payload else { return }
-        flow = .join
+        entry = .join
         joinCode = payload.token
         if !payload.name.isEmpty, joinName.trimmingCharacters(in: .whitespaces).isEmpty {
             joinName = payload.name
@@ -177,7 +235,7 @@ struct ProductionSignInView: View {
     /// a sign-in.
     private func awaitConfirmation(of address: String?) {
         guard let address, !address.isEmpty else { return }
-        flow = .signIn
+        entry = .signIn
         email = address
         password = ""
         joinCode = ""
@@ -185,24 +243,127 @@ struct ProductionSignInView: View {
         env.consumePendingEmailConfirmation()
     }
 
-    private var credentialFields: some View {
-        VStack(spacing: 0) {
-            TextField("Work email", text: $email)
-                .textContentType(.emailAddress)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .padding(.horizontal, 14)
-                .frame(minHeight: Theme.minTap)
+    // MARK: - Header
 
-            Divider().padding(.leading, 14)
-
-            SecureField("Password", text: $password)
-                .textContentType(flow == .signIn ? .password : .newPassword)
-                .padding(.horizontal, 14)
-                .frame(minHeight: Theme.minTap)
+    private var backButton: some View {
+        Button {
+            env.clearAuthError()
+            entry = nil
+        } label: {
+            Label("Back", systemImage: "chevron.left")
+                .font(.body.weight(.medium))
+                .frame(minHeight: 44)
+                .contentShape(.rect)
         }
-        .cardSurface()
+        .foregroundStyle(Theme.primary)
+        .accessibilityIdentifier("auth.back")
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            backButton
+
+            BrandMark(size: 48)
+                .padding(.top, 2)
+
+            Text(headerTitle)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+
+            Text(headerSubtitle)
+                .font(.subheadline)
+                .foregroundStyle(Theme.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var headerTitle: String {
+        switch flow {
+        case .signIn: return "Sign in"
+        case .join: return "Join your company"
+        case .createCompany: return "Create a company account"
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch flow {
+        case .signIn:
+            return "Sign in with your work email."
+        case .join:
+            return "Use the email address your invitation was sent to, choose a password, and enter the join code from your invitation."
+        case .createCompany:
+            return "You're creating a new company account and you'll be its owner. You can invite your team once you're set up. All fields are required."
+        }
+    }
+
+    // MARK: - Fields
+
+    private func fieldHint(_ text: String, isProblem: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            if isProblem {
+                Image(systemName: "exclamationmark.circle.fill")
+            }
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption)
+        .foregroundStyle(isProblem ? Theme.red : Theme.meta)
+        .padding(.horizontal, 4)
+    }
+
+    private var emailProblem: String? {
+        guard touched.contains(.email) else { return nil }
+        if trimmedEmail.isEmpty { return "Enter your email address." }
+        if !emailIsValid { return "Enter a valid email address, like name@company.com." }
+        return nil
+    }
+
+    private var passwordProblem: String? {
+        guard touched.contains(.password) else { return nil }
+        if password.isEmpty { return flow == .signIn ? "Enter your password." : "Choose a password." }
+        if flow != .signIn, password.count < Self.minimumPassword {
+            return "Use at least \(Self.minimumPassword) characters."
+        }
+        return nil
+    }
+
+    private var credentialFields: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 0) {
+                TextField("Work email", text: $email)
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focused, equals: .email)
+                    .submitLabel(.next)
+                    .onSubmit { focused = .password }
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: Theme.minTap)
+                    .accessibilityIdentifier("auth.email")
+
+                Divider().padding(.leading, 14)
+
+                SecureField(flow == .signIn ? "Password" : "Choose a password", text: $password)
+                    .textContentType(flow == .signIn ? .password : .newPassword)
+                    .focused($focused, equals: .password)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: Theme.minTap)
+                    .accessibilityIdentifier("auth.password")
+            }
+            .cardSurface()
+
+            if let emailProblem {
+                fieldHint(emailProblem, isProblem: true)
+            }
+            if let passwordProblem {
+                fieldHint(passwordProblem, isProblem: true)
+            } else if flow != .signIn {
+                fieldHint("At least \(Self.minimumPassword) characters. Only you will know it.", isProblem: false)
+            }
+        }
     }
 
     private var companyFields: some View {
@@ -213,6 +374,7 @@ struct ProductionSignInView: View {
             VStack(spacing: 0) {
                 TextField("Your name", text: $ownerName)
                     .textContentType(.name)
+                    .focused($focused, equals: .ownerName)
                     .padding(.horizontal, 14)
                     .frame(minHeight: Theme.minTap)
 
@@ -220,25 +382,32 @@ struct ProductionSignInView: View {
 
                 TextField("Company name", text: $companyName)
                     .textContentType(.organizationName)
+                    .focused($focused, equals: .companyName)
                     .padding(.horizontal, 14)
                     .frame(minHeight: Theme.minTap)
 
                 Divider().padding(.leading, 14)
 
-                Picker("Business type", selection: $trade) {
-                    ForEach(Trade.setupOptions) { item in
-                        Text(item.title).tag(item)
+                LabeledContent("Business type") {
+                    Picker("Business type", selection: $trade) {
+                        ForEach(Trade.setupOptions) { item in
+                            Text(item.title).tag(item)
+                        }
                     }
+                    .labelsHidden()
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: Theme.minTap)
 
                 Divider().padding(.leading, 14)
 
-                Picker("Country", selection: $market) {
-                    ForEach(SupportedMarket.allCases) { item in
-                        Text(item.countryName).tag(item)
+                LabeledContent("Country") {
+                    Picker("Country", selection: $market) {
+                        ForEach(SupportedMarket.allCases) { item in
+                            Text(item.countryName).tag(item)
+                        }
                     }
+                    .labelsHidden()
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: Theme.minTap)
@@ -251,20 +420,27 @@ struct ProductionSignInView: View {
 
                 Divider().padding(.leading, 14)
 
-                Picker("Currency", selection: $currencyCode) {
-                    ForEach(Self.selectableCurrencyCodes, id: \.self) { code in
-                        Text(code).tag(code)
+                LabeledContent("Currency") {
+                    Picker("Currency", selection: $currencyCode) {
+                        ForEach(Self.selectableCurrencyCodes, id: \.self) { code in
+                            Text(code).tag(code)
+                        }
                     }
+                    .labelsHidden()
                 }
                 .padding(.horizontal, 14)
                 .frame(minHeight: Theme.minTap)
             }
             .cardSurface()
 
-            Text("You'll be the owner of this company. Your role and company are assigned by the server, not by this app.")
-                .font(.caption)
-                .foregroundStyle(Theme.meta)
-                .fixedSize(horizontal: false, vertical: true)
+            if touched.contains(.ownerName), isBlank(ownerName) {
+                fieldHint("Enter your name.", isProblem: true)
+            }
+            if touched.contains(.companyName), isBlank(companyName) {
+                fieldHint("Enter your company's name.", isProblem: true)
+            }
+
+            fieldHint("You'll be the owner of this company account.", isProblem: false)
         }
     }
 
@@ -276,6 +452,7 @@ struct ProductionSignInView: View {
             VStack(spacing: 0) {
                 TextField("Your name", text: $joinName)
                     .textContentType(.name)
+                    .focused($focused, equals: .joinName)
                     .padding(.horizontal, 14)
                     .frame(minHeight: Theme.minTap)
 
@@ -284,16 +461,21 @@ struct ProductionSignInView: View {
                 TextField("Join code", text: $joinCode)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .focused($focused, equals: .joinCode)
                     .font(.system(.body, design: .monospaced))
                     .padding(.horizontal, 14)
                     .frame(minHeight: Theme.minTap)
             }
             .cardSurface()
 
-            Text("Your invitation email carries this code — tapping the link in it fills this in for you. It decides which company you join and what you can do; this app cannot choose either. The password you enter above is your own, and nobody at your company can see it.")
-                .font(.caption)
-                .foregroundStyle(Theme.meta)
-                .fixedSize(horizontal: false, vertical: true)
+            if touched.contains(.joinName), isBlank(joinName) {
+                fieldHint("Enter your name.", isProblem: true)
+            }
+            if touched.contains(.joinCode), !joinCodeIsValid {
+                fieldHint("Enter the join code from your invitation email.", isProblem: true)
+            }
+
+            fieldHint("Tapping the link in your invitation email fills in the code for you. Your company and role come from your invitation.", isProblem: false)
         }
     }
 
@@ -302,49 +484,49 @@ struct ProductionSignInView: View {
     /// Bold at this size is WCAG "large text", which is what keeps white
     /// legible on the orange fill.
     private var submitButton: some View {
-        Button {
-            Task { await submit() }
-        } label: {
-            HStack(spacing: 8) {
-                if env.authPhase.isBusy { ProgressView().tint(.white) }
-                Text(submitTitle)
-                    .font(.body.weight(.bold))
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                focused = nil
+                Task { await submit() }
+            } label: {
+                HStack(spacing: 8) {
+                    if env.authPhase.isBusy { ProgressView().tint(.white) }
+                    Text(submitTitle)
+                        .font(.body.weight(.bold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: Theme.minTap)
+                .background(canSubmit ? Theme.accent : Theme.accent.opacity(0.35))
+                .foregroundStyle(.white)
+                .clipShape(.rect(cornerRadius: Theme.buttonRadius))
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: Theme.minTap)
-            .background(canSubmit ? Theme.accent : Theme.accent.opacity(0.35))
-            .foregroundStyle(.white)
-            .clipShape(.rect(cornerRadius: Theme.buttonRadius))
+            .buttonStyle(PressableTileStyle())
+            .disabled(!canSubmit)
+            .accessibilityIdentifier("auth.submit")
+            .accessibilityHint(missing.isEmpty ? "" : missingSummary)
+
+            // A disabled button always says why.
+            if !env.authPhase.isBusy, !missing.isEmpty {
+                fieldHint(missingSummary, isProblem: false)
+                    .accessibilityIdentifier("auth.missing")
+            }
         }
-        .buttonStyle(PressableTileStyle())
-        .disabled(!canSubmit)
     }
 
     private var submitTitle: String {
         switch flow {
         case .signIn: return "Sign in"
         case .join: return "Join company"
-        case .createCompany: return "Create company"
+        case .createCompany: return "Create company account"
         }
-    }
-
-    private var footnote: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Connected to \(BackendConfiguration.summary).")
-            Text("Your company and role are read from the database on every sign-in. This app cannot choose either one.")
-        }
-        .font(.caption)
-        .foregroundStyle(Theme.meta)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top, 4)
     }
 
     private var notConfigured: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Production sign-in unavailable")
+            Text("Sign-in unavailable")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(Theme.ink)
-            Text("This build wasn't given Supabase credentials, so there is nothing to authenticate against. Development sign-in still works.")
+            Text(AuthError.notConfigured.errorDescription ?? "")
                 .font(.footnote)
                 .foregroundStyle(Theme.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -379,6 +561,10 @@ struct ProductionSignInView: View {
             )
             await env.signUpToProduction(registration)
         }
-        password = ""
+        // Kept only after a connection failure, so Try again can resend it.
+        if !isNetworkFailure {
+            password = ""
+            touched.remove(.password)
+        }
     }
 }

@@ -19,9 +19,9 @@ struct ChooseNewPasswordView: View {
 
     private enum Field { case password, confirmation }
 
-    /// Supabase's own minimum. Stated up front rather than discovered by being
-    /// rejected.
-    private let minimumLength = 8
+    /// The server's own minimum. Stated up front rather than discovered by
+    /// being rejected.
+    private let minimumLength = AuthError.minimumPasswordLength
 
     private var meetsLength: Bool { password.count >= minimumLength }
     private var matches: Bool { !confirmation.isEmpty && password == confirmation }

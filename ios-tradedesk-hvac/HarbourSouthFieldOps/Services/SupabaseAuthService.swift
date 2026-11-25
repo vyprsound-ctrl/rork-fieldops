@@ -92,7 +92,7 @@ struct SupabaseAuthService: AuthService {
         } catch let error as AuthError {
             throw error
         } catch {
-            throw Self.translate(error)
+            throw Self.translate(error, context: .signIn)
         }
     }
 
@@ -121,6 +121,13 @@ struct SupabaseAuthService: AuthService {
             )
 
             guard response.session != nil else {
+                // An address that is already registered and confirmed comes
+                // back as a stand-in user with no identities and no email
+                // sent. Saying "check your email" would be untrue, so answer
+                // neutrally without confirming the account exists.
+                if Self.isObfuscatedExistingUser(response.user) {
+                    throw AuthError.accountMayExist
+                }
                 // Confirmation required. This is a success, not a failure: the
                 // identity exists and the company details are safely parked.
                 return .confirmationSent(email: normalised)
@@ -131,7 +138,7 @@ struct SupabaseAuthService: AuthService {
         } catch let error as AuthError {
             throw error
         } catch {
-            throw Self.translate(error)
+            throw Self.translate(error, context: .signUp)
         }
     }
 
@@ -161,6 +168,11 @@ struct SupabaseAuthService: AuthService {
             )
 
             guard response.session != nil else {
+                // Already registered and confirmed: no email was sent, so
+                // treat it exactly like the "already registered" answer below.
+                if Self.isObfuscatedExistingUser(response.user) {
+                    return try await joinExistingAccount(email: normalised, password: redemption.password, setup: setup)
+                }
                 // Confirmation required. The code is parked on the identity and
                 // redeemed on the first authenticated session.
                 return .confirmationSent(email: normalised)
@@ -172,10 +184,30 @@ struct SupabaseAuthService: AuthService {
             // An address that already has an account is not a failure here: the
             // person may have been invited after signing up, or be moving
             // between companies. Authenticate them and redeem the code.
-            guard Self.isAlreadyRegistered(error) else { throw Self.translate(error) }
-            let response = try await client.auth.signIn(email: normalised, password: redemption.password)
-            return .joined(try await redeem(setup, for: response.user.id))
+            guard Self.isAlreadyRegistered(error) else { throw Self.translate(error, context: .signUp) }
+            return try await joinExistingAccount(email: normalised, password: redemption.password, setup: setup)
         }
+    }
+
+    private func joinExistingAccount(
+        email: String,
+        password: String,
+        setup: PendingInvitationSetup
+    ) async throws -> JoinOutcome {
+        do {
+            let response = try await client.auth.signIn(email: email, password: password)
+            return .joined(try await redeem(setup, for: response.user.id))
+        } catch let error as AuthError {
+            throw error
+        } catch {
+            throw Self.translate(error, context: .signIn)
+        }
+    }
+
+    /// The stand-in user the server returns for an address that is already
+    /// registered and confirmed, when email confirmation is on.
+    private static func isObfuscatedExistingUser(_ user: User) -> Bool {
+        user.identities?.isEmpty == true
     }
 
     /// Redeems the invitation, then resolves the resulting membership.
@@ -226,6 +258,10 @@ struct SupabaseAuthService: AuthService {
     }
 
     private static func isAlreadyRegistered(_ error: Error) -> Bool {
+        if let authError = error as? Auth.AuthError {
+            let code = authError.errorCode.rawValue
+            if code == "user_already_exists" || code == "email_exists" { return true }
+        }
         let text = error.localizedDescription.lowercased()
         return text.contains("already registered")
             || text.contains("already been registered")
@@ -291,7 +327,7 @@ struct SupabaseAuthService: AuthService {
     /// change to the session's own identity, so this cannot set somebody else's
     /// password even if the caller wanted to.
     func updatePassword(_ newPassword: String) async throws {
-        guard newPassword.count >= 8 else { throw AuthError.passwordTooWeak }
+        guard newPassword.count >= AuthError.minimumPasswordLength else { throw AuthError.passwordTooWeak }
 
         // A recovery session that has already lapsed produces a confusing
         // provider error, so check for it first and say what actually happened.
@@ -302,6 +338,7 @@ struct SupabaseAuthService: AuthService {
         do {
             _ = try await client.auth.update(user: UserAttributes(password: newPassword))
         } catch {
+            if Self.isNetworkError(error) { throw AuthError.network }
             let text = error.localizedDescription.lowercased()
             if text.contains("weak") || text.contains("at least") || text.contains("characters") {
                 throw AuthError.passwordTooWeak
@@ -422,7 +459,7 @@ struct SupabaseAuthService: AuthService {
                 // Someone — an earlier attempt, or a concurrent one that won —
                 // already founded this company. Fall through and resolve it
                 // rather than reporting a failure or founding a second one.
-                guard Self.isAlreadyProvisioned(error) else { throw Self.translate(error) }
+                guard Self.isAlreadyProvisioned(error) else { throw Self.translate(error, context: .other) }
                 print("[auth] company already provisioned for this account; resolving the existing one")
             }
 
@@ -454,7 +491,7 @@ struct SupabaseAuthService: AuthService {
     /// unique violation a concurrent caller hits when it loses the race to
     /// insert `app_users.id` — surfacing that raw would show the user a
     /// Postgres constraint name for what is really a success.
-    private static func isAlreadyProvisioned(_ error: Error) -> Bool {
+    nonisolated private static func isAlreadyProvisioned(_ error: Error) -> Bool {
         if let postgrest = error as? PostgrestError {
             if postgrest.code == "23505" { return true }
             if postgrest.message.lowercased().contains("already belongs to a company") { return true }
@@ -523,31 +560,65 @@ struct SupabaseAuthService: AuthService {
 
     // MARK: - Error mapping
 
-    /// Maps SDK/Postgres errors onto the app's vocabulary without leaking
-    /// internals into the UI.
-    private static func translate(_ error: Error) -> AuthError {
-        let text = error.localizedDescription.lowercased()
+    nonisolated private enum ErrorContext {
+        case signIn
+        case signUp
+        case other
+    }
 
-        if text.contains("invalid login") || text.contains("invalid credentials") || text.contains("bad_credential") {
-            return .invalidCredentials
+    nonisolated private static func isNetworkError(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        return (error as NSError).domain == NSURLErrorDomain
+    }
+
+    /// Maps SDK/Postgres errors onto the app's vocabulary without leaking
+    /// internals into the UI. Auth errors are matched on the server's error
+    /// code, never on its wording.
+    nonisolated private static func translate(_ error: Error, context: ErrorContext) -> AuthError {
+        if isNetworkError(error) { return .network }
+
+        if let authError = error as? Auth.AuthError {
+            switch authError.errorCode.rawValue {
+            case "invalid_credentials":
+                return .invalidCredentials
+            case "email_not_confirmed":
+                return .emailConfirmationRequired
+            case "weak_password":
+                return .passwordTooWeak
+            case "email_address_invalid", "validation_failed":
+                return .emailInvalid
+            case "over_email_send_rate_limit", "over_request_rate_limit", "over_sms_send_rate_limit":
+                return .rateLimited
+            case "user_already_exists", "email_exists":
+                return .accountMayExist
+            default:
+                break
+            }
+            if case let .api(message, _, _, response) = authError {
+                if response.statusCode == 429 { return .rateLimited }
+                let lowered = message.lowercased()
+                if context == .signUp, lowered.contains("sending confirmation") || lowered.contains("confirmation email") {
+                    return .confirmationEmailFailed
+                }
+            }
         }
-        if text.contains("email not confirmed") || text.contains("confirm") {
-            return .emailConfirmationRequired
-        }
-        if text.contains("already registered") || text.contains("already been registered") {
-            return .server("That email already has an account. Sign in instead.")
-        }
+
+        let text = error.localizedDescription.lowercased()
         if text.contains("already belongs to a company") {
             return .server("This account already belongs to a company.")
         }
-        if text.contains("jwt") || text.contains("expired") {
+        if context == .other, text.contains("jwt") || text.contains("expired") {
             return .sessionExpired
-        }
-        if text.contains("password") && text.contains("short") {
-            return .server("Choose a password of at least 6 characters.")
         }
 
         print("[auth] unmapped error: \(error)")
-        return .server("Sign-in failed. Please try again.")
+        switch context {
+        case .signUp:
+            return .signUpFailed
+        case .signIn:
+            return .server("We couldn't sign you in just now. Please try again, or contact \(AuthError.supportEmail).")
+        case .other:
+            return .server("Something went wrong. Please try again, or contact \(AuthError.supportEmail).")
+        }
     }
 }

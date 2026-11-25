@@ -121,7 +121,23 @@ nonisolated enum AuthError: LocalizedError, Equatable {
     case notAvailableInDevelopment
     /// The invitation code does not match a live, unexpired invitation.
     case invitationUnusable
+    /// The server rejected the address as not a valid email.
+    case emailInvalid
+    /// Sign-up for an address that may already have an account. Worded so it
+    /// never confirms whether an account exists.
+    case accountMayExist
+    /// The account was accepted but the confirmation email could not be sent.
+    case confirmationEmailFailed
+    case rateLimited
+    /// No connection, or the request timed out. Safe to retry.
+    case network
+    /// Any other sign-up failure.
+    case signUpFailed
     case server(String)
+
+    /// The minimum the server enforces for a new password.
+    static let minimumPasswordLength = 6
+    static let supportEmail = "help@harboursouth.us"
 
     var errorDescription: String? {
         switch self {
@@ -130,7 +146,7 @@ nonisolated enum AuthError: LocalizedError, Equatable {
         case .suspended:
             return "This account is suspended. Contact your owner."
         case .notConfigured:
-            return "This build has no Supabase configuration, so production sign-in is unavailable."
+            return "Sign-in isn't available in this version of the app. Contact \(Self.supportEmail)."
         case .invalidCredentials:
             return "That email and password don't match an account."
         case .emailConfirmationRequired:
@@ -146,7 +162,7 @@ nonisolated enum AuthError: LocalizedError, Equatable {
         case .passwordResetFailed:
             return "We couldn't send a reset email. Check the address and try again."
         case .passwordTooWeak:
-            return "Choose a longer password — at least 8 characters."
+            return "Choose a password of at least \(Self.minimumPasswordLength) characters."
         case .recoverySessionExpired:
             return "That reset link has expired. Request a new one and try again."
         case .confirmationLinkExpired:
@@ -157,6 +173,18 @@ nonisolated enum AuthError: LocalizedError, Equatable {
             return "That action needs the production backend. Switch to Production sign-in."
         case .invitationUnusable:
             return "That invitation code isn't valid any more. Ask your office for a new one."
+        case .emailInvalid:
+            return "Enter a valid email address, like name@company.com."
+        case .accountMayExist:
+            return "If you already have an account with this email, sign in or reset your password."
+        case .confirmationEmailFailed:
+            return "We couldn't send your confirmation email just now. Please try again in a few minutes. If it keeps happening, contact \(Self.supportEmail)."
+        case .rateLimited:
+            return "Too many attempts. Please wait a few minutes, then try again."
+        case .network:
+            return "We couldn't connect. Check your internet connection and try again."
+        case .signUpFailed:
+            return "We couldn't create your account just now. Please try again, or contact \(Self.supportEmail)."
         case .server(let message):
             return message
         }
